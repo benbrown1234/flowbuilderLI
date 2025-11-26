@@ -4,12 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "dev": "concurrently -k \"npm run server\" \"sleep 2 && npm run client\"",
     "client": "vite",
     "server": "tsx server/index.ts",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "concurrently \"npm run server\" \"npm run preview\""
+    "start": "concurrently -k \"npm run server\" \"sleep 2 && npm run preview\""
   },
   "dependencies": {
     "@types/cookie-parser": "^1.4.10",

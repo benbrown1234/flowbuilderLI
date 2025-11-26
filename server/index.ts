@@ -380,7 +380,7 @@ if (isProduction) {
   });
 }
 
-const HOST = isProduction ? '0.0.0.0' : 'localhost';
+const HOST = '0.0.0.0';
 app.listen(PORT, HOST, () => {
   console.log(`LinkedIn API server running on http://${HOST}:${PORT}`);
 });

@@ -24,8 +24,19 @@ export const getAuthUrl = async (): Promise<{ authUrl: string; state: string }> 
 };
 
 export const getAuthStatus = async (): Promise<AuthStatus> => {
-  const response = await api.get('/auth/status');
-  return response.data;
+  const maxRetries = 3;
+  const delay = 1000;
+  
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await api.get('/auth/status');
+      return response.data;
+    } catch (error) {
+      if (i === maxRetries - 1) throw error;
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  return { isAuthenticated: false };
 };
 
 export const logout = async (): Promise<void> => {
