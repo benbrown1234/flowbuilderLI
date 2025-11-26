@@ -272,20 +272,43 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     const { accountId } = req.params;
     const sessionId = (req as any).sessionId;
     
-    const [groupsData, campaignsData, creativesData] = await Promise.all([
-      linkedinApiRequest(sessionId, '/adCampaignGroups', {
+    console.log(`Fetching hierarchy for account: ${accountId}`);
+    
+    // Fetch each endpoint separately to identify which one fails
+    let groupsData, campaignsData, creativesData;
+    
+    try {
+      groupsData = await linkedinApiRequest(sessionId, '/adCampaignGroups', {
         q: 'search',
         search: `(account:(values:List(urn:li:sponsoredAccount:${accountId})))`,
-      }),
-      linkedinApiRequest(sessionId, '/adCampaigns', {
+      });
+      console.log(`Campaign groups fetched: ${groupsData.elements?.length || 0} items`);
+    } catch (err: any) {
+      console.error('Failed to fetch campaign groups:', err.response?.data || err.message);
+      groupsData = { elements: [] };
+    }
+    
+    try {
+      campaignsData = await linkedinApiRequest(sessionId, '/adCampaigns', {
         q: 'search',
         search: `(account:(values:List(urn:li:sponsoredAccount:${accountId})))`,
-      }),
-      linkedinApiRequest(sessionId, '/adCreatives', {
+      });
+      console.log(`Campaigns fetched: ${campaignsData.elements?.length || 0} items`);
+    } catch (err: any) {
+      console.error('Failed to fetch campaigns:', err.response?.data || err.message);
+      campaignsData = { elements: [] };
+    }
+    
+    try {
+      creativesData = await linkedinApiRequest(sessionId, '/adCreatives', {
         q: 'search',
         search: `(account:(values:List(urn:li:sponsoredAccount:${accountId})))`,
-      }),
-    ]);
+      });
+      console.log(`Creatives fetched: ${creativesData.elements?.length || 0} items`);
+    } catch (err: any) {
+      console.error('Failed to fetch creatives:', err.response?.data || err.message);
+      creativesData = { elements: [] };
+    }
     
     res.json({
       groups: groupsData.elements || [],

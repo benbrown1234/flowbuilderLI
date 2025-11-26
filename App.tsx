@@ -13,7 +13,10 @@ const App: React.FC = () => {
   const [data, setData] = useState<AccountStructure | null>(null);
   const [viewMode, setViewMode] = useState<'TREE' | 'FLOW' | 'REMARKETING'>('TREE');
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+  const [selectedAccountId, setSelectedAccountId] = useState<string>(() => {
+    // Load saved account from localStorage
+    return localStorage.getItem('selectedAccountId') || '';
+  });
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [useRealData, setUseRealData] = useState<boolean>(false);
@@ -72,7 +75,15 @@ const App: React.FC = () => {
           const apiAccounts = await getAvailableAccountsFromApi();
           if (apiAccounts.length > 0) {
             setAccounts(apiAccounts);
-            setSelectedAccountId(apiAccounts[0].id);
+            // Use saved account if it exists in the list, otherwise use first
+            const savedAccountId = localStorage.getItem('selectedAccountId');
+            const savedAccountExists = savedAccountId && apiAccounts.some(a => a.id === savedAccountId);
+            if (savedAccountExists) {
+              setSelectedAccountId(savedAccountId);
+            } else if (!selectedAccountId) {
+              setSelectedAccountId(apiAccounts[0].id);
+              localStorage.setItem('selectedAccountId', apiAccounts[0].id);
+            }
           } else {
             setError('No ad accounts found. Make sure your LinkedIn app has access to your ad accounts.');
             setAccounts([]);
@@ -86,7 +97,12 @@ const App: React.FC = () => {
       } else {
         const available = getAvailableAccounts();
         setAccounts(available);
-        if (available.length > 0) {
+        // Use saved account if it exists in demo list, otherwise use first
+        const savedAccountId = localStorage.getItem('selectedAccountId');
+        const savedAccountExists = savedAccountId && available.some(a => a.id === savedAccountId);
+        if (savedAccountExists) {
+          setSelectedAccountId(savedAccountId);
+        } else if (available.length > 0 && !selectedAccountId) {
           setSelectedAccountId(available[0].id);
         }
       }
@@ -178,7 +194,10 @@ const App: React.FC = () => {
   };
 
   const handleAccountChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedAccountId(e.target.value);
+    const newAccountId = e.target.value;
+    setSelectedAccountId(newAccountId);
+    // Save to localStorage so it persists across refreshes
+    localStorage.setItem('selectedAccountId', newAccountId);
   };
 
   if (isLoading && !data) {
