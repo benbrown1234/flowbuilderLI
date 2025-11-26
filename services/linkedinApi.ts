@@ -326,10 +326,14 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
       console.warn('API returned errors:', rawData._debug.errors);
     }
 
-    const targetingUrns = collectTargetingUrns(campaigns);
-    if (targetingUrns.length > 0) {
-      console.log(`Resolving ${targetingUrns.length} targeting URNs...`);
-      await resolveTargetingUrns(targetingUrns);
+    try {
+      const targetingUrns = collectTargetingUrns(campaigns);
+      if (targetingUrns.length > 0) {
+        console.log(`Resolving ${targetingUrns.length} targeting URNs...`);
+        await resolveTargetingUrns(targetingUrns);
+      }
+    } catch (resolveErr) {
+      console.warn('Non-blocking: Failed to resolve targeting URNs:', resolveErr);
     }
 
     const processedCampaigns: CampaignNode[] = campaigns.map((raw: any) => {
