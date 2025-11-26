@@ -254,9 +254,8 @@ app.get('/api/linkedin/accounts', requireAuth, async (req, res) => {
 app.get('/api/linkedin/account/:accountId/campaigns', requireAuth, async (req, res) => {
   try {
     const { accountId } = req.params;
-    const data = await linkedinApiRequest((req as any).sessionId, '/adCampaigns', {
+    const data = await linkedinApiRequest((req as any).sessionId, `/adAccounts/${accountId}/adCampaigns`, {
       q: 'search',
-      search: `(account:(values:List(urn:li:sponsoredAccount:${accountId})))`,
     });
     res.json(data);
   } catch (err: any) {
@@ -270,9 +269,8 @@ app.get('/api/linkedin/account/:accountId/campaigns', requireAuth, async (req, r
 app.get('/api/linkedin/account/:accountId/groups', requireAuth, async (req, res) => {
   try {
     const { accountId } = req.params;
-    const data = await linkedinApiRequest((req as any).sessionId, '/adCampaignGroups', {
+    const data = await linkedinApiRequest((req as any).sessionId, `/adAccounts/${accountId}/adCampaignGroups`, {
       q: 'search',
-      search: `(account:(values:List(urn:li:sponsoredAccount:${accountId})))`,
     });
     res.json(data);
   } catch (err: any) {
@@ -286,9 +284,8 @@ app.get('/api/linkedin/account/:accountId/groups', requireAuth, async (req, res)
 app.get('/api/linkedin/account/:accountId/creatives', requireAuth, async (req, res) => {
   try {
     const { accountId } = req.params;
-    const data = await linkedinApiRequest((req as any).sessionId, '/adCreatives', {
+    const data = await linkedinApiRequest((req as any).sessionId, `/adAccounts/${accountId}/adCreatives`, {
       q: 'search',
-      search: `(account:(values:List(urn:li:sponsoredAccount:${accountId})))`,
     });
     res.json(data);
   } catch (err: any) {
@@ -312,9 +309,8 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     const errors: string[] = [];
     
     try {
-      groups = await linkedinApiRequestPaginated(sessionId, '/adCampaignGroups', {
+      groups = await linkedinApiRequestPaginated(sessionId, `/adAccounts/${accountId}/adCampaignGroups`, {
         q: 'search',
-        search: `(account:(values:List(urn:li:sponsoredAccount:${accountId})))`,
       });
       console.log(`Campaign groups fetched: ${groups.length} items`);
       if (groups.length > 0) {
@@ -327,9 +323,8 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     }
     
     try {
-      campaigns = await linkedinApiRequestPaginated(sessionId, '/adCampaigns', {
+      campaigns = await linkedinApiRequestPaginated(sessionId, `/adAccounts/${accountId}/adCampaigns`, {
         q: 'search',
-        search: `(account:(values:List(urn:li:sponsoredAccount:${accountId})))`,
       });
       console.log(`Campaigns fetched: ${campaigns.length} items`);
       if (campaigns.length > 0) {
@@ -342,9 +337,8 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     }
     
     try {
-      creatives = await linkedinApiRequestPaginated(sessionId, '/adCreatives', {
+      creatives = await linkedinApiRequestPaginated(sessionId, `/adAccounts/${accountId}/adCreatives`, {
         q: 'search',
-        search: `(account:(values:List(urn:li:sponsoredAccount:${accountId})))`,
       });
       console.log(`Creatives fetched: ${creatives.length} items`);
     } catch (err: any) {

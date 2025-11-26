@@ -43,6 +43,7 @@ Required secrets for LinkedIn API:
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-26: Fixed LinkedIn API endpoints to use new path-based account ID format (May 2024 API change)
 - 2025-11-26: Added full pagination support for LinkedIn API (handles large accounts with 500+ items per page)
 - 2025-11-26: Fixed budget parsing to handle LinkedIn's minor currency units (cents → dollars)
 - 2025-11-26: Improved targeting criteria parsing with facet mappings (geos, industries, job titles, seniorities, skills)
