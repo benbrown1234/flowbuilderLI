@@ -132,7 +132,9 @@ export const buildAccountHierarchyFromApi = async (accountId: string): Promise<A
 
     const processedCampaigns: CampaignNode[] = rawData.campaigns.map((raw: any) => {
       const campaignUrn = raw.id || raw.urn;
-      const campaignId = campaignUrn?.split(':').pop() || campaignUrn;
+      const campaignId = typeof campaignUrn === 'string' && campaignUrn.includes(':')
+        ? campaignUrn.split(':').pop() 
+        : String(campaignUrn);
       
       const creatives: CreativeNode[] = rawData.creatives
         .filter((c: any) => {
@@ -169,7 +171,10 @@ export const buildAccountHierarchyFromApi = async (accountId: string): Promise<A
           (raw.id || raw.urn) === c.id
         );
         const campaignGroup = campaign?.campaignGroup || campaign?.campaignGroupUrn;
-        return campaignGroup === groupUrn || campaignGroup?.includes(groupUrn.split(':').pop());
+        const groupId = typeof groupUrn === 'string' && groupUrn.includes(':') 
+          ? groupUrn.split(':').pop() 
+          : String(groupUrn);
+        return campaignGroup === groupUrn || (campaignGroup && String(campaignGroup).includes(groupId));
       });
 
       const totalBudget = childCampaigns.reduce((sum: number, c: CampaignNode) => sum + c.dailyBudget, 0);
@@ -200,10 +205,17 @@ export const buildAccountHierarchyFromApi = async (accountId: string): Promise<A
 export const getAvailableAccountsFromApi = async (): Promise<AccountSummary[]> => {
   try {
     const accounts = await getAdAccounts();
-    return accounts.map((account: any) => ({
-      id: account.id?.split(':').pop() || account.id,
-      name: account.name || `Account ${account.id}`,
-    }));
+    return accounts.map((account: any) => {
+      // account.id can be a number or a URN string
+      const rawId = account.id;
+      const id = typeof rawId === 'string' && rawId.includes(':') 
+        ? rawId.split(':').pop() 
+        : String(rawId);
+      return {
+        id,
+        name: account.name || `Account ${id}`,
+      };
+    });
   } catch (error) {
     console.error('Error fetching accounts:', error);
     return [];
