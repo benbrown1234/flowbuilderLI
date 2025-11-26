@@ -43,9 +43,11 @@ Required secrets for LinkedIn API:
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-26: Added targeting URN resolution via LinkedIn adTargetingEntities API for human-readable names
+- 2025-11-26: Added targeting rules panel - click on campaigns in Structure view to see targeting criteria
+- 2025-11-26: Fixed creatives API to correctly fetch ads using List() format with proper encoding
 - 2025-11-26: Added "Active Only" toggle to filter campaigns/ads by ACTIVE status
 - 2025-11-26: Added retargeting segments API endpoint (`/adSegments`) for remarketing visualization
-- 2025-11-26: Fixed creatives API to use correct query format (`/creatives?q=search&search.account.values[0]=...`)
 - 2025-11-26: Fixed LinkedIn API endpoints to use new path-based account ID format (May 2024 API change)
 - 2025-11-26: Added full pagination support for LinkedIn API (handles large accounts with 500+ items per page)
 - 2025-11-26: Fixed budget parsing to handle LinkedIn's minor currency units (cents → dollars)

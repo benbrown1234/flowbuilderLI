@@ -430,6 +430,52 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
   }
 });
 
+app.post('/api/linkedin/resolve-targeting', requireAuth, async (req, res) => {
+  try {
+    const sessionId = (req as any).sessionId;
+    const { urns } = req.body;
+    
+    if (!urns || !Array.isArray(urns) || urns.length === 0) {
+      return res.json({ resolved: {} });
+    }
+    
+    const resolved: Record<string, string> = {};
+    const uniqueUrns = [...new Set(urns)];
+    
+    const batchSize = 50;
+    for (let i = 0; i < uniqueUrns.length; i += batchSize) {
+      const batch = uniqueUrns.slice(i, i + batchSize);
+      const urnList = batch.map(u => encodeURIComponent(u)).join(',');
+      
+      try {
+        const response = await linkedinApiRequest(
+          sessionId, 
+          '/adTargetingEntities',
+          {},
+          `q=urns&urns=List(${urnList})`
+        );
+        
+        if (response.results) {
+          Object.entries(response.results).forEach(([urn, entity]: [string, any]) => {
+            if (entity && entity.name) {
+              resolved[urn] = entity.name;
+            } else if (entity && entity.value) {
+              resolved[urn] = entity.value;
+            }
+          });
+        }
+      } catch (batchErr: any) {
+        console.warn(`Batch targeting resolution failed: ${batchErr.message}`);
+      }
+    }
+    
+    res.json({ resolved });
+  } catch (err: any) {
+    console.error('Targeting resolution error:', err.response?.data || err.message);
+    res.status(500).json({ error: 'Failed to resolve targeting' });
+  }
+});
+
 if (isProduction) {
   const distPath = path.join(__dirname, '..', 'dist');
   app.use(express.static(distPath));
