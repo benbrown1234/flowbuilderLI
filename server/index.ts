@@ -304,11 +304,12 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     const { accountId } = req.params;
     const sessionId = (req as any).sessionId;
     
-    console.log(`Fetching hierarchy for account: ${accountId}`);
+    console.log(`\n=== Fetching hierarchy for account: ${accountId} ===`);
     
     let groups: any[] = [];
     let campaigns: any[] = [];
     let creatives: any[] = [];
+    const errors: string[] = [];
     
     try {
       groups = await linkedinApiRequestPaginated(sessionId, '/adCampaignGroups', {
@@ -316,8 +317,13 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
         search: `(account:(values:List(urn:li:sponsoredAccount:${accountId})))`,
       });
       console.log(`Campaign groups fetched: ${groups.length} items`);
+      if (groups.length > 0) {
+        console.log(`First group sample: ${JSON.stringify(groups[0], null, 2).substring(0, 500)}`);
+      }
     } catch (err: any) {
-      console.error('Failed to fetch campaign groups:', err.response?.data || err.message);
+      const errorMsg = `Campaign groups error: ${JSON.stringify(err.response?.data || err.message)}`;
+      console.error(errorMsg);
+      errors.push(errorMsg);
     }
     
     try {
@@ -326,8 +332,13 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
         search: `(account:(values:List(urn:li:sponsoredAccount:${accountId})))`,
       });
       console.log(`Campaigns fetched: ${campaigns.length} items`);
+      if (campaigns.length > 0) {
+        console.log(`First campaign sample: ${JSON.stringify(campaigns[0], null, 2).substring(0, 500)}`);
+      }
     } catch (err: any) {
-      console.error('Failed to fetch campaigns:', err.response?.data || err.message);
+      const errorMsg = `Campaigns error: ${JSON.stringify(err.response?.data || err.message)}`;
+      console.error(errorMsg);
+      errors.push(errorMsg);
     }
     
     try {
@@ -337,13 +348,18 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
       });
       console.log(`Creatives fetched: ${creatives.length} items`);
     } catch (err: any) {
-      console.error('Failed to fetch creatives:', err.response?.data || err.message);
+      const errorMsg = `Creatives error: ${JSON.stringify(err.response?.data || err.message)}`;
+      console.error(errorMsg);
+      errors.push(errorMsg);
     }
+    
+    console.log(`=== Summary: ${groups.length} groups, ${campaigns.length} campaigns, ${creatives.length} creatives ===\n`);
     
     res.json({
       groups,
       campaigns,
       creatives,
+      _debug: errors.length > 0 ? { errors } : undefined,
     });
   } catch (err: any) {
     console.error('Hierarchy error:', err.response?.data || err.message);
