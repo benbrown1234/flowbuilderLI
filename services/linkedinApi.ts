@@ -161,52 +161,75 @@ const parseTargeting = (targetingCriteria: any): TargetingSummary => {
     exclusions: []
   };
 
-  if (!targetingCriteria) return summary;
+  if (!targetingCriteria) {
+    return summary;
+  }
 
-  const processInclude = (include: any) => {
-    if (include?.and) {
-      include.and.forEach((facetObj: any) => {
-        Object.entries(facetObj).forEach(([facetKey, urns]: [string, any]) => {
-          const targetKey = FACET_MAPPING[facetKey];
-          if (targetKey && Array.isArray(urns)) {
-            urns.forEach((urn: string) => {
-              const name = extractReadableName(urn);
-              if (name && !summary[targetKey].includes(name)) {
-                summary[targetKey].push(name);
-              }
-            });
-          } else if (!targetKey && Array.isArray(urns)) {
-            urns.forEach((urn: string) => {
-              const name = extractReadableName(urn);
-              if (name && !summary.audiences.includes(name)) {
-                summary.audiences.push(name);
-              }
-            });
-          }
-        });
-      });
-    }
+  const addToSummary = (facetKey: string, urns: string[]) => {
+    const targetKey = FACET_MAPPING[facetKey];
+    urns.forEach((urn: string) => {
+      const name = extractReadableName(urn);
+      if (!name) return;
+      
+      if (targetKey) {
+        if (!summary[targetKey].includes(name)) {
+          summary[targetKey].push(name);
+        }
+      } else if (facetKey.includes('adTargetingFacet')) {
+        if (!summary.audiences.includes(name)) {
+          summary.audiences.push(name);
+        }
+      }
+    });
   };
 
-  const processExclude = (exclude: any) => {
-    if (exclude?.or && Array.isArray(exclude.or)) {
-      exclude.or.forEach((facetObj: any) => {
-        Object.values(facetObj).forEach((urns: any) => {
+  const processFacetObject = (obj: any) => {
+    if (!obj || typeof obj !== 'object') return;
+    
+    Object.entries(obj).forEach(([key, value]: [string, any]) => {
+      if (key === 'or' && typeof value === 'object' && !Array.isArray(value)) {
+        Object.entries(value).forEach(([facetKey, urns]: [string, any]) => {
           if (Array.isArray(urns)) {
-            urns.forEach((urn: string) => {
-              const name = extractReadableName(urn);
-              if (name && !summary.exclusions.includes(name)) {
-                summary.exclusions.push(name);
-              }
-            });
+            addToSummary(facetKey, urns);
           }
         });
-      });
-    }
+      } else if (key.includes('adTargetingFacet') && Array.isArray(value)) {
+        addToSummary(key, value);
+      }
+    });
   };
 
-  processInclude(targetingCriteria.include);
-  processExclude(targetingCriteria.exclude);
+  if (targetingCriteria.include?.and && Array.isArray(targetingCriteria.include.and)) {
+    targetingCriteria.include.and.forEach((andItem: any) => {
+      processFacetObject(andItem);
+    });
+  }
+
+  if (targetingCriteria.exclude?.or && Array.isArray(targetingCriteria.exclude.or)) {
+    targetingCriteria.exclude.or.forEach((orItem: any) => {
+      Object.entries(orItem).forEach(([key, value]: [string, any]) => {
+        if (key === 'or' && typeof value === 'object') {
+          Object.values(value).forEach((urns: any) => {
+            if (Array.isArray(urns)) {
+              urns.forEach((urn: string) => {
+                const name = extractReadableName(urn);
+                if (name && !summary.exclusions.includes(name)) {
+                  summary.exclusions.push(name);
+                }
+              });
+            }
+          });
+        } else if (Array.isArray(value)) {
+          value.forEach((urn: string) => {
+            const name = extractReadableName(urn);
+            if (name && !summary.exclusions.includes(name)) {
+              summary.exclusions.push(name);
+            }
+          });
+        }
+      });
+    });
+  }
 
   return summary;
 };
