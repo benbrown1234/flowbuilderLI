@@ -184,8 +184,10 @@ const parseBudget = (budget: any): number => {
 
 export const buildAccountHierarchyFromApi = async (accountId: string): Promise<AccountStructure | null> => {
   try {
+    console.log(`Fetching hierarchy for account: ${accountId}`);
     const rawData = await getAccountHierarchy(accountId);
     
+    console.log('Raw API response:', rawData);
     
     if (!rawData) {
       console.warn(`No data found for account ${accountId}`);
@@ -197,6 +199,10 @@ export const buildAccountHierarchyFromApi = async (accountId: string): Promise<A
     const creatives = rawData.creatives || [];
 
     console.log(`Found ${groups.length} groups, ${campaigns.length} campaigns, ${creatives.length} creatives`);
+    
+    if (rawData._debug?.errors) {
+      console.warn('API returned errors:', rawData._debug.errors);
+    }
 
     const processedCampaigns: CampaignNode[] = campaigns.map((raw: any) => {
       const campaignId = extractIdFromUrn(raw.id);
