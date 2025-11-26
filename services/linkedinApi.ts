@@ -72,16 +72,78 @@ const FACET_MAPPING: Record<string, keyof TargetingSummary> = {
   'urn:li:adTargetingFacet:companySize': 'industries',
   'urn:li:adTargetingFacet:seniorities': 'jobTitles',
   'urn:li:adTargetingFacet:functions': 'jobTitles',
+  'urn:li:adTargetingFacet:skills': 'jobTitles',
+  'urn:li:adTargetingFacet:memberBehaviors': 'audiences',
+  'urn:li:adTargetingFacet:yearsOfExperience': 'jobTitles',
 };
 
-const extractReadableName = (urn: string): string => {
+let resolvedUrnCache: Record<string, string> = {};
+
+export const resolveTargetingUrns = async (urns: string[]): Promise<Record<string, string>> => {
+  const uncachedUrns = urns.filter(u => !resolvedUrnCache[u]);
+  
+  if (uncachedUrns.length === 0) {
+    return resolvedUrnCache;
+  }
+  
+  try {
+    const response = await api.post('/linkedin/resolve-targeting', { urns: uncachedUrns });
+    if (response.data.resolved) {
+      Object.assign(resolvedUrnCache, response.data.resolved);
+    }
+  } catch (err) {
+    console.warn('Failed to resolve targeting URNs:', err);
+  }
+  
+  return resolvedUrnCache;
+};
+
+const extractReadableName = (urn: string, resolvedNames?: Record<string, string>): string => {
   if (!urn || typeof urn !== 'string') return String(urn);
+  
+  if (resolvedNames && resolvedNames[urn]) {
+    return resolvedNames[urn];
+  }
+  
+  if (resolvedUrnCache[urn]) {
+    return resolvedUrnCache[urn];
+  }
+  
+  if (urn.includes('urn:li:geo:')) {
+    const geoId = urn.split(':').pop();
+    const geoNames: Record<string, string> = {
+      '101165590': 'United Kingdom',
+      '102095887': 'California, US',
+      '103644278': 'United States',
+      '101174742': 'Canada',
+      '102713980': 'India',
+      '101452733': 'Australia',
+      '100506914': 'New York, US',
+      '90009496': 'San Francisco Bay Area',
+    };
+    if (geoId && geoNames[geoId]) return geoNames[geoId];
+  }
+  
+  if (urn.includes('urn:li:seniority:')) {
+    const senId = urn.split(':').pop();
+    const seniorityNames: Record<string, string> = {
+      '1': 'Unpaid', '2': 'Training', '3': 'Entry', '4': 'Senior',
+      '5': 'Manager', '6': 'Director', '7': 'VP', '8': 'CXO',
+      '9': 'Partner', '10': 'Owner',
+    };
+    if (senId && seniorityNames[senId]) return seniorityNames[senId];
+  }
   
   const lastPart = urn.split(':').pop() || urn;
   
   if (lastPart.includes('(')) {
     const match = lastPart.match(/\(([^)]+)\)/);
     if (match) return match[1];
+  }
+  
+  if (/^\d+$/.test(lastPart)) {
+    const urnType = urn.split(':')[2] || 'item';
+    return `${urnType.charAt(0).toUpperCase()}${urnType.slice(1)} #${lastPart}`;
   }
   
   return lastPart
@@ -189,6 +251,58 @@ const parseBudget = (budget: any): number => {
   return 0;
 };
 
+const collectTargetingUrns = (campaigns: any[]): string[] => {
+  const urns: string[] = [];
+  
+  campaigns.forEach((campaign: any) => {
+    const criteria = campaign.targetingCriteria;
+    if (!criteria) return;
+    
+    const processAndGroup = (andGroup: any) => {
+      if (!andGroup?.and) return;
+      andGroup.and.forEach((orGroup: any) => {
+        if (orGroup?.or) {
+          Object.values(orGroup.or).forEach((values: any) => {
+            if (Array.isArray(values)) {
+              values.forEach((urn: string) => {
+                if (typeof urn === 'string' && urn.startsWith('urn:')) {
+                  urns.push(urn);
+                }
+              });
+            }
+          });
+        }
+        Object.entries(orGroup).forEach(([key, values]: [string, any]) => {
+          if (key !== 'or' && Array.isArray(values)) {
+            values.forEach((urn: string) => {
+              if (typeof urn === 'string' && urn.startsWith('urn:')) {
+                urns.push(urn);
+              }
+            });
+          }
+        });
+      });
+    };
+    
+    processAndGroup(criteria.include);
+    if (criteria.exclude?.or) {
+      criteria.exclude.or.forEach((orGroup: any) => {
+        Object.values(orGroup).forEach((values: any) => {
+          if (Array.isArray(values)) {
+            values.forEach((urn: string) => {
+              if (typeof urn === 'string' && urn.startsWith('urn:')) {
+                urns.push(urn);
+              }
+            });
+          }
+        });
+      });
+    }
+  });
+  
+  return [...new Set(urns)];
+};
+
 export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly: boolean = false): Promise<AccountStructure | null> => {
   try {
     console.log(`Fetching hierarchy for account: ${accountId} (activeOnly: ${activeOnly})`);
@@ -210,6 +324,16 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
     
     if (rawData._debug?.errors) {
       console.warn('API returned errors:', rawData._debug.errors);
+    }
+
+    try {
+      const targetingUrns = collectTargetingUrns(campaigns);
+      if (targetingUrns.length > 0) {
+        console.log(`Resolving ${targetingUrns.length} targeting URNs...`);
+        await resolveTargetingUrns(targetingUrns);
+      }
+    } catch (resolveErr) {
+      console.warn('Non-blocking: Failed to resolve targeting URNs:', resolveErr);
     }
 
     const processedCampaigns: CampaignNode[] = campaigns.map((raw: any) => {
