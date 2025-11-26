@@ -54,11 +54,20 @@ export interface GroupNode extends BaseNode {
   children: CampaignNode[];
 }
 
+export interface SegmentNode {
+  id: string;
+  name: string;
+  type: 'WEBSITE' | 'COMPANY' | 'CONTACT' | 'LOOKALIKE' | 'OTHER';
+  status: string;
+  audienceCount?: number;
+}
+
 export interface AccountStructure {
   id: string;
   name: string;
   currency: string;
   groups: GroupNode[];
+  segments?: SegmentNode[];
 }
 
 export interface AccountSummary {

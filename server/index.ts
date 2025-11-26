@@ -284,8 +284,9 @@ app.get('/api/linkedin/account/:accountId/groups', requireAuth, async (req, res)
 app.get('/api/linkedin/account/:accountId/creatives', requireAuth, async (req, res) => {
   try {
     const { accountId } = req.params;
-    const data = await linkedinApiRequest((req as any).sessionId, `/adAccounts/${accountId}/creatives`, {
+    const data = await linkedinApiRequest((req as any).sessionId, '/creatives', {
       q: 'search',
+      'search.account.values[0]': `urn:li:sponsoredAccount:${accountId}`,
     });
     res.json(data);
   } catch (err: any) {
@@ -296,22 +297,43 @@ app.get('/api/linkedin/account/:accountId/creatives', requireAuth, async (req, r
   }
 });
 
+app.get('/api/linkedin/account/:accountId/segments', requireAuth, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const data = await linkedinApiRequest((req as any).sessionId, '/adSegments', {
+      q: 'account',
+      account: `urn:li:sponsoredAccount:${accountId}`,
+    });
+    res.json(data);
+  } catch (err: any) {
+    console.error('Segments error:', err.response?.data || err.message);
+    res.status(err.response?.status || 500).json({ 
+      error: err.response?.data || err.message 
+    });
+  }
+});
+
 app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, res) => {
   try {
     const { accountId } = req.params;
     const sessionId = (req as any).sessionId;
+    const activeOnly = req.query.activeOnly === 'true';
     
-    console.log(`\n=== Fetching hierarchy for account: ${accountId} ===`);
+    console.log(`\n=== Fetching hierarchy for account: ${accountId} (activeOnly: ${activeOnly}) ===`);
     
     let groups: any[] = [];
     let campaigns: any[] = [];
     let creatives: any[] = [];
+    let segments: any[] = [];
     const errors: string[] = [];
     
     try {
       groups = await linkedinApiRequestPaginated(sessionId, `/adAccounts/${accountId}/adCampaignGroups`, {
         q: 'search',
       });
+      if (activeOnly) {
+        groups = groups.filter((g: any) => g.status === 'ACTIVE');
+      }
       console.log(`Campaign groups fetched: ${groups.length} items`);
       if (groups.length > 0) {
         console.log(`First group sample: ${JSON.stringify(groups[0], null, 2).substring(0, 500)}`);
@@ -326,6 +348,9 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
       campaigns = await linkedinApiRequestPaginated(sessionId, `/adAccounts/${accountId}/adCampaigns`, {
         q: 'search',
       });
+      if (activeOnly) {
+        campaigns = campaigns.filter((c: any) => c.status === 'ACTIVE');
+      }
       console.log(`Campaigns fetched: ${campaigns.length} items`);
       if (campaigns.length > 0) {
         console.log(`First campaign sample: ${JSON.stringify(campaigns[0], null, 2).substring(0, 500)}`);
@@ -337,9 +362,13 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     }
     
     try {
-      creatives = await linkedinApiRequestPaginated(sessionId, `/adAccounts/${accountId}/creatives`, {
+      creatives = await linkedinApiRequestPaginated(sessionId, '/creatives', {
         q: 'search',
+        'search.account.values[0]': `urn:li:sponsoredAccount:${accountId}`,
       });
+      if (activeOnly) {
+        creatives = creatives.filter((c: any) => c.intendedStatus === 'ACTIVE');
+      }
       console.log(`Creatives fetched: ${creatives.length} items`);
     } catch (err: any) {
       const errorMsg = `Creatives error: ${JSON.stringify(err.response?.data || err.message)}`;
@@ -347,12 +376,25 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
       errors.push(errorMsg);
     }
     
-    console.log(`=== Summary: ${groups.length} groups, ${campaigns.length} campaigns, ${creatives.length} creatives ===\n`);
+    try {
+      segments = await linkedinApiRequestPaginated(sessionId, '/adSegments', {
+        q: 'account',
+        account: `urn:li:sponsoredAccount:${accountId}`,
+      });
+      console.log(`Segments fetched: ${segments.length} items`);
+    } catch (err: any) {
+      const errorMsg = `Segments error: ${JSON.stringify(err.response?.data || err.message)}`;
+      console.error(errorMsg);
+      errors.push(errorMsg);
+    }
+    
+    console.log(`=== Summary: ${groups.length} groups, ${campaigns.length} campaigns, ${creatives.length} creatives, ${segments.length} segments ===\n`);
     
     res.json({
       groups,
       campaigns,
       creatives,
+      segments,
       _debug: errors.length > 0 ? { errors } : undefined,
     });
   } catch (err: any) {

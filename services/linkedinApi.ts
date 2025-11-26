@@ -48,9 +48,16 @@ export const getAdAccounts = async (): Promise<any[]> => {
   return response.data.elements || [];
 };
 
-export const getAccountHierarchy = async (accountId: string): Promise<any> => {
-  const response = await api.get(`/linkedin/account/${accountId}/hierarchy`);
+export const getAccountHierarchy = async (accountId: string, activeOnly: boolean = false): Promise<any> => {
+  const response = await api.get(`/linkedin/account/${accountId}/hierarchy`, {
+    params: { activeOnly: activeOnly.toString() }
+  });
   return response.data;
+};
+
+export const getAccountSegments = async (accountId: string): Promise<any[]> => {
+  const response = await api.get(`/linkedin/account/${accountId}/segments`);
+  return response.data.elements || [];
 };
 
 const FACET_MAPPING: Record<string, keyof TargetingSummary> = {
@@ -182,10 +189,10 @@ const parseBudget = (budget: any): number => {
   return 0;
 };
 
-export const buildAccountHierarchyFromApi = async (accountId: string): Promise<AccountStructure | null> => {
+export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly: boolean = false): Promise<AccountStructure | null> => {
   try {
-    console.log(`Fetching hierarchy for account: ${accountId}`);
-    const rawData = await getAccountHierarchy(accountId);
+    console.log(`Fetching hierarchy for account: ${accountId} (activeOnly: ${activeOnly})`);
+    const rawData = await getAccountHierarchy(accountId, activeOnly);
     
     console.log('Raw API response:', rawData);
     
@@ -197,8 +204,9 @@ export const buildAccountHierarchyFromApi = async (accountId: string): Promise<A
     const groups = rawData.groups || [];
     const campaigns = rawData.campaigns || [];
     const creatives = rawData.creatives || [];
+    const segments = rawData.segments || [];
 
-    console.log(`Found ${groups.length} groups, ${campaigns.length} campaigns, ${creatives.length} creatives`);
+    console.log(`Found ${groups.length} groups, ${campaigns.length} campaigns, ${creatives.length} creatives, ${segments.length} segments`);
     
     if (rawData._debug?.errors) {
       console.warn('API returned errors:', rawData._debug.errors);
@@ -280,11 +288,30 @@ export const buildAccountHierarchyFromApi = async (accountId: string): Promise<A
       });
     }
 
+    const processedSegments = segments.map((seg: any) => {
+      const segId = extractIdFromUrn(seg.id);
+      let segType: 'WEBSITE' | 'COMPANY' | 'CONTACT' | 'LOOKALIKE' | 'OTHER' = 'OTHER';
+      
+      if (seg.type === 'RETARGETING_SEGMENT') segType = 'WEBSITE';
+      else if (seg.type === 'COMPANY_SEGMENT') segType = 'COMPANY';
+      else if (seg.type === 'CONTACT_SEGMENT') segType = 'CONTACT';
+      else if (seg.type === 'LOOKALIKE_SEGMENT') segType = 'LOOKALIKE';
+      
+      return {
+        id: segId,
+        name: seg.name || `Segment ${segId}`,
+        type: segType,
+        status: seg.status || 'UNKNOWN',
+        audienceCount: seg.approximateMemberCount || seg.audienceCount,
+      };
+    });
+
     return {
       id: accountId,
       name: `Account ${accountId}`,
       currency: 'USD',
       groups: processedGroups,
+      segments: processedSegments,
     };
   } catch (error) {
     console.error('Error building hierarchy from API:', error);

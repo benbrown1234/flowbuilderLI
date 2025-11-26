@@ -20,6 +20,7 @@ const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [useRealData, setUseRealData] = useState<boolean>(false);
+  const [activeOnly, setActiveOnly] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   
   // State to hold the details of the currently selected node for the inspector
@@ -121,7 +122,7 @@ const App: React.FC = () => {
         let result: AccountStructure | null;
         
         if (useRealData && isAuthenticated) {
-          result = await buildAccountHierarchyFromApi(selectedAccountId);
+          result = await buildAccountHierarchyFromApi(selectedAccountId, activeOnly);
         } else {
           result = buildAccountHierarchy(selectedAccountId);
         }
@@ -138,7 +139,7 @@ const App: React.FC = () => {
     };
     
     loadData();
-  }, [selectedAccountId, useRealData, isAuthenticated]);
+  }, [selectedAccountId, useRealData, isAuthenticated, activeOnly]);
 
   const handleLogin = async () => {
     try {
@@ -273,6 +274,21 @@ const App: React.FC = () => {
                <Database size={16} />
                {useRealData ? 'Live Data' : 'Demo Data'}
              </button>
+
+             {/* Active Only Toggle - only show when using real data */}
+             {useRealData && isAuthenticated && (
+               <button
+                 onClick={() => setActiveOnly(!activeOnly)}
+                 className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all border ${
+                   activeOnly 
+                     ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100' 
+                     : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                 }`}
+                 title={activeOnly ? 'Show all campaigns' : 'Show only active campaigns'}
+               >
+                 {activeOnly ? 'Active Only' : 'All Status'}
+               </button>
+             )}
 
              {/* Auth Button */}
              {isAuthenticated ? (
