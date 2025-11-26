@@ -8,7 +8,8 @@
     "client": "vite",
     "server": "tsx server/index.ts",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "concurrently \"npm run server\" \"npm run preview\""
   },
   "dependencies": {
     "@types/cookie-parser": "^1.4.10",

@@ -3,9 +3,14 @@ import cors from 'cors';
 import axios from 'axios';
 import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
-const PORT = 3001;
+const isProduction = process.env.NODE_ENV === 'production';
+const PORT = isProduction ? 5000 : 3001;
 
 app.use(cors({ credentials: true, origin: true }));
 app.use(express.json());
@@ -295,6 +300,18 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
   }
 });
 
-app.listen(PORT, 'localhost', () => {
-  console.log(`LinkedIn API server running on http://localhost:${PORT}`);
+if (isProduction) {
+  const distPath = path.join(__dirname, '..', 'dist');
+  app.use(express.static(distPath));
+  
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api/')) {
+      res.sendFile(path.join(distPath, 'index.html'));
+    }
+  });
+}
+
+const HOST = isProduction ? '0.0.0.0' : 'localhost';
+app.listen(PORT, HOST, () => {
+  console.log(`LinkedIn API server running on http://${HOST}:${PORT}`);
 });
