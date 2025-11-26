@@ -86,13 +86,18 @@ export const resolveTargetingUrns = async (urns: string[]): Promise<Record<strin
     return resolvedUrnCache;
   }
   
+  console.log(`Requesting resolution for ${uncachedUrns.length} URNs...`);
+  
   try {
     const response = await api.post('/linkedin/resolve-targeting', { urns: uncachedUrns });
+    console.log('Resolution response:', response.data);
     if (response.data.resolved) {
+      const resolvedCount = Object.keys(response.data.resolved).length;
+      console.log(`Successfully resolved ${resolvedCount} URNs`);
       Object.assign(resolvedUrnCache, response.data.resolved);
     }
-  } catch (err) {
-    console.warn('Failed to resolve targeting URNs:', err);
+  } catch (err: any) {
+    console.warn('Failed to resolve targeting URNs:', err?.response?.data || err?.message || err);
   }
   
   return resolvedUrnCache;
@@ -308,9 +313,9 @@ const collectTargetingUrns = (campaigns: any[]): string[] => {
     };
     
     processAndGroup(criteria.include);
-    if (criteria.exclude?.or) {
-      criteria.exclude.or.forEach((orGroup: any) => {
-        Object.values(orGroup).forEach((values: any) => {
+    if (criteria.exclude) {
+      if (criteria.exclude.or && typeof criteria.exclude.or === 'object') {
+        Object.values(criteria.exclude.or).forEach((values: any) => {
           if (Array.isArray(values)) {
             values.forEach((urn: string) => {
               if (typeof urn === 'string' && urn.startsWith('urn:')) {
@@ -319,7 +324,22 @@ const collectTargetingUrns = (campaigns: any[]): string[] => {
             });
           }
         });
-      });
+      }
+      if (criteria.exclude.and && Array.isArray(criteria.exclude.and)) {
+        criteria.exclude.and.forEach((orGroup: any) => {
+          if (orGroup?.or && typeof orGroup.or === 'object') {
+            Object.values(orGroup.or).forEach((values: any) => {
+              if (Array.isArray(values)) {
+                values.forEach((urn: string) => {
+                  if (typeof urn === 'string' && urn.startsWith('urn:')) {
+                    urns.push(urn);
+                  }
+                });
+              }
+            });
+          }
+        });
+      }
     }
   });
   
@@ -350,13 +370,17 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
     }
 
     try {
+      console.log('Collecting targeting URNs from campaigns...');
       const targetingUrns = collectTargetingUrns(campaigns);
+      console.log(`Collected ${targetingUrns.length} targeting URNs`);
       if (targetingUrns.length > 0) {
         console.log(`Resolving ${targetingUrns.length} targeting URNs...`);
         await resolveTargetingUrns(targetingUrns);
+        console.log('URN resolution complete');
       }
-    } catch (resolveErr) {
-      console.warn('Non-blocking: Failed to resolve targeting URNs:', resolveErr);
+    } catch (resolveErr: any) {
+      console.warn('Non-blocking: Failed to resolve targeting URNs:', 
+        resolveErr?.message || resolveErr?.toString() || JSON.stringify(resolveErr) || 'Unknown error');
     }
 
     const processedCampaigns: CampaignNode[] = campaigns.map((raw: any) => {

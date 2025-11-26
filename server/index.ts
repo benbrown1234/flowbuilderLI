@@ -440,35 +440,110 @@ app.post('/api/linkedin/resolve-targeting', requireAuth, async (req, res) => {
     }
     
     const resolved: Record<string, string> = {};
-    const uniqueUrns = [...new Set(urns)];
+    const uniqueUrns = [...new Set(urns)] as string[];
     
-    const batchSize = 50;
-    for (let i = 0; i < uniqueUrns.length; i += batchSize) {
-      const batch = uniqueUrns.slice(i, i + batchSize);
-      const urnList = batch.map(u => encodeURIComponent(u)).join(',');
-      
-      try {
-        const response = await linkedinApiRequest(
-          sessionId, 
-          '/adTargetingEntities',
-          {},
-          `q=urns&urns=List(${urnList})`
-        );
-        
-        if (response.results) {
-          Object.entries(response.results).forEach(([urn, entity]: [string, any]) => {
-            if (entity && entity.name) {
-              resolved[urn] = entity.name;
-            } else if (entity && entity.value) {
-              resolved[urn] = entity.value;
-            }
-          });
+    // Group URNs by facet type for more efficient resolution
+    const facetGroups: Record<string, string[]> = {};
+    uniqueUrns.forEach(urn => {
+      // Extract facet type from URN like urn:li:title:123 -> titles
+      const parts = urn.split(':');
+      if (parts.length >= 3) {
+        const entityType = parts[2]; // e.g., "title", "industry", "geo", etc.
+        if (!facetGroups[entityType]) {
+          facetGroups[entityType] = [];
         }
-      } catch (batchErr: any) {
-        console.warn(`Batch targeting resolution failed: ${batchErr.message}`);
+        facetGroups[entityType].push(urn);
+      }
+    });
+    
+    // Process each facet type - try to fetch by facet first, then fall back to URN lookup
+    for (const [entityType, entityUrns] of Object.entries(facetGroups)) {
+      // Map entity types to their adTargetingFacet URNs
+      const facetMap: Record<string, string> = {
+        'title': 'titles',
+        'industry': 'industries',
+        'geo': 'locations',
+        'seniority': 'seniorities',
+        'function': 'jobFunctions',
+        'skill': 'skills',
+        'degree': 'degrees',
+        'fieldOfStudy': 'fieldsOfStudy',
+        'organization': 'employers',
+        'adSegment': 'audienceMatchingSegments',
+      };
+      
+      const facetName = facetMap[entityType];
+      
+      if (facetName) {
+        try {
+          // Try to get all entities for this facet type
+          const facetUrn = `urn:li:adTargetingFacet:${facetName}`;
+          const response = await linkedinApiRequest(
+            sessionId, 
+            '/adTargetingEntities',
+            {
+              q: 'adTargetingFacet',
+              queryVersion: 'QUERY_USES_URNS',
+              facet: facetUrn,
+              'locale': '(language:en,country:US)',
+            }
+          );
+          
+          if (response.elements && Array.isArray(response.elements)) {
+            response.elements.forEach((entity: any) => {
+              if (entity.urn && entity.name) {
+                resolved[entity.urn] = entity.name;
+              }
+            });
+          }
+        } catch (facetErr: any) {
+          console.warn(`Facet lookup failed for ${facetName}: ${facetErr.message}`);
+        }
       }
     }
     
+    // For any URNs not resolved by facet lookup, try direct URN resolution
+    const unresolvedUrns = uniqueUrns.filter(urn => !resolved[urn]);
+    
+    if (unresolvedUrns.length > 0) {
+      const batchSize = 20;
+      for (let i = 0; i < unresolvedUrns.length; i += batchSize) {
+        const batch = unresolvedUrns.slice(i, i + batchSize);
+        // URNs inside List() should be comma-separated, each URN individually encoded
+        const urnList = batch.map(u => encodeURIComponent(u)).join(',');
+        
+        try {
+          const response = await linkedinApiRequest(
+            sessionId, 
+            '/adTargetingEntities',
+            {},
+            `q=urns&queryVersion=QUERY_USES_URNS&urns=List(${urnList})&locale=(language:en,country:US)`
+          );
+          
+          // Response can be in 'results' (batch lookup) or 'elements' format
+          if (response.results) {
+            Object.entries(response.results).forEach(([urn, entity]: [string, any]) => {
+              if (entity && entity.name) {
+                resolved[urn] = entity.name;
+              } else if (entity && entity.value) {
+                resolved[urn] = entity.value;
+              }
+            });
+          }
+          if (response.elements && Array.isArray(response.elements)) {
+            response.elements.forEach((entity: any) => {
+              if (entity.urn && entity.name) {
+                resolved[entity.urn] = entity.name;
+              }
+            });
+          }
+        } catch (batchErr: any) {
+          console.warn(`URN batch resolution failed: ${batchErr.message}`);
+        }
+      }
+    }
+    
+    console.log(`Resolved ${Object.keys(resolved).length} of ${uniqueUrns.length} targeting URNs`);
     res.json({ resolved });
   } catch (err: any) {
     console.error('Targeting resolution error:', err.response?.data || err.message);

@@ -43,6 +43,8 @@ Required secrets for LinkedIn API:
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-26: Fixed targeting URN resolution - added `queryVersion=QUERY_USES_URNS` for LinkedIn API compatibility
+- 2025-11-26: Fixed `collectTargetingUrns` to handle `exclude.or` as object instead of array (was causing resolution failures)
 - 2025-11-26: Added targeting URN resolution via LinkedIn adTargetingEntities API for human-readable names
 - 2025-11-26: Added targeting rules panel - click on campaigns in Structure view to see targeting criteria
 - 2025-11-26: Fixed creatives API to correctly fetch ads using List() format with proper encoding
