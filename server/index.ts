@@ -15,8 +15,10 @@ const LINKEDIN_CLIENT_ID = process.env.LINKEDIN_CLIENT_ID;
 const LINKEDIN_CLIENT_SECRET = process.env.LINKEDIN_CLIENT_SECRET;
 
 const getRedirectUri = (req: express.Request): string => {
-  const host = req.get('host') || process.env.REPLIT_DEV_DOMAIN || 'localhost:5000';
-  const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+  const forwardedHost = req.get('x-forwarded-host');
+  const replitDomain = process.env.REPLIT_DEV_DOMAIN || process.env.REPLIT_DOMAINS;
+  const host = forwardedHost || replitDomain || req.get('host') || 'localhost:5000';
+  const protocol = replitDomain || forwardedHost ? 'https' : (req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http');
   return `${protocol}://${host}/api/auth/callback`;
 };
 
