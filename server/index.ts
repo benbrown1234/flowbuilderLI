@@ -208,8 +208,8 @@ app.get('/api/linkedin/accounts', requireAuth, async (req, res) => {
   try {
     const data = await linkedinApiRequest((req as any).sessionId, '/adAccounts', {
       q: 'search',
-      search: '(status:(values:List(ACTIVE)))',
     });
+    console.log('Ad accounts response:', JSON.stringify(data, null, 2));
     res.json(data);
   } catch (err: any) {
     console.error('Ad accounts error:', err.response?.data || err.message);
