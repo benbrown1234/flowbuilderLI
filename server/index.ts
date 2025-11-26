@@ -10,7 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
-const PORT = isProduction ? 5000 : 3001;
+const PORT = Number(process.env.PORT) || (isProduction ? 5000 : 3001);
 
 app.use(cors({ credentials: true, origin: true }));
 app.use(express.json());
