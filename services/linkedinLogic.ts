@@ -413,7 +413,7 @@ export const getTreeGraph = (account: AccountStructure) => {
   const nodes: TreeNode[] = [];
   const links: TreeLink[] = [];
   
-  const X_SPACING = 300;
+  const X_SPACING = 360;
   
   // Use a mutable cursor to track vertical position in pixels
   let currentY = 0;

@@ -132,7 +132,7 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
               const target = graph.nodes.find(n => n.id === link.target);
               if (!source || !target) return null;
 
-              const startX = source.x + 220; // Node width + padding
+              const startX = source.x + 280; // Node width + padding
               const startY = source.y + 30;  // Center Y (approx half of typical node height)
               const endX = target.x;
               const endY = target.y + 30;
@@ -161,12 +161,12 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
               onClick={() => node.type !== NodeType.ACCOUNT && handleNodeClick(node)}
               className={`
                 absolute transition-all duration-200 hover:z-20 shadow-sm hover:shadow-xl
-                w-[220px] rounded-lg border flex flex-col justify-center px-4 py-3 z-10
+                w-[280px] rounded-lg border flex flex-col justify-center px-4 py-3 z-10
                 ${node.type !== NodeType.ACCOUNT ? 'cursor-pointer hover:scale-105' : 'cursor-default'}
-                ${node.type === NodeType.ACCOUNT ? 'bg-blue-600 border-blue-700 text-white h-[70px]' : ''}
-                ${node.type === NodeType.GROUP ? 'bg-white border-gray-300 h-[70px]' : ''}
-                ${node.type === NodeType.CAMPAIGN ? 'bg-white border-orange-200 border-l-4 border-l-orange-500 h-[80px]' : ''}
-                ${node.type === NodeType.CREATIVE ? 'bg-white border-green-200 border-l-4 border-l-green-500 h-[60px]' : ''}
+                ${node.type === NodeType.ACCOUNT ? 'bg-blue-600 border-blue-700 text-white min-h-[70px]' : ''}
+                ${node.type === NodeType.GROUP ? 'bg-white border-gray-300 min-h-[70px]' : ''}
+                ${node.type === NodeType.CAMPAIGN ? 'bg-white border-orange-200 border-l-4 border-l-orange-500 min-h-[80px]' : ''}
+                ${node.type === NodeType.CREATIVE ? 'bg-white border-green-200 border-l-4 border-l-green-500 min-h-[60px]' : ''}
               `}
               style={{ 
                 left: node.x, 
@@ -192,7 +192,7 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
                 </span>
               </div>
               
-              <div className={`font-semibold text-sm truncate leading-tight ${node.type === NodeType.ACCOUNT ? 'text-white' : 'text-gray-900'}`} title={node.name}>
+              <div className={`font-semibold text-sm leading-tight ${node.type === NodeType.ACCOUNT ? 'text-white' : 'text-gray-900'}`} title={node.name}>
                 {node.name}
               </div>
 
