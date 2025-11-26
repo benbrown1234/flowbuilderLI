@@ -43,5 +43,17 @@ Required secrets for LinkedIn API:
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-26: Added full pagination support for LinkedIn API (handles large accounts with 500+ items per page)
+- 2025-11-26: Fixed budget parsing to handle LinkedIn's minor currency units (cents → dollars)
+- 2025-11-26: Improved targeting criteria parsing with facet mappings (geos, industries, job titles, seniorities, skills)
+- 2025-11-26: Fixed campaign-to-group linking using URN parsing
+- 2025-11-26: Added account selection dropdown with localStorage persistence
 - 2025-11-26: Added LinkedIn Marketing API integration with OAuth 2.0 authentication
 - 2025-11-26: Initial import from GitHub, configured for Replit environment
+
+## LinkedIn API Data Mapping Notes
+- Campaign Groups: `name`, `status` fields from API; budget from `runSchedule.start/end`
+- Campaigns: `name`, `status`, `costType`, `objectiveType`, `dailyBudget`; linked via `campaignGroup` URN
+- Creatives: `name`, `type`, `status`; linked via `campaign` URN  
+- Budgets: LinkedIn returns amounts in cents (minor units), converted to dollars in display
+- IDs: Extracted from URN format (e.g., `urn:li:sponsoredCampaign:123456` → `123456`)
