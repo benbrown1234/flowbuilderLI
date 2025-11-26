@@ -1,0 +1,5 @@
+{
+  "name": "LinkedIn Audience Visualizer",
+  "description": "A visualization tool for LinkedIn Ad Account hierarchy, parsing complex targeting logic and aggregating audience insights from Campaign Groups down to Creatives.",
+  "requestFramePermissions": []
+}
