@@ -189,7 +189,7 @@ async function linkedinApiRequest(sessionId: string, endpoint: string, params: R
   return response.data;
 }
 
-async function linkedinApiRequestPaginated(sessionId: string, endpoint: string, params: Record<string, any> = {}): Promise<any[]> {
+async function linkedinApiRequestPaginated(sessionId: string, endpoint: string, params: Record<string, any> = {}, rawQueryString?: string): Promise<any[]> {
   const allElements: any[] = [];
   let pageToken: string | undefined;
   const pageSize = 500;
@@ -204,7 +204,15 @@ async function linkedinApiRequestPaginated(sessionId: string, endpoint: string, 
       requestParams.pageToken = pageToken;
     }
     
-    const response = await linkedinApiRequest(sessionId, endpoint, requestParams);
+    let queryStr = rawQueryString;
+    if (queryStr) {
+      queryStr += `&pageSize=${pageSize}`;
+      if (pageToken) {
+        queryStr += `&pageToken=${pageToken}`;
+      }
+    }
+    
+    const response = await linkedinApiRequest(sessionId, endpoint, rawQueryString ? {} : requestParams, queryStr);
     
     if (response.elements && Array.isArray(response.elements)) {
       allElements.push(...response.elements);
@@ -305,9 +313,13 @@ app.get('/api/linkedin/account/:accountId/creatives', requireAuth, async (req, r
 app.get('/api/linkedin/account/:accountId/segments', requireAuth, async (req, res) => {
   try {
     const { accountId } = req.params;
-    const data = await linkedinApiRequest((req as any).sessionId, `/adAccounts/${accountId}/dmpSegments`, {
-      q: 'criteria',
-    });
+    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+    const data = await linkedinApiRequest(
+      (req as any).sessionId, 
+      '/adSegments',
+      {},
+      `q=accounts&accounts=List(${accountUrn})`
+    );
     res.json(data);
   } catch (err: any) {
     console.error('Segments error:', err.response?.data || err.message);
@@ -399,10 +411,13 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     }
     
     try {
-      segments = await linkedinApiRequestPaginated(sessionId, `/adAccounts/${accountId}/dmpSegments`, {
-        q: 'criteria',
-        account: `urn:li:sponsoredAccount:${accountId}`,
-      });
+      const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+      segments = await linkedinApiRequestPaginated(
+        sessionId, 
+        '/adSegments',
+        {},
+        `q=accounts&accounts=List(${accountUrn})`
+      );
       console.log(`Segments fetched: ${segments.length} items`);
       if (segments.length > 0) {
         console.log(`First segment sample: ${JSON.stringify(segments[0], null, 2).substring(0, 500)}`);
