@@ -37,12 +37,13 @@ export interface CampaignNode extends BaseNode {
   type: NodeType.CAMPAIGN;
   dailyBudget: number;
   status: string;
-  objective: string;        // NEW
-  biddingStrategy: string;  // NEW
-  targetingRaw: any; // The raw criteria object from API
-  targetingResolved: TargetingSummary; // The parsed, human-readable summary
-  outputAudiences: string[]; // NEW: Audiences this campaign populates (e.g., Website Visitors)
+  objective: string;
+  biddingStrategy: string;
+  targetingRaw: any;
+  targetingResolved: TargetingSummary;
+  outputAudiences: string[];
   children: CreativeNode[];
+  campaignGroupUrn?: string;
 }
 
 export interface GroupNode extends BaseNode {

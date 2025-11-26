@@ -183,6 +183,38 @@ async function linkedinApiRequest(sessionId: string, endpoint: string, params: R
   return response.data;
 }
 
+async function linkedinApiRequestPaginated(sessionId: string, endpoint: string, params: Record<string, any> = {}): Promise<any[]> {
+  const allElements: any[] = [];
+  let pageToken: string | undefined;
+  const pageSize = 500;
+  
+  do {
+    const requestParams: Record<string, any> = {
+      ...params,
+      pageSize,
+    };
+    
+    if (pageToken) {
+      requestParams.pageToken = pageToken;
+    }
+    
+    const response = await linkedinApiRequest(sessionId, endpoint, requestParams);
+    
+    if (response.elements && Array.isArray(response.elements)) {
+      allElements.push(...response.elements);
+    }
+    
+    pageToken = response.metadata?.nextPageToken || response.paging?.nextPageToken;
+    
+    if (allElements.length > 5000) {
+      console.warn(`Stopping pagination at ${allElements.length} elements to prevent excessive API calls`);
+      break;
+    }
+  } while (pageToken);
+  
+  return allElements;
+}
+
 const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const sessionId = req.cookies?.session_id;
   
@@ -274,46 +306,44 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     
     console.log(`Fetching hierarchy for account: ${accountId}`);
     
-    // Fetch each endpoint separately to identify which one fails
-    let groupsData, campaignsData, creativesData;
+    let groups: any[] = [];
+    let campaigns: any[] = [];
+    let creatives: any[] = [];
     
     try {
-      groupsData = await linkedinApiRequest(sessionId, '/adCampaignGroups', {
+      groups = await linkedinApiRequestPaginated(sessionId, '/adCampaignGroups', {
         q: 'search',
         search: `(account:(values:List(urn:li:sponsoredAccount:${accountId})))`,
       });
-      console.log(`Campaign groups fetched: ${groupsData.elements?.length || 0} items`);
+      console.log(`Campaign groups fetched: ${groups.length} items`);
     } catch (err: any) {
       console.error('Failed to fetch campaign groups:', err.response?.data || err.message);
-      groupsData = { elements: [] };
     }
     
     try {
-      campaignsData = await linkedinApiRequest(sessionId, '/adCampaigns', {
+      campaigns = await linkedinApiRequestPaginated(sessionId, '/adCampaigns', {
         q: 'search',
         search: `(account:(values:List(urn:li:sponsoredAccount:${accountId})))`,
       });
-      console.log(`Campaigns fetched: ${campaignsData.elements?.length || 0} items`);
+      console.log(`Campaigns fetched: ${campaigns.length} items`);
     } catch (err: any) {
       console.error('Failed to fetch campaigns:', err.response?.data || err.message);
-      campaignsData = { elements: [] };
     }
     
     try {
-      creativesData = await linkedinApiRequest(sessionId, '/adCreatives', {
+      creatives = await linkedinApiRequestPaginated(sessionId, '/adCreatives', {
         q: 'search',
         search: `(account:(values:List(urn:li:sponsoredAccount:${accountId})))`,
       });
-      console.log(`Creatives fetched: ${creativesData.elements?.length || 0} items`);
+      console.log(`Creatives fetched: ${creatives.length} items`);
     } catch (err: any) {
       console.error('Failed to fetch creatives:', err.response?.data || err.message);
-      creativesData = { elements: [] };
     }
     
     res.json({
-      groups: groupsData.elements || [],
-      campaigns: campaignsData.elements || [],
-      creatives: creativesData.elements || [],
+      groups,
+      campaigns,
+      creatives,
     });
   } catch (err: any) {
     console.error('Hierarchy error:', err.response?.data || err.message);

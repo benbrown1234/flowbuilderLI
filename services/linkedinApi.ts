@@ -45,10 +45,31 @@ export const getAccountHierarchy = async (accountId: string): Promise<any> => {
 const FACET_MAPPING: Record<string, keyof TargetingSummary> = {
   'urn:li:adTargetingFacet:locations': 'geos',
   'urn:li:adTargetingFacet:geoLocations': 'geos',
+  'urn:li:adTargetingFacet:interfaceLocales': 'geos',
   'urn:li:adTargetingFacet:industries': 'industries',
   'urn:li:adTargetingFacet:jobTitles': 'jobTitles',
+  'urn:li:adTargetingFacet:titles': 'jobTitles',
   'urn:li:adTargetingFacet:audienceMatchingSegments': 'audiences',
+  'urn:li:adTargetingFacet:similarAudiences': 'audiences',
   'urn:li:adTargetingFacet:companySize': 'industries',
+  'urn:li:adTargetingFacet:seniorities': 'jobTitles',
+  'urn:li:adTargetingFacet:functions': 'jobTitles',
+};
+
+const extractReadableName = (urn: string): string => {
+  if (!urn || typeof urn !== 'string') return String(urn);
+  
+  const lastPart = urn.split(':').pop() || urn;
+  
+  if (lastPart.includes('(')) {
+    const match = lastPart.match(/\(([^)]+)\)/);
+    if (match) return match[1];
+  }
+  
+  return lastPart
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/_/g, ' ')
+    .trim();
 };
 
 const parseTargeting = (targetingCriteria: any): TargetingSummary => {
@@ -69,8 +90,17 @@ const parseTargeting = (targetingCriteria: any): TargetingSummary => {
           const targetKey = FACET_MAPPING[facetKey];
           if (targetKey && Array.isArray(urns)) {
             urns.forEach((urn: string) => {
-              const name = urn.split(':').pop() || urn;
-              summary[targetKey].push(name);
+              const name = extractReadableName(urn);
+              if (name && !summary[targetKey].includes(name)) {
+                summary[targetKey].push(name);
+              }
+            });
+          } else if (!targetKey && Array.isArray(urns)) {
+            urns.forEach((urn: string) => {
+              const name = extractReadableName(urn);
+              if (name && !summary.audiences.includes(name)) {
+                summary.audiences.push(name);
+              }
             });
           }
         });
@@ -84,8 +114,10 @@ const parseTargeting = (targetingCriteria: any): TargetingSummary => {
         Object.values(facetObj).forEach((urns: any) => {
           if (Array.isArray(urns)) {
             urns.forEach((urn: string) => {
-              const name = urn.split(':').pop() || urn;
-              summary.exclusions.push(name);
+              const name = extractReadableName(urn);
+              if (name && !summary.exclusions.includes(name)) {
+                summary.exclusions.push(name);
+              }
             });
           }
         });
@@ -121,67 +153,95 @@ const aggregateTargeting = (campaigns: CampaignNode[]): TargetingSummary => {
   };
 };
 
+const extractIdFromUrn = (urnOrId: any): string => {
+  if (typeof urnOrId === 'string' && urnOrId.includes(':')) {
+    return urnOrId.split(':').pop() || urnOrId;
+  }
+  return String(urnOrId);
+};
+
+const parseBudget = (budget: any): number => {
+  if (!budget) return 0;
+  if (typeof budget === 'number') return budget;
+  if (budget.amount) {
+    const rawAmount = typeof budget.amount === 'string' ? parseFloat(budget.amount) : budget.amount;
+    if (isNaN(rawAmount)) return 0;
+    return rawAmount / 100;
+  }
+  return 0;
+};
+
 export const buildAccountHierarchyFromApi = async (accountId: string): Promise<AccountStructure | null> => {
   try {
     const rawData = await getAccountHierarchy(accountId);
     
-    if (!rawData || !rawData.groups) {
+    
+    if (!rawData) {
       console.warn(`No data found for account ${accountId}`);
       return null;
     }
 
-    const processedCampaigns: CampaignNode[] = rawData.campaigns.map((raw: any) => {
-      const campaignUrn = raw.id || raw.urn;
-      const campaignId = typeof campaignUrn === 'string' && campaignUrn.includes(':')
-        ? campaignUrn.split(':').pop() 
-        : String(campaignUrn);
+    const groups = rawData.groups || [];
+    const campaigns = rawData.campaigns || [];
+    const creatives = rawData.creatives || [];
+
+    console.log(`Found ${groups.length} groups, ${campaigns.length} campaigns, ${creatives.length} creatives`);
+
+    const processedCampaigns: CampaignNode[] = campaigns.map((raw: any) => {
+      const campaignId = extractIdFromUrn(raw.id);
+      const campaignUrn = typeof raw.id === 'number' 
+        ? `urn:li:sponsoredCampaign:${raw.id}` 
+        : raw.id;
       
-      const creatives: CreativeNode[] = rawData.creatives
+      const matchingCreatives: CreativeNode[] = creatives
         .filter((c: any) => {
-          const creativeCampaign = c.campaign || c.campaignUrn;
-          return creativeCampaign === campaignUrn || creativeCampaign?.includes(campaignId);
+          const creativeCampaignUrn = c.campaign;
+          const creativeCampaignId = extractIdFromUrn(creativeCampaignUrn);
+          return creativeCampaignId === campaignId || creativeCampaignUrn === campaignUrn;
         })
         .map((c: any) => ({
-          id: c.id || c.urn,
-          name: c.name || `Creative ${c.id}`,
+          id: extractIdFromUrn(c.id),
+          name: c.name || `Creative ${extractIdFromUrn(c.id)}`,
           type: NodeType.CREATIVE,
-          format: c.type || c.format || 'UNKNOWN',
+          format: c.type || 'SPONSORED_UPDATE',
         }));
 
+      const dailyBudget = parseBudget(raw.dailyBudget);
+
       return {
-        id: campaignUrn,
+        id: campaignId,
         name: raw.name || `Campaign ${campaignId}`,
         type: NodeType.CAMPAIGN,
-        dailyBudget: raw.dailyBudget?.amount?.value || raw.dailyBudget || 0,
+        dailyBudget,
         status: raw.status || 'UNKNOWN',
-        objective: raw.objectiveType || raw.objective || 'UNKNOWN',
-        biddingStrategy: raw.costType || raw.biddingStrategy || 'UNKNOWN',
+        objective: raw.objectiveType || 'UNKNOWN',
+        biddingStrategy: raw.costType || 'CPM',
         targetingRaw: raw.targetingCriteria || {},
         targetingResolved: parseTargeting(raw.targetingCriteria),
         outputAudiences: [],
-        children: creatives,
+        children: matchingCreatives,
+        campaignGroupUrn: raw.campaignGroup,
       };
     });
 
-    const groups: GroupNode[] = rawData.groups.map((rawGroup: any) => {
-      const groupUrn = rawGroup.id || rawGroup.urn;
+    const processedGroups: GroupNode[] = groups.map((rawGroup: any) => {
+      const groupId = extractIdFromUrn(rawGroup.id);
+      const groupUrn = typeof rawGroup.id === 'number'
+        ? `urn:li:sponsoredCampaignGroup:${rawGroup.id}`
+        : rawGroup.id;
       
-      const childCampaigns = processedCampaigns.filter((c: CampaignNode) => {
-        const campaign = rawData.campaigns.find((raw: any) => 
-          (raw.id || raw.urn) === c.id
-        );
-        const campaignGroup = campaign?.campaignGroup || campaign?.campaignGroupUrn;
-        const groupId = typeof groupUrn === 'string' && groupUrn.includes(':') 
-          ? groupUrn.split(':').pop() 
-          : String(groupUrn);
-        return campaignGroup === groupUrn || (campaignGroup && String(campaignGroup).includes(groupId));
+      const childCampaigns = processedCampaigns.filter((c: any) => {
+        if (!c.campaignGroupUrn) return false;
+        const campaignGroupId = extractIdFromUrn(c.campaignGroupUrn);
+        return campaignGroupId === groupId || c.campaignGroupUrn === groupUrn;
       });
 
-      const totalBudget = childCampaigns.reduce((sum: number, c: CampaignNode) => sum + c.dailyBudget, 0);
+      const totalBudget = parseBudget(rawGroup.totalBudget) || 
+        childCampaigns.reduce((sum: number, c: CampaignNode) => sum + c.dailyBudget, 0);
 
       return {
-        id: groupUrn,
-        name: rawGroup.name || `Group ${groupUrn}`,
+        id: groupId,
+        name: rawGroup.name || `Campaign Group ${groupId}`,
         type: NodeType.GROUP,
         status: rawGroup.status || 'UNKNOWN',
         totalBudget,
@@ -190,11 +250,24 @@ export const buildAccountHierarchyFromApi = async (accountId: string): Promise<A
       };
     });
 
+    const orphanCampaigns = processedCampaigns.filter((c: any) => !c.campaignGroupUrn);
+    if (orphanCampaigns.length > 0) {
+      processedGroups.push({
+        id: 'ungrouped',
+        name: 'Ungrouped Campaigns',
+        type: NodeType.GROUP,
+        status: 'ACTIVE',
+        totalBudget: orphanCampaigns.reduce((sum, c) => sum + c.dailyBudget, 0),
+        children: orphanCampaigns,
+        derivedTargeting: aggregateTargeting(orphanCampaigns),
+      });
+    }
+
     return {
       id: accountId,
       name: `Account ${accountId}`,
       currency: 'USD',
-      groups,
+      groups: processedGroups,
     };
   } catch (error) {
     console.error('Error building hierarchy from API:', error);
