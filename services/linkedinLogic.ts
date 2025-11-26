@@ -55,7 +55,7 @@ const parseTargeting = (criteria: MockRawCampaign['targetingCriteria']): Targeti
   }
 
   // Process EXCLUDES (The "OR" logic)
-  if (criteria.exclude?.or) {
+  if (criteria.exclude?.or && Array.isArray(criteria.exclude.or)) {
     criteria.exclude.or.forEach((facetObj) => {
       Object.values(facetObj).forEach((urns) => {
         if (Array.isArray(urns)) {

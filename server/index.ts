@@ -174,7 +174,7 @@ async function linkedinApiRequest(sessionId: string, endpoint: string, params: R
   const response = await axios.get(`https://api.linkedin.com/rest${endpoint}`, {
     headers: {
       'Authorization': `Bearer ${session.accessToken}`,
-      'LinkedIn-Version': '202411',
+      'LinkedIn-Version': '202511',
       'X-Restli-Protocol-Version': '2.0.0',
     },
     params,
@@ -284,7 +284,7 @@ app.get('/api/linkedin/account/:accountId/groups', requireAuth, async (req, res)
 app.get('/api/linkedin/account/:accountId/creatives', requireAuth, async (req, res) => {
   try {
     const { accountId } = req.params;
-    const data = await linkedinApiRequest((req as any).sessionId, `/adAccounts/${accountId}/adCreatives`, {
+    const data = await linkedinApiRequest((req as any).sessionId, `/adAccounts/${accountId}/creatives`, {
       q: 'search',
     });
     res.json(data);
@@ -337,7 +337,7 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     }
     
     try {
-      creatives = await linkedinApiRequestPaginated(sessionId, `/adAccounts/${accountId}/adCreatives`, {
+      creatives = await linkedinApiRequestPaginated(sessionId, `/adAccounts/${accountId}/creatives`, {
         q: 'search',
       });
       console.log(`Creatives fetched: ${creatives.length} items`);

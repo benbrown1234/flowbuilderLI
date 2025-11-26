@@ -120,7 +120,7 @@ const parseTargeting = (targetingCriteria: any): TargetingSummary => {
   };
 
   const processExclude = (exclude: any) => {
-    if (exclude?.or) {
+    if (exclude?.or && Array.isArray(exclude.or)) {
       exclude.or.forEach((facetObj: any) => {
         Object.values(facetObj).forEach((urns: any) => {
           if (Array.isArray(urns)) {
