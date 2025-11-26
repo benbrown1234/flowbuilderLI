@@ -160,7 +160,7 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ success: true });
 });
 
-async function linkedinApiRequest(sessionId: string, endpoint: string, params: Record<string, any> = {}) {
+async function linkedinApiRequest(sessionId: string, endpoint: string, params: Record<string, any> = {}, rawQueryString?: string) {
   const session = getSession(sessionId);
   
   if (!session.accessToken) {
@@ -171,13 +171,19 @@ async function linkedinApiRequest(sessionId: string, endpoint: string, params: R
     throw new Error('Token expired');
   }
   
-  const response = await axios.get(`https://api.linkedin.com/rest${endpoint}`, {
+  let url = `https://api.linkedin.com/rest${endpoint}`;
+  
+  if (rawQueryString) {
+    url += `?${rawQueryString}`;
+  }
+  
+  const response = await axios.get(url, {
     headers: {
       'Authorization': `Bearer ${session.accessToken}`,
       'LinkedIn-Version': '202511',
       'X-Restli-Protocol-Version': '2.0.0',
     },
-    params,
+    params: rawQueryString ? undefined : params,
   });
   
   return response.data;
@@ -284,9 +290,8 @@ app.get('/api/linkedin/account/:accountId/groups', requireAuth, async (req, res)
 app.get('/api/linkedin/account/:accountId/creatives', requireAuth, async (req, res) => {
   try {
     const { accountId } = req.params;
-    const data = await linkedinApiRequest((req as any).sessionId, '/creatives', {
-      q: 'search',
-      'search.account.values[0]': `urn:li:sponsoredAccount:${accountId}`,
+    const data = await linkedinApiRequest((req as any).sessionId, `/adAccounts/${accountId}/creatives`, {
+      q: 'criteria',
     });
     res.json(data);
   } catch (err: any) {
@@ -300,9 +305,8 @@ app.get('/api/linkedin/account/:accountId/creatives', requireAuth, async (req, r
 app.get('/api/linkedin/account/:accountId/segments', requireAuth, async (req, res) => {
   try {
     const { accountId } = req.params;
-    const data = await linkedinApiRequest((req as any).sessionId, '/adSegments', {
-      q: 'account',
-      account: `urn:li:sponsoredAccount:${accountId}`,
+    const data = await linkedinApiRequest((req as any).sessionId, `/adAccounts/${accountId}/dmpSegments`, {
+      q: 'criteria',
     });
     res.json(data);
   } catch (err: any) {
@@ -361,27 +365,48 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
       errors.push(errorMsg);
     }
     
-    try {
-      creatives = await linkedinApiRequestPaginated(sessionId, '/creatives', {
-        q: 'search',
-        'search.account.values[0]': `urn:li:sponsoredAccount:${accountId}`,
-      });
-      if (activeOnly) {
-        creatives = creatives.filter((c: any) => c.intendedStatus === 'ACTIVE');
+    if (campaigns.length > 0) {
+      try {
+        const campaignUrns = campaigns.map((c: any) => {
+          const id = typeof c.id === 'number' ? c.id : c.id;
+          return `urn:li:sponsoredCampaign:${id}`;
+        });
+        
+        const batchSize = 10;
+        for (let i = 0; i < campaignUrns.length; i += batchSize) {
+          const batch = campaignUrns.slice(i, i + batchSize);
+          const campaignListEncoded = batch.map(u => encodeURIComponent(u)).join(',');
+          const rawQuery = `q=criteria&campaigns=List(${campaignListEncoded})&pageSize=100`;
+          
+          const response = await linkedinApiRequest(sessionId, `/adAccounts/${accountId}/creatives`, {}, rawQuery);
+          if (response.elements && Array.isArray(response.elements)) {
+            creatives.push(...response.elements);
+          }
+        }
+        
+        if (activeOnly) {
+          creatives = creatives.filter((c: any) => c.intendedStatus === 'ACTIVE');
+        }
+        console.log(`Creatives fetched: ${creatives.length} items`);
+        if (creatives.length > 0) {
+          console.log(`First creative sample: ${JSON.stringify(creatives[0], null, 2).substring(0, 500)}`);
+        }
+      } catch (err: any) {
+        const errorMsg = `Creatives error: ${JSON.stringify(err.response?.data || err.message)}`;
+        console.error(errorMsg);
+        errors.push(errorMsg);
       }
-      console.log(`Creatives fetched: ${creatives.length} items`);
-    } catch (err: any) {
-      const errorMsg = `Creatives error: ${JSON.stringify(err.response?.data || err.message)}`;
-      console.error(errorMsg);
-      errors.push(errorMsg);
     }
     
     try {
-      segments = await linkedinApiRequestPaginated(sessionId, '/adSegments', {
-        q: 'account',
+      segments = await linkedinApiRequestPaginated(sessionId, `/adAccounts/${accountId}/dmpSegments`, {
+        q: 'criteria',
         account: `urn:li:sponsoredAccount:${accountId}`,
       });
       console.log(`Segments fetched: ${segments.length} items`);
+      if (segments.length > 0) {
+        console.log(`First segment sample: ${JSON.stringify(segments[0], null, 2).substring(0, 500)}`);
+      }
     } catch (err: any) {
       const errorMsg = `Segments error: ${JSON.stringify(err.response?.data || err.message)}`;
       console.error(errorMsg);
