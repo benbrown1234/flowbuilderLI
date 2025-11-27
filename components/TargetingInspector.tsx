@@ -217,19 +217,72 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose }) 
                   borderColor="border-orange-100"
                 />
 
-                {node.targeting.exclusions && node.targeting.exclusions.length > 0 && (
-                  <div className="mt-6 pt-2">
+                {node.targeting.exclusions && (
+                  node.targeting.exclusions.geos.length > 0 ||
+                  node.targeting.exclusions.companyLists.length > 0 ||
+                  node.targeting.exclusions.audiences.length > 0 ||
+                  node.targeting.exclusions.industries.length > 0 ||
+                  node.targeting.exclusions.jobTitles.length > 0 ||
+                  node.targeting.exclusions.other.length > 0
+                ) && (
+                  <div className="mt-6 pt-4 border-t border-red-100">
+                    <h4 className="flex items-center text-xs font-bold text-red-600 mb-3 uppercase tracking-wide">
+                      <UserX className="w-3.5 h-3.5 mr-2" />
+                      Exclusions
+                    </h4>
+                    
                     <TargetingSection 
-                      title="Exclusions" 
-                      items={node.targeting.exclusions} 
+                      title="Excluded Locations" 
+                      items={node.targeting.exclusions.geos} 
+                      icon={MapPin}
+                      colorClass="bg-red-50 text-red-700 border-red-200"
+                      borderColor="border-red-100"
+                    />
+                    
+                    <TargetingSection 
+                      title="Excluded Company Lists" 
+                      items={node.targeting.exclusions.companyLists} 
+                      icon={Building2}
+                      colorClass="bg-red-50 text-red-700 border-red-200"
+                      borderColor="border-red-100"
+                    />
+                    
+                    <TargetingSection 
+                      title="Excluded Audiences" 
+                      items={node.targeting.exclusions.audiences} 
+                      icon={Users}
+                      colorClass="bg-red-50 text-red-700 border-red-200"
+                      borderColor="border-red-100"
+                    />
+                    
+                    <TargetingSection 
+                      title="Excluded Industries" 
+                      items={node.targeting.exclusions.industries} 
+                      icon={Briefcase}
+                      colorClass="bg-red-50 text-red-700 border-red-200"
+                      borderColor="border-red-100"
+                    />
+                    
+                    <TargetingSection 
+                      title="Excluded Job Titles" 
+                      items={node.targeting.exclusions.jobTitles} 
+                      icon={Target}
+                      colorClass="bg-red-50 text-red-700 border-red-200"
+                      borderColor="border-red-100"
+                    />
+                    
+                    <TargetingSection 
+                      title="Other Exclusions" 
+                      items={node.targeting.exclusions.other} 
                       icon={UserX}
                       colorClass="bg-red-50 text-red-700 border-red-200"
-                      borderColor="border-red-200 bg-red-50"
+                      borderColor="border-red-100"
                     />
                   </div>
                 )}
                 
-                {(node.targeting.geos.length === 0 && node.targeting.audiences.length === 0 && (node.targeting.companyLists?.length || 0) === 0 && node.targeting.exclusions.length === 0 && node.targeting.industries.length === 0 && node.targeting.jobTitles.length === 0) && (
+                {(node.targeting.geos.length === 0 && node.targeting.audiences.length === 0 && (node.targeting.companyLists?.length || 0) === 0 && node.targeting.industries.length === 0 && node.targeting.jobTitles.length === 0 && 
+                  node.targeting.exclusions.geos.length === 0 && node.targeting.exclusions.audiences.length === 0 && node.targeting.exclusions.companyLists.length === 0 && node.targeting.exclusions.industries.length === 0 && node.targeting.exclusions.jobTitles.length === 0 && node.targeting.exclusions.other.length === 0) && (
                   <div className="text-gray-400 italic text-sm text-center py-4 bg-gray-50 rounded border border-gray-100 border-dashed">
                     No specific targeting criteria found.
                   </div>

@@ -19,7 +19,14 @@ export interface TargetingSummary {
   companyLists: string[];
   industries: string[];
   jobTitles: string[];
-  exclusions: string[];
+  exclusions: {
+    geos: string[];
+    audiences: string[];
+    companyLists: string[];
+    industries: string[];
+    jobTitles: string[];
+    other: string[];
+  };
 }
 
 export interface BaseNode {

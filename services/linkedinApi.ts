@@ -60,10 +60,9 @@ export const getAccountSegments = async (accountId: string): Promise<any[]> => {
   return response.data.elements || [];
 };
 
-const FACET_MAPPING: Record<string, keyof TargetingSummary> = {
+const FACET_MAPPING: Record<string, string> = {
   'urn:li:adTargetingFacet:locations': 'geos',
   'urn:li:adTargetingFacet:geoLocations': 'geos',
-  'urn:li:adTargetingFacet:interfaceLocales': 'geos',
   'urn:li:adTargetingFacet:industries': 'industries',
   'urn:li:adTargetingFacet:jobTitles': 'jobTitles',
   'urn:li:adTargetingFacet:titles': 'jobTitles',
@@ -76,6 +75,11 @@ const FACET_MAPPING: Record<string, keyof TargetingSummary> = {
   'urn:li:adTargetingFacet:memberBehaviors': 'audiences',
   'urn:li:adTargetingFacet:yearsOfExperience': 'jobTitles',
 };
+
+const IGNORED_FACETS = [
+  'urn:li:adTargetingFacet:interfaceLocales',
+  'urn:li:adTargetingFacet:profileLocations',
+];
 
 let resolvedUrnCache: Record<string, string> = {};
 
@@ -164,93 +168,112 @@ const parseTargeting = (targetingCriteria: any, segmentNameMap: Record<string, s
     companyLists: [],
     industries: [],
     jobTitles: [],
-    exclusions: []
+    exclusions: {
+      geos: [],
+      audiences: [],
+      companyLists: [],
+      industries: [],
+      jobTitles: [],
+      other: []
+    }
   };
 
   if (!targetingCriteria) {
     return summary;
   }
 
-  const addToSummary = (facetKey: string, urns: string[]) => {
-    const targetKey = FACET_MAPPING[facetKey];
-    urns.forEach((urn: string) => {
-      const isAdSegment = urn.includes('urn:li:adSegment:');
-      const isGeoUrn = urn.includes('urn:li:geo:') || urn.includes('urn:li:country:') || urn.includes('urn:li:region:');
-      
-      let name: string;
-      if (isAdSegment && segmentNameMap[urn]) {
-        name = segmentNameMap[urn];
-      } else {
-        name = extractReadableName(urn);
-      }
-      
-      if (!name) return;
-      
-      if (isAdSegment) {
-        if (!summary.companyLists.includes(name)) {
-          summary.companyLists.push(name);
-        }
-      } else if (isGeoUrn) {
-        if (!summary.geos.includes(name)) {
-          summary.geos.push(name);
-        }
-      } else if (targetKey) {
-        if (!summary[targetKey].includes(name)) {
-          summary[targetKey].push(name);
-        }
-      } else if (facetKey.includes('adTargetingFacet')) {
-        if (!summary.audiences.includes(name)) {
-          summary.audiences.push(name);
-        }
-      }
-    });
+  const isLocaleUrn = (urn: string): boolean => {
+    return urn.includes('urn:li:locale:') || urn.includes('urn:li:language:');
   };
 
-  const processFacetObject = (obj: any) => {
+  const isGeoUrn = (urn: string): boolean => {
+    return urn.includes('urn:li:geo:') || urn.includes('urn:li:country:') || urn.includes('urn:li:region:');
+  };
+
+  const isAdSegment = (urn: string): boolean => {
+    return urn.includes('urn:li:adSegment:');
+  };
+
+  const classifyAndAdd = (facetKey: string, urn: string, isExclusion: boolean = false) => {
+    if (IGNORED_FACETS.includes(facetKey)) return;
+    if (isLocaleUrn(urn)) return;
+    
+    let name: string;
+    if (isAdSegment(urn) && segmentNameMap[urn]) {
+      name = segmentNameMap[urn];
+    } else {
+      name = extractReadableName(urn);
+    }
+    
+    if (!name) return;
+
+    const targetArray = isExclusion ? summary.exclusions : summary;
+    const targetKey = FACET_MAPPING[facetKey];
+    
+    if (isAdSegment(urn)) {
+      const arr = isExclusion ? summary.exclusions.companyLists : summary.companyLists;
+      if (!arr.includes(name)) arr.push(name);
+    } else if (isGeoUrn(urn) || targetKey === 'geos') {
+      const arr = isExclusion ? summary.exclusions.geos : summary.geos;
+      if (!arr.includes(name)) arr.push(name);
+    } else if (targetKey === 'industries') {
+      const arr = isExclusion ? summary.exclusions.industries : summary.industries;
+      if (!arr.includes(name)) arr.push(name);
+    } else if (targetKey === 'jobTitles') {
+      const arr = isExclusion ? summary.exclusions.jobTitles : summary.jobTitles;
+      if (!arr.includes(name)) arr.push(name);
+    } else if (targetKey === 'audiences') {
+      const arr = isExclusion ? summary.exclusions.audiences : summary.audiences;
+      if (!arr.includes(name)) arr.push(name);
+    } else if (facetKey.includes('adTargetingFacet')) {
+      const arr = isExclusion ? summary.exclusions.audiences : summary.audiences;
+      if (!arr.includes(name)) arr.push(name);
+    } else {
+      if (isExclusion) {
+        if (!summary.exclusions.other.includes(name)) summary.exclusions.other.push(name);
+      }
+    }
+  };
+
+  const processFacetObject = (obj: any, isExclusion: boolean = false) => {
     if (!obj || typeof obj !== 'object') return;
     
     Object.entries(obj).forEach(([key, value]: [string, any]) => {
       if (key === 'or' && typeof value === 'object' && !Array.isArray(value)) {
         Object.entries(value).forEach(([facetKey, urns]: [string, any]) => {
           if (Array.isArray(urns)) {
-            addToSummary(facetKey, urns);
+            urns.forEach((urn: string) => classifyAndAdd(facetKey, urn, isExclusion));
           }
         });
       } else if (key.includes('adTargetingFacet') && Array.isArray(value)) {
-        addToSummary(key, value);
+        value.forEach((urn: string) => classifyAndAdd(key, urn, isExclusion));
       }
     });
   };
 
   if (targetingCriteria.include?.and && Array.isArray(targetingCriteria.include.and)) {
     targetingCriteria.include.and.forEach((andItem: any) => {
-      processFacetObject(andItem);
+      processFacetObject(andItem, false);
     });
   }
 
-  if (targetingCriteria.exclude?.or && Array.isArray(targetingCriteria.exclude.or)) {
-    targetingCriteria.exclude.or.forEach((orItem: any) => {
-      Object.entries(orItem).forEach(([key, value]: [string, any]) => {
-        if (key === 'or' && typeof value === 'object') {
-          Object.values(value).forEach((urns: any) => {
-            if (Array.isArray(urns)) {
-              urns.forEach((urn: string) => {
-                const name = extractReadableName(urn);
-                if (name && !summary.exclusions.includes(name)) {
-                  summary.exclusions.push(name);
-                }
-              });
-            }
-          });
-        } else if (Array.isArray(value)) {
-          value.forEach((urn: string) => {
-            const name = extractReadableName(urn);
-            if (name && !summary.exclusions.includes(name)) {
-              summary.exclusions.push(name);
-            }
-          });
+  if (targetingCriteria.exclude?.or && typeof targetingCriteria.exclude.or === 'object') {
+    if (Array.isArray(targetingCriteria.exclude.or)) {
+      targetingCriteria.exclude.or.forEach((orItem: any) => {
+        processFacetObject(orItem, true);
+      });
+    } else {
+      Object.entries(targetingCriteria.exclude.or).forEach(([facetKey, urns]: [string, any]) => {
+        if (Array.isArray(urns)) {
+          urns.forEach((urn: string) => classifyAndAdd(facetKey, urn, true));
         }
       });
+    }
+  }
+
+  if (targetingCriteria.exclude?.and && Array.isArray(targetingCriteria.exclude.and)) {
+    targetingCriteria.exclude.and.forEach((andItem: any) => {
+      processFacetObject(andItem, true);
     });
   }
 
@@ -278,7 +301,7 @@ const aggregateTargeting = (campaigns: CampaignNode[]): TargetingSummary => {
     companyLists: Array.from(allCompanyLists),
     industries: Array.from(allIndustries),
     jobTitles: Array.from(allJobTitles),
-    exclusions: []
+    exclusions: { geos: [], audiences: [], companyLists: [], industries: [], jobTitles: [], other: [] }
   };
 };
 

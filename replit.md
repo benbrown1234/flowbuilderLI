@@ -43,6 +43,8 @@ Required secrets for LinkedIn API:
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-27: Added categorized exclusions - exclusions now display by type (Locations, Company Lists, Audiences, Industries, Job Titles) instead of flat list
+- 2025-11-27: Removed language/locale from Locations - interfaceLocales facet and locale URNs are now filtered out; only geographic locations show in Locations section
 - 2025-11-27: Added human-readable names for company lists in targeting sidebar - uses segment name map from adSegments API
 - 2025-11-27: Separated Company Lists from Audience Segments in Targeting Rules sidebar - company list IDs now show in dedicated "Company Lists" section with cyan styling
 - 2025-11-27: Fixed geo/location detection - locations like "United Kingdom" now correctly appear under Locations instead of Audience Segments

@@ -39,7 +39,14 @@ const parseTargeting = (criteria: MockRawCampaign['targetingCriteria']): Targeti
     companyLists: [],
     industries: [],
     jobTitles: [],
-    exclusions: []
+    exclusions: {
+      geos: [],
+      audiences: [],
+      companyLists: [],
+      industries: [],
+      jobTitles: [],
+      other: []
+    }
   };
 
   // Process INCLUDES (The "AND" logic)
@@ -47,21 +54,26 @@ const parseTargeting = (criteria: MockRawCampaign['targetingCriteria']): Targeti
     criteria.include.and.forEach((facetObj) => {
       Object.entries(facetObj).forEach(([facetKey, urns]) => {
         const targetKey = FACET_MAPPING[facetKey];
-        if (targetKey && Array.isArray(urns)) {
+        if (targetKey && Array.isArray(urns) && targetKey !== 'exclusions') {
           const names = resolveUrns(urns);
-          summary[targetKey].push(...names);
+          (summary[targetKey] as string[]).push(...names);
         }
       });
     });
   }
 
-  // Process EXCLUDES (The "OR" logic)
+  // Process EXCLUDES (The "OR" logic) - categorize by facet type
   if (criteria.exclude?.or && Array.isArray(criteria.exclude.or)) {
     criteria.exclude.or.forEach((facetObj) => {
-      Object.values(facetObj).forEach((urns) => {
+      Object.entries(facetObj).forEach(([facetKey, urns]) => {
         if (Array.isArray(urns)) {
           const names = resolveUrns(urns);
-          summary.exclusions.push(...names);
+          const targetKey = FACET_MAPPING[facetKey];
+          if (targetKey && targetKey !== 'exclusions' && summary.exclusions[targetKey as keyof typeof summary.exclusions]) {
+            (summary.exclusions[targetKey as keyof typeof summary.exclusions] as string[]).push(...names);
+          } else {
+            summary.exclusions.other.push(...names);
+          }
         }
       });
     });
@@ -94,7 +106,7 @@ const aggregateTargeting = (campaigns: CampaignNode[]): TargetingSummary => {
     companyLists: Array.from(allCompanyLists),
     industries: Array.from(allIndustries),
     jobTitles: Array.from(allJobTitles),
-    exclusions: []
+    exclusions: { geos: [], audiences: [], companyLists: [], industries: [], jobTitles: [], other: [] }
   };
 };
 
@@ -217,7 +229,12 @@ export const getAllTargetingConnections = (data: AccountStructure): FlowData => 
       camp.targetingResolved.audiences.forEach(t => register(t, 'AUDIENCE'));
       camp.targetingResolved.industries.forEach(t => register(t, 'INDUSTRY'));
       camp.targetingResolved.jobTitles.forEach(t => register(t, 'JOB'));
-      camp.targetingResolved.exclusions.forEach(t => register(t, 'EXCLUSION'));
+      camp.targetingResolved.exclusions.geos.forEach(t => register(t, 'EXCLUSION'));
+      camp.targetingResolved.exclusions.audiences.forEach(t => register(t, 'EXCLUSION'));
+      camp.targetingResolved.exclusions.companyLists.forEach(t => register(t, 'EXCLUSION'));
+      camp.targetingResolved.exclusions.industries.forEach(t => register(t, 'EXCLUSION'));
+      camp.targetingResolved.exclusions.jobTitles.forEach(t => register(t, 'EXCLUSION'));
+      camp.targetingResolved.exclusions.other.forEach(t => register(t, 'EXCLUSION'));
     });
   });
 
