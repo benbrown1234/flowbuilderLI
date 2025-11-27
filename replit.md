@@ -43,6 +43,7 @@ Required secrets for LinkedIn API:
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-27: Added inferred "Source Campaign" connections (orange dashed lines) from cold campaigns to remarketing audiences they likely generated. Video campaigns connect to Video Viewer audiences, engagement campaigns connect to Ad Engagement audiences. These are inferred based on campaign objectives and names.
 - 2025-11-27: Added click-to-filter behavior on Remarketing Flow - clicking any item filters the view to show only connected items across all three columns. Hovering highlights connections while clicking removes unrelated items entirely. Headers show filtered/total counts (e.g., "3/10") when selection is active.
 - 2025-11-27: Fixed Remarketing Flow segment extraction to handle LinkedIn API's `dynamicSegments` facet (in addition to `audienceMatchingSegments`). Added fallback for legacy campaigns without raw targeting data. Filtered native targeting values (company sizes, etc.) from appearing in the middle column - only actual remarketing segments now appear.
 - 2025-11-27: Redesigned Remarketing Flow as 3-column marketing funnel: Cold Campaigns (left) → Remarketing Audiences (middle) → Remarketing Campaigns (right). Cold campaigns use company lists/native targeting, remarketing campaigns target audience segments. Blue lines show which cold campaigns build audiences (via outputAudiences), green lines show which audiences are targeted by remarketing campaigns. Hover/click highlighting shows connections across all columns.

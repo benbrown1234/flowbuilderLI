@@ -31,7 +31,7 @@ interface ConnectionLine {
   x2: number;
   y2: number;
   key: string;
-  type: 'output' | 'targeting';
+  type: 'output' | 'targeting' | 'source';
   sourceId: string;
   targetId: string;
 }
@@ -44,11 +44,12 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const nodeRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
-  const { coldCampaigns, remarketingCampaigns, audiences, outputLinks, targetingLinks, allColdCampaigns, allRemarketingCampaigns, allAudiences } = React.useMemo(() => {
+  const { coldCampaigns, remarketingCampaigns, audiences, outputLinks, targetingLinks, sourceLinks, allColdCampaigns, allRemarketingCampaigns, allAudiences } = React.useMemo(() => {
     const allCampaigns: CampaignInfo[] = [];
     const audienceMap = new Map<string, AudienceInfo>();
     const outputLinks: { campaignId: string; audienceId: string }[] = [];
     const targetingLinks: { audienceId: string; campaignId: string }[] = [];
+    const sourceLinks: { campaignId: string; audienceId: string }[] = [];
 
     const segmentIdToAudId = new Map<string, string>();
     const knownSegmentIds = new Set<string>();
@@ -223,9 +224,50 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
     const allColdCampaigns = allCampaigns.filter(c => c.targetedAudiences.length === 0);
     const allRemarketingCampaigns = allCampaigns.filter(c => c.targetedAudiences.length > 0);
 
+    // Infer source connections: which cold campaigns could generate which audiences
+    const isVideoCampaign = (campaign: CampaignInfo): boolean => {
+      const objective = campaign.campaign.objective?.toLowerCase() || '';
+      const name = campaign.name.toLowerCase();
+      return objective.includes('video') || 
+             name.includes('video') || 
+             name.includes('tla') || // Thought Leader Ads often video
+             objective.includes('awareness'); // Awareness campaigns often run video
+    };
+
+    const isEngagementCampaign = (campaign: CampaignInfo): boolean => {
+      const objective = campaign.campaign.objective?.toLowerCase() || '';
+      return objective.includes('engagement') || objective.includes('consideration');
+    };
+
+    // For each cold campaign, check which audiences it might have generated
+    allColdCampaigns.forEach(coldCampaign => {
+      const campaignIsVideo = isVideoCampaign(coldCampaign);
+      const campaignIsEngagement = isEngagementCampaign(coldCampaign);
+
+      audienceMap.forEach((audience, audId) => {
+        // Skip if already linked via outputAudiences
+        const alreadyLinked = outputLinks.some(
+          l => l.campaignId === coldCampaign.id && l.audienceId === audId
+        );
+        if (alreadyLinked) return;
+
+        // Video campaigns → Video viewer audiences
+        if (campaignIsVideo && audience.type === 'VIDEO') {
+          sourceLinks.push({ campaignId: coldCampaign.id, audienceId: audId });
+          audience.feedingCampaigns.push(coldCampaign.id);
+        }
+        // Any cold campaign with ads → Ad engagement audiences
+        else if (campaignIsEngagement && audience.type === 'ENGAGED') {
+          sourceLinks.push({ campaignId: coldCampaign.id, audienceId: audId });
+          audience.feedingCampaigns.push(coldCampaign.id);
+        }
+      });
+    });
+
     const usedAudienceIds = new Set<string>();
     outputLinks.forEach(l => usedAudienceIds.add(l.audienceId));
     targetingLinks.forEach(l => usedAudienceIds.add(l.audienceId));
+    sourceLinks.forEach(l => usedAudienceIds.add(l.audienceId));
 
     const allAudiences = Array.from(audienceMap.values()).filter(a => usedAudienceIds.has(a.id));
 
@@ -235,6 +277,7 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
       audiences: allAudiences, 
       outputLinks, 
       targetingLinks,
+      sourceLinks,
       allColdCampaigns,
       allRemarketingCampaigns,
       allAudiences
@@ -248,7 +291,8 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
         filteredAudiences: audiences, 
         filteredRemarketing: remarketingCampaigns,
         filteredOutputLinks: outputLinks,
-        filteredTargetingLinks: targetingLinks
+        filteredTargetingLinks: targetingLinks,
+        filteredSourceLinks: sourceLinks
       };
     }
 
@@ -261,11 +305,14 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
     let filteredRemarketing = allRemarketingCampaigns;
     let filteredOutputLinks = outputLinks;
     let filteredTargetingLinks = targetingLinks;
+    let filteredSourceLinks = sourceLinks;
 
     if (isColdCampaign) {
-      const connectedAudienceIds = new Set(
-        outputLinks.filter(l => l.campaignId === selectedNode).map(l => l.audienceId)
-      );
+      // Include both output and source links
+      const connectedAudienceIds = new Set([
+        ...outputLinks.filter(l => l.campaignId === selectedNode).map(l => l.audienceId),
+        ...sourceLinks.filter(l => l.campaignId === selectedNode).map(l => l.audienceId)
+      ]);
       filteredCold = allColdCampaigns.filter(c => c.id === selectedNode);
       filteredAudiences = allAudiences.filter(a => connectedAudienceIds.has(a.id));
       const connectedRemarketingIds = new Set(
@@ -274,10 +321,13 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
       filteredRemarketing = allRemarketingCampaigns.filter(c => connectedRemarketingIds.has(c.id));
       filteredOutputLinks = outputLinks.filter(l => l.campaignId === selectedNode);
       filteredTargetingLinks = targetingLinks.filter(l => connectedAudienceIds.has(l.audienceId));
+      filteredSourceLinks = sourceLinks.filter(l => l.campaignId === selectedNode);
     } else if (isAudience) {
-      const connectedColdIds = new Set(
-        outputLinks.filter(l => l.audienceId === selectedNode).map(l => l.campaignId)
-      );
+      // Include both output and source links pointing to this audience
+      const connectedColdIds = new Set([
+        ...outputLinks.filter(l => l.audienceId === selectedNode).map(l => l.campaignId),
+        ...sourceLinks.filter(l => l.audienceId === selectedNode).map(l => l.campaignId)
+      ]);
       const connectedRemarketingIds = new Set(
         targetingLinks.filter(l => l.audienceId === selectedNode).map(l => l.campaignId)
       );
@@ -286,24 +336,27 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
       filteredRemarketing = allRemarketingCampaigns.filter(c => connectedRemarketingIds.has(c.id));
       filteredOutputLinks = outputLinks.filter(l => l.audienceId === selectedNode);
       filteredTargetingLinks = targetingLinks.filter(l => l.audienceId === selectedNode);
+      filteredSourceLinks = sourceLinks.filter(l => l.audienceId === selectedNode);
     } else if (isRemarketingCampaign) {
       const connectedAudienceIds = new Set(
         targetingLinks.filter(l => l.campaignId === selectedNode).map(l => l.audienceId)
       );
-      const connectedColdIds = new Set(
-        outputLinks.filter(l => connectedAudienceIds.has(l.audienceId)).map(l => l.campaignId)
-      );
+      const connectedColdIds = new Set([
+        ...outputLinks.filter(l => connectedAudienceIds.has(l.audienceId)).map(l => l.campaignId),
+        ...sourceLinks.filter(l => connectedAudienceIds.has(l.audienceId)).map(l => l.campaignId)
+      ]);
       filteredCold = allColdCampaigns.filter(c => connectedColdIds.has(c.id));
       filteredAudiences = allAudiences.filter(a => connectedAudienceIds.has(a.id));
       filteredRemarketing = allRemarketingCampaigns.filter(c => c.id === selectedNode);
       filteredOutputLinks = outputLinks.filter(l => connectedAudienceIds.has(l.audienceId));
       filteredTargetingLinks = targetingLinks.filter(l => l.campaignId === selectedNode);
+      filteredSourceLinks = sourceLinks.filter(l => connectedAudienceIds.has(l.audienceId));
     }
 
-    return { filteredCold, filteredAudiences, filteredRemarketing, filteredOutputLinks, filteredTargetingLinks };
+    return { filteredCold, filteredAudiences, filteredRemarketing, filteredOutputLinks, filteredTargetingLinks, filteredSourceLinks };
   };
 
-  const { filteredCold, filteredAudiences, filteredRemarketing, filteredOutputLinks, filteredTargetingLinks } = getFilteredData();
+  const { filteredCold, filteredAudiences, filteredRemarketing, filteredOutputLinks, filteredTargetingLinks, filteredSourceLinks } = getFilteredData();
 
   const calculateLines = () => {
     if (!containerRef.current) return;
@@ -352,6 +405,28 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
       }
     });
 
+    // Source links (inferred connections from cold campaigns to audiences)
+    filteredSourceLinks.forEach(link => {
+      const sourceEl = nodeRefs.current.get(`cold-${link.campaignId}`);
+      const targetEl = nodeRefs.current.get(`aud-${link.audienceId}`);
+
+      if (sourceEl && targetEl) {
+        const sRect = sourceEl.getBoundingClientRect();
+        const tRect = targetEl.getBoundingClientRect();
+
+        newLines.push({
+          x1: sRect.right - containerRect.left,
+          y1: sRect.top + sRect.height / 2 - containerRect.top,
+          x2: tRect.left - containerRect.left,
+          y2: tRect.top + tRect.height / 2 - containerRect.top,
+          key: `src-${link.campaignId}-${link.audienceId}`,
+          type: 'source',
+          sourceId: link.campaignId,
+          targetId: link.audienceId
+        });
+      }
+    });
+
     setLines(newLines);
   };
 
@@ -362,7 +437,7 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
   useLayoutEffect(() => {
     const timer = setTimeout(calculateLines, 150);
     return () => clearTimeout(timer);
-  }, [filteredCold, filteredRemarketing, filteredAudiences, filteredOutputLinks, filteredTargetingLinks, selectedNode]);
+  }, [filteredCold, filteredRemarketing, filteredAudiences, filteredOutputLinks, filteredTargetingLinks, filteredSourceLinks, selectedNode]);
 
   useEffect(() => {
     window.addEventListener('resize', calculateLines);
@@ -499,12 +574,16 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
           <marker id="arrowhead-green" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
             <polygon points="0 0, 8 3, 0 6" fill="#22c55e" />
           </marker>
+          <marker id="arrowhead-amber" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#f59e0b" />
+          </marker>
         </defs>
         {lines.map((line) => {
           const highlighted = isLineHighlighted(line);
           const baseOpacity = hoveredNode ? (highlighted ? 0.9 : 0.15) : (selectedNode ? 0.8 : 0.5);
           const strokeWidth = highlighted ? 2.5 : 1.5;
-          const color = line.type === 'output' ? '#3b82f6' : '#22c55e';
+          const color = line.type === 'output' ? '#3b82f6' : line.type === 'source' ? '#f59e0b' : '#22c55e';
+          const markerColor = line.type === 'output' ? 'blue' : line.type === 'source' ? 'amber' : 'green';
           const midX = (line.x1 + line.x2) / 2;
 
           return (
@@ -515,7 +594,8 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
               stroke={color}
               strokeWidth={strokeWidth}
               strokeOpacity={baseOpacity}
-              markerEnd={`url(#arrowhead-${line.type === 'output' ? 'blue' : 'green'})`}
+              strokeDasharray={line.type === 'source' ? '5,3' : undefined}
+              markerEnd={`url(#arrowhead-${markerColor})`}
               style={{ transition: 'all 0.2s ease' }}
             />
           );
@@ -699,6 +779,10 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
       </div>
 
       <div className="absolute bottom-4 left-4 flex items-center gap-4 text-[10px] text-gray-400 bg-white/80 px-3 py-2 rounded-lg border">
+        <div className="flex items-center gap-1">
+          <div className="w-8 h-0.5 bg-amber-500 rounded" style={{ backgroundImage: 'repeating-linear-gradient(90deg, #f59e0b 0, #f59e0b 5px, transparent 5px, transparent 8px)' }}></div>
+          <span>Source Campaign</span>
+        </div>
         <div className="flex items-center gap-1">
           <div className="w-8 h-0.5 bg-blue-500 rounded"></div>
           <span>Builds Audience</span>
