@@ -750,6 +750,13 @@ const parseBudget = (budget: any): number => {
   if (budget.amount) {
     const rawAmount = typeof budget.amount === 'string' ? parseFloat(budget.amount) : budget.amount;
     if (isNaN(rawAmount)) return 0;
+    // LinkedIn API returns amounts in minor currency units (cents/pence)
+    // However, some versions may return major units directly
+    // If the raw amount is < 100, assume it's already in major units
+    // (unlikely someone has a daily budget of less than £1/€1/$1)
+    if (rawAmount < 100) {
+      return rawAmount;
+    }
     return rawAmount / 100;
   }
   return 0;
