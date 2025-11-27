@@ -450,8 +450,8 @@ export const getTreeGraph = (account: AccountStructure) => {
     const hasChildren = children.length > 0;
 
     if (!hasChildren) {
-      // Determine slot height: Creatives are packed tighter, Groups/Campaigns get more room
-      const slotHeight = type === NodeType.CREATIVE ? AD_HEIGHT : 120;
+      // Determine slot height: Creatives are packed tighter, Groups/Campaigns get more room for text wrapping
+      const slotHeight = type === NodeType.CREATIVE ? AD_HEIGHT : 140;
       
       const y = currentY + (slotHeight / 2);
       currentY += slotHeight;
@@ -511,9 +511,9 @@ export const getTreeGraph = (account: AccountStructure) => {
       currentY = startY + (numRows * AD_HEIGHT) + ((numRows - 1) * AD_GAP) + AD_GAP;
     } else {
       children.forEach((child: any, index: number) => {
-         // If we are processing sibling Ad Groups (Campaigns), add minimal visual separation
+         // If we are processing sibling Ad Groups (Campaigns), add visual separation
          if (childType === NodeType.CAMPAIGN && index > 0) {
-            currentY += 8; // Minimal padding between Campaigns
+            currentY += 20; // Spacing between Campaigns
          }
 
          const cy = traverse(child, childType, level + 1);

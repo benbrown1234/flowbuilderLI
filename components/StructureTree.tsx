@@ -177,7 +177,7 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
                 ${node.type !== NodeType.ACCOUNT ? 'cursor-pointer hover:scale-105' : 'cursor-default'}
                 ${node.type === NodeType.ACCOUNT ? 'bg-blue-600 border-blue-700 text-white min-h-[60px]' : ''}
                 ${node.type === NodeType.GROUP ? 'bg-white border-gray-300 min-h-[50px]' : ''}
-                ${node.type === NodeType.CAMPAIGN ? 'bg-white border-orange-200 border-l-4 border-l-orange-500 min-h-[70px]' : ''}
+                ${node.type === NodeType.CAMPAIGN ? 'bg-white border-orange-200 border-l-4 border-l-orange-500' : ''}
                 ${node.type === NodeType.CREATIVE ? 'bg-white border-green-200 border-l-2 border-l-green-500 min-h-[42px]' : ''}
               `}
               style={{ 
@@ -206,8 +206,8 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
               </div>
               
               <div 
-                className={`font-semibold leading-tight truncate
-                  ${node.type === NodeType.CREATIVE ? 'text-xs' : 'text-sm'}
+                className={`font-semibold leading-tight
+                  ${node.type === NodeType.CREATIVE ? 'text-xs truncate' : 'text-sm'}
                   ${node.type === NodeType.ACCOUNT ? 'text-white' : 'text-gray-900'}
                 `} 
                 title={node.name}
