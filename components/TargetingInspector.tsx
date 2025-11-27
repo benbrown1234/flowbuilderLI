@@ -139,16 +139,20 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
         {!loading && previewHtml && (
           <div className="relative">
             <div 
-              className={`w-full overflow-hidden transition-all duration-300 ${isPreviewExpanded ? 'max-h-none' : 'max-h-64'}`}
-              style={{ transform: isPreviewExpanded ? 'none' : 'scale(0.95)', transformOrigin: 'top center' }}
+              className={`w-full overflow-hidden transition-all duration-300 ${isPreviewExpanded ? 'max-h-none' : 'max-h-72'}`}
             >
               <div 
-                className="w-full" 
+                className="w-full origin-top-left"
+                style={{ 
+                  transform: isPreviewExpanded ? 'scale(1)' : 'scale(0.55)',
+                  transformOrigin: 'top left',
+                  width: isPreviewExpanded ? '100%' : '182%'
+                }}
                 dangerouslySetInnerHTML={{ __html: previewHtml }} 
               />
             </div>
             {!isPreviewExpanded && (
-              <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-white to-transparent pointer-events-none" />
+              <div className="absolute bottom-8 left-0 right-0 h-8 bg-gradient-to-t from-white to-transparent pointer-events-none" />
             )}
             <button
               onClick={() => setIsPreviewExpanded(!isPreviewExpanded)}
