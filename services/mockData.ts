@@ -11,19 +11,13 @@ export const MOCK_ACCOUNTS_LIST = [
 export const MOCK_DATA_STORE: Record<string, {
   groups: any[],
   campaigns: MockRawCampaign[],
-  creatives: any[],
-  segments?: any[]
+  creatives: any[]
 }> = {
   // --- ACME CORP (Existing) ---
   'act_55123412': {
     groups: [
       { id: 'urn:li:sponsoredCampaignGroup:1001', name: 'Q3 Awareness Layer', status: 'ACTIVE' },
       { id: 'urn:li:sponsoredCampaignGroup:1002', name: 'Q3 Conversion - Bottom Funnel', status: 'ACTIVE' },
-    ],
-    segments: [
-      { id: '5001', name: 'Website Visitors (30D)', type: 'WEBSITE', status: 'READY', audienceCount: 25000 },
-      { id: '9001', name: 'Competitor List', type: 'COMPANY', status: 'READY', audienceCount: 1500 },
-      { id: '9999', name: 'Converted Leads', type: 'CONTACT', status: 'READY', audienceCount: 3200 },
     ],
     campaigns: [
       {
@@ -100,14 +94,6 @@ export const MOCK_DATA_STORE: Record<string, {
       { id: 'grp_ft_01', name: 'FT SaaS / Software - Marketing Senior', status: 'ACTIVE' },
       { id: 'grp_wl_01', name: 'WL SaaS / Software - Marketing Senior', status: 'ACTIVE' },
     ],
-    segments: [
-      { id: '5001', name: 'Website Visitors (30D)', type: 'WEBSITE', status: 'READY', audienceCount: 18500 },
-      { id: '5002', name: 'Video Viewers (50%+)', type: 'VIDEO', status: 'READY', audienceCount: 8200 },
-      { id: '6001', name: 'ABM - Target Accounts', type: 'COMPANY', status: 'READY', audienceCount: 2100 },
-      { id: '6002', name: 'Contact List - Webinar Signups', type: 'CONTACT', status: 'READY', audienceCount: 4500 },
-      { id: '7001', name: 'Lookalike - High-Value Customers', type: 'LOOKALIKE', status: 'READY', audienceCount: 120000 },
-      { id: '9999', name: 'Converted Leads', type: 'CONTACT', status: 'READY', audienceCount: 2800 },
-    ],
     campaigns: [
       // GROUP 1 CAMPAIGNS
       {
@@ -137,13 +123,13 @@ export const MOCK_DATA_STORE: Record<string, {
         status: 'ACTIVE',
         objective: 'Video Views',
         biddingStrategy: 'Maximum Delivery',
-        outputAudiences: ['urn:li:adSegment:5002'],
+        outputAudiences: [],
         targetingCriteria: {
           include: {
             and: [
                { 'urn:li:adTargetingFacet:locations': ['urn:li:geo:101'] }, // UK
                { 'urn:li:adTargetingFacet:industries': ['urn:li:industry:4'] },
-               { 'urn:li:adTargetingFacet:audienceMatchingSegments': ['urn:li:adSegment:6001'] } // ABM Target Accounts
+               { 'urn:li:adTargetingFacet:jobTitles': ['urn:li:jobTitle:MKT_DIR'] }
             ]
           }
         }
@@ -198,7 +184,7 @@ export const MOCK_DATA_STORE: Record<string, {
           include: {
             and: [
                { 'urn:li:adTargetingFacet:industries': ['urn:li:industry:4'] },
-               { 'urn:li:adTargetingFacet:audienceMatchingSegments': ['urn:li:adSegment:5002', 'urn:li:adSegment:6002'] } // Video Viewers + Webinar Signups
+               { 'urn:li:adTargetingFacet:jobTitles': ['urn:li:jobTitle:MKT_DIR', 'urn:li:jobTitle:FNDR'] }
             ]
           }
         }
@@ -215,8 +201,7 @@ export const MOCK_DATA_STORE: Record<string, {
         targetingCriteria: {
           include: {
             and: [
-               { 'urn:li:adTargetingFacet:industries': ['urn:li:industry:4'] },
-               { 'urn:li:adTargetingFacet:audienceMatchingSegments': ['urn:li:adSegment:7001'] } // Lookalike - High-Value Customers
+               { 'urn:li:adTargetingFacet:industries': ['urn:li:industry:4'] }
             ]
           }
         }
@@ -357,10 +342,6 @@ export const MOCK_URN_RESOLVER: Record<string, string> = {
   'urn:li:jobTitle:FNDR': 'Founder',
 
   'urn:li:adSegment:5001': 'Website Visitors (30D)',
-  'urn:li:adSegment:5002': 'Video Viewers (50%+)',
-  'urn:li:adSegment:6001': 'ABM - Target Accounts',
-  'urn:li:adSegment:6002': 'Contact List - Webinar Signups',
-  'urn:li:adSegment:7001': 'Lookalike - High-Value Customers',
   'urn:li:adSegment:9001': 'Competitor List',
   'urn:li:adSegment:7777': 'ABM - Tier 1 Accounts',
   'urn:li:adSegment:9999': 'Converted Leads',

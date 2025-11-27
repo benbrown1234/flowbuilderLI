@@ -177,20 +177,11 @@ export const buildAccountHierarchy = (accountId?: string): AccountStructure | nu
     };
   });
 
-  const segments = rawData.segments?.map((seg: any) => ({
-    id: seg.id,
-    name: seg.name,
-    type: seg.type as 'WEBSITE' | 'VIDEO' | 'COMPANY' | 'CONTACT' | 'LOOKALIKE' | 'OTHER',
-    status: seg.status,
-    audienceCount: seg.audienceCount
-  }));
-
   return {
     id: accountInfo.id,
     name: accountInfo.name,
     currency: 'USD',
-    groups,
-    segments
+    groups
   };
 };
 
