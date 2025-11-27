@@ -80,7 +80,7 @@ export interface GroupNode extends BaseNode {
 export interface SegmentNode {
   id: string;
   name: string;
-  type: 'WEBSITE' | 'VIDEO' | 'COMPANY' | 'CONTACT' | 'LOOKALIKE' | 'OTHER';
+  type: 'WEBSITE' | 'VIDEO' | 'COMPANY' | 'CONTACT' | 'LOOKALIKE' | 'ENGAGED' | 'OTHER';
   status: string;
   audienceCount?: number;
 }

@@ -7,6 +7,26 @@ export const MOCK_ACCOUNTS_LIST = [
   { id: 'act_99999999', name: "Enterprise Scale Demo (Clustering)" },
 ];
 
+// Mock Segments for demo data
+export const MOCK_SEGMENTS: Record<string, any[]> = {
+  '502962649': [
+    { id: 'urn:li:adSegment:5001', name: 'Website Visitors (30D)', type: 'WEBSITE', status: 'READY', audienceCount: 12500 },
+    { id: 'urn:li:adSegment:9999', name: 'Converted Leads', type: 'CONTACT', status: 'ACTIVE', audienceCount: 850 },
+    { id: 'urn:li:adSegment:6001', name: 'Video Viewers 50%+', type: 'VIDEO', status: 'READY', audienceCount: 3200 },
+    { id: 'urn:li:adSegment:6002', name: 'Ad Engagers (Last 90D)', type: 'ENGAGED', status: 'READY', audienceCount: 4800 },
+  ],
+  'act_55123412': [
+    { id: 'urn:li:adSegment:5001', name: 'Website Visitors (30D)', type: 'WEBSITE', status: 'READY', audienceCount: 45000 },
+    { id: 'urn:li:adSegment:9001', name: 'Competitor List', type: 'COMPANY', status: 'ACTIVE', audienceCount: 2500 },
+    { id: 'urn:li:adSegment:9999', name: 'Converted Leads', type: 'CONTACT', status: 'ACTIVE', audienceCount: 1800 },
+    { id: 'urn:li:adSegment:7777', name: 'ABM - Tier 1 Accounts', type: 'COMPANY', status: 'ACTIVE', audienceCount: 150 },
+  ],
+  'act_99999999': [
+    { id: 'urn:li:adSegment:5001', name: 'Career Page Visitors', type: 'WEBSITE', status: 'READY', audienceCount: 8500 },
+    { id: 'urn:li:adSegment:6001', name: 'Video Viewers 75%+', type: 'VIDEO', status: 'READY', audienceCount: 2100 },
+  ],
+};
+
 // Data Store mapped by Account ID
 export const MOCK_DATA_STORE: Record<string, {
   groups: any[],

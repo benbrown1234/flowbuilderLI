@@ -43,6 +43,9 @@ Required secrets for LinkedIn API:
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-27: Redesigned Remarketing Flow as 3-column marketing funnel: Cold Campaigns (left) → Remarketing Audiences (middle) → Remarketing Campaigns (right). Cold campaigns use company lists/native targeting, remarketing campaigns target audience segments. Blue lines show which cold campaigns build audiences (via outputAudiences), green lines show which audiences are targeted by remarketing campaigns. Hover/click highlighting shows connections across all columns.
+- 2025-11-27: Added mock segments (MOCK_SEGMENTS) to mockData.ts for demo mode - includes Website Visitors, Video Viewers, Ad Engagers, Converted Leads segment types
+- 2025-11-27: Added 'ENGAGED' segment type to SegmentNode type for ad engagement audiences
 - 2025-11-27: Dynamic layout with height estimation - campaign/group names wrap to show full text, proper spacing between campaigns (25px) and groups (50px), no overlapping, ads in 2-column grid to the right, flow lines connect to left-column ads only
 - 2025-11-27: Added full-screen modal popup for ad preview - "View Full Preview" opens centered modal with full-size ad preview
 - 2025-11-27: Added "Thought Leader Ad" label - automatically shown when ad name is "Creative" + number format

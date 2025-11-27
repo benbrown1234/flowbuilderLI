@@ -9,7 +9,7 @@ import {
   MockRawCampaign,
   AccountSummary
 } from '../types';
-import { MOCK_ACCOUNTS_LIST, MOCK_DATA_STORE, MOCK_URN_RESOLVER } from './mockData';
+import { MOCK_ACCOUNTS_LIST, MOCK_DATA_STORE, MOCK_URN_RESOLVER, MOCK_SEGMENTS } from './mockData';
 
 // --- Step 2: Parse the Facets (The Switch Statement) ---
 
@@ -177,11 +177,21 @@ export const buildAccountHierarchy = (accountId?: string): AccountStructure | nu
     };
   });
 
+  const rawSegments = MOCK_SEGMENTS[selectedId] || [];
+  const processedSegments = rawSegments.map((seg: any) => ({
+    id: seg.id,
+    name: seg.name,
+    type: seg.type || 'OTHER',
+    status: seg.status || 'ACTIVE',
+    audienceCount: seg.audienceCount
+  }));
+
   return {
     id: accountInfo.id,
     name: accountInfo.name,
     currency: 'USD',
-    groups
+    groups,
+    segments: processedSegments
   };
 };
 
