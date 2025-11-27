@@ -744,63 +744,6 @@ const extractIdFromUrn = (urnOrId: any): string => {
   return String(urnOrId);
 };
 
-const detectCreativeFormat = (creative: any, campaignObjective?: string): string => {
-  const content = creative.content || {};
-  
-  if (content.textAd) return 'TEXT_AD';
-  if (content.spotlight) return 'SPOTLIGHT';
-  if (content.followCompanyAd) return 'FOLLOWER';
-  if (content.messageAd || content.conversationAd) return 'MESSAGE';
-  if (content.videoAd) return 'VIDEO';
-  if (content.carouselAd || content.carousel) return 'CAROUSEL';
-  if (content.documentAd || content.document) return 'DOCUMENT';
-  if (content.eventAd) return 'EVENT';
-  
-  if (content.reference) {
-    const ref = content.reference;
-    if (ref.includes(':video:')) return 'VIDEO';
-    if (ref.includes(':image:')) return 'IMAGE';
-    if (ref.includes(':document:')) return 'DOCUMENT';
-    if (ref.includes(':article:')) return 'ARTICLE';
-  }
-  
-  const creativeType = creative.type?.toUpperCase() || '';
-  if (creativeType.includes('VIDEO')) return 'VIDEO';
-  if (creativeType.includes('CAROUSEL')) return 'CAROUSEL';
-  if (creativeType.includes('MESSAGE') || creativeType.includes('INMAIL') || creativeType.includes('CONVERSATION')) return 'MESSAGE';
-  if (creativeType.includes('TEXT')) return 'TEXT_AD';
-  if (creativeType.includes('SPOTLIGHT')) return 'SPOTLIGHT';
-  if (creativeType.includes('FOLLOWER') || creativeType.includes('FOLLOW')) return 'FOLLOWER';
-  if (creativeType.includes('DOCUMENT')) return 'DOCUMENT';
-  if (creativeType.includes('EVENT')) return 'EVENT';
-  if (creativeType.includes('JOB')) return 'JOBS';
-  
-  const name = (creative.name || '').toLowerCase();
-  if (name.includes('video')) return 'VIDEO';
-  if (name.includes('carousel')) return 'CAROUSEL';
-  if (name.includes('message') || name.includes('inmail')) return 'MESSAGE';
-  if (name.includes('document')) return 'DOCUMENT';
-  if (name.includes('conversation')) return 'CONVERSATION';
-  
-  const variables = creative.variables?.data || {};
-  if (variables['com.linkedin.ads.SponsoredVideoCreativeVariables']) return 'VIDEO';
-  if (variables['com.linkedin.ads.CarouselAdCreativeVariables']) return 'CAROUSEL';
-  if (variables['com.linkedin.ads.SpotlightCreativeVariables']) return 'SPOTLIGHT';
-  if (variables['com.linkedin.ads.TextAdCreativeVariables']) return 'TEXT_AD';
-  if (variables['com.linkedin.ads.JobsCreativeVariables']) return 'JOBS';
-  if (variables['com.linkedin.ads.MessageAdCreativeVariables']) return 'MESSAGE';
-  if (variables['com.linkedin.ads.DocumentAdCreativeVariables']) return 'DOCUMENT';
-  if (variables['com.linkedin.ads.EventAdCreativeVariables']) return 'EVENT';
-  
-  if (campaignObjective) {
-    const obj = campaignObjective.toUpperCase();
-    if (obj.includes('VIDEO_VIEW') || obj === 'VIDEO_VIEWS') return 'VIDEO';
-    if (obj.includes('MESSAGE') || obj === 'MESSAGING') return 'MESSAGE';
-  }
-  
-  return 'IMAGE';
-};
-
 const parseBudget = (budget: any): number => {
   if (!budget) return 0;
   if (typeof budget === 'number') return budget;
@@ -942,8 +885,6 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
         ? `urn:li:sponsoredCampaign:${raw.id}` 
         : raw.id;
       
-      const campaignObjective = raw.objectiveType || '';
-      
       const matchingCreatives: CreativeNode[] = creatives
         .filter((c: any) => {
           const creativeCampaignUrn = c.campaign;
@@ -954,7 +895,7 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
           id: extractIdFromUrn(c.id),
           name: c.name || `Creative ${extractIdFromUrn(c.id)}`,
           type: NodeType.CREATIVE,
-          format: detectCreativeFormat(c, campaignObjective),
+          format: c.type || 'SPONSORED_UPDATE',
         }));
 
       const dailyBudget = parseBudget(raw.dailyBudget);
