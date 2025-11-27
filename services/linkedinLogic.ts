@@ -501,16 +501,19 @@ export const getTreeGraph = (account: AccountStructure) => {
         });
         
         childYs.push(y);
-        links.push({ source: node.id, target: child.id });
+        // Only draw link to left-column ads (col 0) for cleaner flow
+        if (col === 0) {
+          links.push({ source: node.id, target: child.id });
+        }
       });
       
       // Tighten vertical spacing calculation
       currentY = startY + (numRows * AD_HEIGHT) + ((numRows - 1) * AD_GAP) + AD_GAP;
     } else {
       children.forEach((child: any, index: number) => {
-         // If we are processing sibling Ad Groups (Campaigns), add some visual separation
+         // If we are processing sibling Ad Groups (Campaigns), add minimal visual separation
          if (childType === NodeType.CAMPAIGN && index > 0) {
-            currentY += 30; // Reduced padding between Campaigns
+            currentY += 8; // Minimal padding between Campaigns
          }
 
          const cy = traverse(child, childType, level + 1);
