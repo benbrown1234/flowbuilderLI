@@ -166,7 +166,9 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
             // Apply columnOffset for creative nodes
             const actualLeft = node.x + (node.columnOffset || 0);
             // Position from center (y is center, so top = y - height/2)
-            const actualTop = node.y - (node.height / 2);
+            // Default height to 70 if undefined to avoid NaN
+            const nodeHeight = node.height || 70;
+            const actualTop = node.y - (nodeHeight / 2);
             
             return (
             <div

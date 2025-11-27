@@ -493,8 +493,14 @@ export const getTreeGraph = (account: AccountStructure) => {
     
     // Special handling for creatives - 2 column layout
     if (childType === NodeType.CREATIVE && children.length > 0) {
-      const startY = currentY;
+      // First, calculate how tall the campaign box will be
+      const campaignHeight = estimateHeight(node.name, type);
+      const startY = currentY + (campaignHeight / 2); // Start ads from campaign center
       const numRows = Math.ceil(children.length / 2);
+      const adsHeight = (numRows * AD_HEIGHT) + ((numRows - 1) * AD_GAP);
+      
+      // Calculate vertical offset to center ads with campaign
+      const adsStartY = currentY + Math.max(campaignHeight, adsHeight) / 2 - adsHeight / 2;
       
       children.forEach((child: any, index: number) => {
         const row = Math.floor(index / 2);
@@ -503,7 +509,7 @@ export const getTreeGraph = (account: AccountStructure) => {
         // Creatives are at level+1 (one level to the right of their parent campaign)
         const x = (level + 1) * X_SPACING;
         const columnOffset = col * (AD_WIDTH + AD_GAP);
-        const y = startY + (row * (AD_HEIGHT + AD_GAP)) + (AD_HEIGHT / 2);
+        const y = adsStartY + (row * (AD_HEIGHT + AD_GAP)) + (AD_HEIGHT / 2);
         
         nodes.push({
           id: child.id,
@@ -523,22 +529,35 @@ export const getTreeGraph = (account: AccountStructure) => {
         }
       });
       
-      // Tighten vertical spacing calculation
-      currentY = startY + (numRows * AD_HEIGHT) + ((numRows - 1) * AD_GAP) + AD_GAP;
+      // The campaign node is centered in its slot
+      const slotHeight = Math.max(campaignHeight, adsHeight);
+      const campaignY = currentY + slotHeight / 2;
+      
+      nodes.push({
+        id: node.id,
+        type,
+        name: node.name,
+        x: level * X_SPACING,
+        y: campaignY,
+        height: campaignHeight,
+        data: node
+      });
+      
+      // Advance currentY by the slot height plus gap
+      currentY += slotHeight + CAMPAIGN_GAP;
+      
+      return campaignY;
     } else {
       children.forEach((child: any, index: number) => {
-         // Add visual separation between siblings
-         if (index > 0) {
-            if (childType === NodeType.CAMPAIGN) {
-               currentY += CAMPAIGN_GAP; // Gap between campaigns
-            } else if (childType === NodeType.GROUP) {
-               currentY += GROUP_GAP; // Larger gap between campaign groups
-            }
-         }
-
+         // Add visual separation between siblings (gap comes AFTER each node)
          const cy = traverse(child, childType, level + 1);
          childYs.push(cy);
          links.push({ source: node.id, target: child.id });
+         
+         // Add gap after each child (except implicitly handled by traverse for campaigns)
+         if (childType === NodeType.GROUP && index < children.length - 1) {
+            currentY += GROUP_GAP; // Larger gap between campaign groups
+         }
       });
     }
 
