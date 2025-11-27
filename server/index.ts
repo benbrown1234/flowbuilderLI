@@ -4,11 +4,111 @@ import axios from 'axios';
 import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
+
+const URN_CACHE_FILE = path.join(__dirname, '../.urn-cache.json');
+let urnCache: Record<string, string> = {};
+
+const loadUrnCache = () => {
+  try {
+    if (fs.existsSync(URN_CACHE_FILE)) {
+      const data = fs.readFileSync(URN_CACHE_FILE, 'utf-8');
+      urnCache = JSON.parse(data);
+      console.log(`Loaded ${Object.keys(urnCache).length} cached URN names`);
+    }
+  } catch (err) {
+    console.warn('Could not load URN cache:', err);
+    urnCache = {};
+  }
+};
+
+const saveUrnCache = () => {
+  try {
+    fs.writeFileSync(URN_CACHE_FILE, JSON.stringify(urnCache, null, 2));
+  } catch (err) {
+    console.warn('Could not save URN cache:', err);
+  }
+};
+
+loadUrnCache();
+
+const COMMON_TITLES: Record<string, string> = {
+  '1': 'Accountant', '2': 'Actor', '3': 'Actuary', '4': 'Administrator',
+  '5': 'Director', '6': 'Advisor', '7': 'Agent', '8': 'Analyst',
+  '9': 'Architect', '10': 'Artist', '11': 'Assistant', '12': 'Attorney',
+  '16': 'Managing Director', '35': 'Founder', '103': 'Co-Founder',
+  '729': 'Vice President', '4645': 'Group Managing Director',
+  '39': 'CEO', '40': 'CFO', '41': 'CTO', '42': 'COO', '43': 'CMO',
+  '44': 'CIO', '45': 'President', '46': 'Chairman', '47': 'Partner',
+  '48': 'Principal', '49': 'Owner', '50': 'Consultant',
+  '51': 'Manager', '52': 'Senior Manager', '53': 'General Manager',
+  '54': 'Project Manager', '55': 'Product Manager', '56': 'Account Manager',
+  '57': 'Sales Manager', '58': 'Marketing Manager', '59': 'Operations Manager',
+  '60': 'HR Manager', '61': 'Finance Manager', '62': 'IT Manager',
+  '63': 'Engineer', '64': 'Software Engineer', '65': 'Senior Engineer',
+  '66': 'Lead Engineer', '67': 'Staff Engineer', '68': 'Principal Engineer',
+  '69': 'Developer', '70': 'Senior Developer', '71': 'Full Stack Developer',
+  '72': 'Frontend Developer', '73': 'Backend Developer', '74': 'Data Engineer',
+  '75': 'DevOps Engineer', '76': 'QA Engineer', '77': 'Test Engineer',
+  '78': 'Designer', '79': 'UX Designer', '80': 'UI Designer', '81': 'Graphic Designer',
+  '82': 'Product Designer', '83': 'Creative Director', '84': 'Art Director',
+  '85': 'Sales', '86': 'Sales Representative', '87': 'Account Executive',
+  '88': 'Business Development', '89': 'Sales Director', '90': 'VP Sales',
+  '91': 'Marketing', '92': 'Marketing Director', '93': 'VP Marketing',
+  '94': 'Digital Marketing', '95': 'Content Marketing', '96': 'Brand Manager',
+  '97': 'HR', '98': 'Recruiter', '99': 'Talent Acquisition', '100': 'HR Director',
+  '7196': 'Head of Marketing', '393': 'Business Owner',
+};
+
+const COMMON_INDUSTRIES: Record<string, string> = {
+  '1': 'Accounting', '2': 'Airlines/Aviation', '3': 'Alternative Dispute Resolution',
+  '4': 'Alternative Medicine', '5': 'Animation', '6': 'Technology, Information and Internet',
+  '7': 'Apparel & Fashion', '8': 'Architecture & Planning', '9': 'Arts and Crafts',
+  '10': 'Automotive', '11': 'Business Consulting and Services', '12': 'Aviation & Aerospace',
+  '41': 'Banking', '43': 'Financial Services', '44': 'Real Estate',
+  '46': 'Investment Management', '80': 'Advertising Services',
+  '98': 'Public Relations and Communications Services', '99': 'Design Services',
+  '104': 'Staffing and Recruiting', '105': 'Professional Training and Coaching',
+  '106': 'Venture Capital and Private Equity Principals', '113': 'Online Audio and Video Media',
+  '124': 'Wellness and Fitness Services', '128': 'Leasing Non-residential Real Estate',
+};
+
+const COMMON_FUNCTIONS: Record<string, string> = {
+  '1': 'Accounting', '2': 'Administrative', '3': 'Arts and Design',
+  '4': 'Business Development', '5': 'Community and Social Services',
+  '6': 'Consulting', '7': 'Education', '8': 'Engineering', '9': 'Entrepreneurship',
+  '10': 'Finance', '11': 'Healthcare Services', '12': 'Human Resources',
+  '13': 'Information Technology', '14': 'Legal', '15': 'Marketing',
+  '16': 'Media and Communication', '17': 'Military and Protective Services',
+  '18': 'Operations', '19': 'Product Management', '20': 'Program and Project Management',
+  '21': 'Purchasing', '22': 'Quality Assurance', '23': 'Real Estate',
+  '24': 'Research', '25': 'Sales', '26': 'Support',
+};
+
+const getFallbackName = (urn: string): string | null => {
+  const parts = urn.split(':');
+  if (parts.length < 4) return null;
+  
+  const entityType = parts[2];
+  const entityId = parts[3];
+  
+  if (entityType === 'title' && COMMON_TITLES[entityId]) {
+    return COMMON_TITLES[entityId];
+  }
+  if (entityType === 'industry' && COMMON_INDUSTRIES[entityId]) {
+    return COMMON_INDUSTRIES[entityId];
+  }
+  if (entityType === 'function' && COMMON_FUNCTIONS[entityId]) {
+    return COMMON_FUNCTIONS[entityId];
+  }
+  
+  return null;
+};
 const isProduction = process.env.NODE_ENV === 'production';
 const PORT = Number(process.env.PORT) || (isProduction ? 5000 : 3001);
 
@@ -458,9 +558,33 @@ app.post('/api/linkedin/resolve-targeting', requireAuth, async (req, res) => {
     const resolved: Record<string, string> = {};
     const uniqueUrns = [...new Set(urns)] as string[];
     
-    // Group URNs by facet type for more efficient resolution
-    const facetGroups: Record<string, string[]> = {};
+    // First, check cache and fallbacks for all URNs
+    const urnsToResolve: string[] = [];
     uniqueUrns.forEach(urn => {
+      if (urnCache[urn]) {
+        resolved[urn] = urnCache[urn];
+      } else {
+        const fallback = getFallbackName(urn);
+        if (fallback) {
+          resolved[urn] = fallback;
+          urnCache[urn] = fallback;
+        } else {
+          urnsToResolve.push(urn);
+        }
+      }
+    });
+    
+    // If all URNs were resolved from cache/fallbacks, return early
+    if (urnsToResolve.length === 0) {
+      console.log(`All ${uniqueUrns.length} URNs resolved from cache/fallbacks`);
+      return res.json({ resolved });
+    }
+    
+    console.log(`Resolving ${urnsToResolve.length} URNs from API (${uniqueUrns.length - urnsToResolve.length} from cache)`);
+    
+    // Group remaining URNs by facet type for more efficient resolution
+    const facetGroups: Record<string, string[]> = {};
+    urnsToResolve.forEach(urn => {
       // Extract facet type from URN like urn:li:title:123 -> titles
       const parts = urn.split(':');
       if (parts.length >= 3) {
@@ -519,7 +643,7 @@ app.post('/api/linkedin/resolve-targeting', requireAuth, async (req, res) => {
     }
     
     // For any URNs not resolved by facet lookup, try direct URN resolution
-    const unresolvedUrns = uniqueUrns.filter(urn => !resolved[urn]);
+    const unresolvedUrns = urnsToResolve.filter(urn => !resolved[urn]);
     
     if (unresolvedUrns.length > 0) {
       const batchSize = 20;
@@ -557,6 +681,20 @@ app.post('/api/linkedin/resolve-targeting', requireAuth, async (req, res) => {
           console.warn(`URN batch resolution failed: ${batchErr.message}`);
         }
       }
+    }
+    
+    // Save newly resolved URNs to cache
+    let newCacheEntries = 0;
+    Object.entries(resolved).forEach(([urn, name]) => {
+      if (!urnCache[urn]) {
+        urnCache[urn] = name;
+        newCacheEntries++;
+      }
+    });
+    
+    if (newCacheEntries > 0) {
+      saveUrnCache();
+      console.log(`Saved ${newCacheEntries} new URN names to cache`);
     }
     
     console.log(`Resolved ${Object.keys(resolved).length} of ${uniqueUrns.length} targeting URNs`);

@@ -27,3 +27,6 @@ pnpm-debug.log*
 # Temporary files
 *.tmp
 *.temp
+
+# URN name cache
+.urn-cache.json
