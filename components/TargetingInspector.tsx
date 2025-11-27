@@ -281,7 +281,7 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
   return (
     <div className="fixed inset-y-0 right-0 w-full md:w-[400px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-gray-200 z-50 overflow-y-auto">
       <div className="p-6">
-        <div className="flex justify-between items-start mb-6">
+        <div className="flex justify-between items-start mb-4">
           <div className="pr-4">
             <span className={`text-[10px] font-bold px-2 py-1 rounded tracking-wider uppercase ${
               node.type === NodeType.GROUP ? 'bg-gray-100 text-gray-700' : 
@@ -291,7 +291,10 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
               {node.type === NodeType.GROUP ? 'CAMPAIGN GROUP' : 
                node.type === NodeType.CAMPAIGN ? 'CAMPAIGN' : 'AD'}
             </span>
-            <h2 className="text-xl font-bold text-gray-900 mt-3 leading-snug break-words">{node.name}</h2>
+            {/* Only show name in header for non-CREATIVE nodes - creatives show name below */}
+            {node.type !== NodeType.CREATIVE && (
+              <h2 className="text-xl font-bold text-gray-900 mt-3 leading-snug break-words">{node.name}</h2>
+            )}
           </div>
           <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
