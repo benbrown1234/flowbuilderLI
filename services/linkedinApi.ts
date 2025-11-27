@@ -463,10 +463,29 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
       const segId = extractIdFromUrn(seg.id);
       let segType: 'WEBSITE' | 'COMPANY' | 'CONTACT' | 'LOOKALIKE' | 'OTHER' = 'OTHER';
       
-      if (seg.type === 'RETARGETING_SEGMENT') segType = 'WEBSITE';
-      else if (seg.type === 'COMPANY_SEGMENT') segType = 'COMPANY';
-      else if (seg.type === 'CONTACT_SEGMENT') segType = 'CONTACT';
-      else if (seg.type === 'LOOKALIKE_SEGMENT') segType = 'LOOKALIKE';
+      console.log(`Segment ${segId}: type=${seg.type}, sourceSegmentSubType=${seg.sourceSegmentSubType}, entityType=${seg.entityType}, name=${seg.name}`);
+      
+      if (seg.type === 'BULK') {
+        if (seg.sourceSegmentSubType === 'COMPANY' || seg.entityType === 'COMPANY') {
+          segType = 'COMPANY';
+        } else if (seg.sourceSegmentSubType === 'USER' || seg.entityType === 'USER' || seg.entityType === 'MEMBER') {
+          segType = 'CONTACT';
+        } else {
+          segType = 'COMPANY';
+        }
+      } else if (seg.type === 'RETARGETING') {
+        segType = 'WEBSITE';
+      } else if (seg.type === 'LOOKALIKE') {
+        segType = 'LOOKALIKE';
+      } else if (seg.type === 'RETARGETING_SEGMENT') {
+        segType = 'WEBSITE';
+      } else if (seg.type === 'COMPANY_SEGMENT') {
+        segType = 'COMPANY';
+      } else if (seg.type === 'CONTACT_SEGMENT') {
+        segType = 'CONTACT';
+      } else if (seg.type === 'LOOKALIKE_SEGMENT') {
+        segType = 'LOOKALIKE';
+      }
       
       return {
         id: segId,

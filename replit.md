@@ -43,6 +43,8 @@ Required secrets for LinkedIn API:
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-27: Separated Company Lists from Audience Segments in Remarketing view - now shows distinct sections for Company Lists, Contact Lists, Website Visitors, and Lookalike Audiences
+- 2025-11-27: Fixed segment type detection for LinkedIn adSegments API - correctly identifies BULK (company/contact uploads), RETARGETING, and LOOKALIKE types
 - 2025-11-26: Fixed remarketing segments API - now uses `/adSegments?q=accounts` endpoint (was `/dmpSegments`)
 - 2025-11-26: Fixed targeting URN resolution - added `queryVersion=QUERY_USES_URNS` for LinkedIn API compatibility
 - 2025-11-26: Fixed `collectTargetingUrns` to handle `exclude.or` as object instead of array (was causing resolution failures)
