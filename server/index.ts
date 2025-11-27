@@ -567,6 +567,128 @@ app.post('/api/linkedin/resolve-targeting', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/linkedin/account/:accountId/ad-preview/:creativeId', requireAuth, async (req, res) => {
+  try {
+    const sessionId = (req as any).sessionId;
+    const { accountId, creativeId } = req.params;
+    
+    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+    const creativeUrn = encodeURIComponent(`urn:li:sponsoredCreative:${creativeId}`);
+    
+    const response = await linkedinApiRequest(
+      sessionId,
+      '/adPreviews',
+      {},
+      `q=creative&creative=${creativeUrn}&account=${accountUrn}`
+    );
+    
+    res.json(response);
+  } catch (err: any) {
+    console.error('Ad preview error:', err.response?.data || err.message);
+    res.status(err.response?.status || 500).json({ 
+      error: err.response?.data || err.message 
+    });
+  }
+});
+
+app.get('/api/linkedin/account/:accountId/creative/:creativeId', requireAuth, async (req, res) => {
+  try {
+    const sessionId = (req as any).sessionId;
+    const { accountId, creativeId } = req.params;
+    
+    const creativeUrn = `urn:li:sponsoredCreative:${creativeId}`;
+    const encodedUrn = encodeURIComponent(creativeUrn);
+    
+    console.log(`Fetching creative details for: ${creativeUrn}`);
+    
+    const response = await linkedinApiRequest(
+      sessionId,
+      `/adAccounts/${accountId}/creatives/${encodedUrn}`,
+      {}
+    );
+    
+    console.log(`Creative response:`, JSON.stringify(response, null, 2).substring(0, 1000));
+    
+    let contentDetails: any = {};
+    
+    if (response.content) {
+      const content = response.content;
+      console.log(`Content type: reference=${content.reference}, textAd=${!!content.textAd}, spotlight=${!!content.spotlight}`);
+      
+      if (content.reference) {
+        const refParts = content.reference.split(':');
+        const refType = refParts[2];
+        
+        if (refType === 'share' || refType === 'ugcPost') {
+          try {
+            const postsResponse = await linkedinApiRequest(
+              sessionId,
+              `/posts/${encodeURIComponent(content.reference)}`,
+              {}
+            );
+            
+            console.log(`Posts response:`, JSON.stringify(postsResponse, null, 2).substring(0, 1000));
+            
+            if (postsResponse) {
+              const postContent = postsResponse.content || postsResponse.specificContent?.['com.linkedin.ugc.ShareContent'];
+              const commentary = postsResponse.commentary || postsResponse.text?.text;
+              
+              contentDetails.headline = postContent?.title || postContent?.shareMediaCategory;
+              contentDetails.description = commentary;
+              contentDetails.callToAction = postContent?.shareMediaCallToAction?.callToAction?.localizedLabel;
+              contentDetails.landingPageUrl = postContent?.shareMediaCallToAction?.callToAction?.url || postContent?.landingPageUrl;
+              contentDetails.imageUrl = postContent?.media?.[0]?.originalUrl || postContent?.shareMedia?.[0]?.thumbnails?.[0]?.url;
+              contentDetails.videoUrl = postContent?.media?.[0]?.originalUrl;
+            }
+          } catch (postErr: any) {
+            console.warn('Failed to fetch post content:', postErr.response?.data || postErr.message);
+          }
+        }
+      }
+      
+      if (content.textAd) {
+        contentDetails.headline = content.textAd.headline;
+        contentDetails.description = content.textAd.text;
+        contentDetails.destinationUrl = content.textAd.destinationUrl;
+        contentDetails.imageUrl = content.textAd.imageUrl;
+      }
+      
+      if (content.spotlight) {
+        contentDetails.headline = content.spotlight.headline;
+        contentDetails.description = content.spotlight.description;
+        contentDetails.callToAction = content.spotlight.callToAction;
+        contentDetails.destinationUrl = content.spotlight.ctaLink;
+        contentDetails.imageUrl = content.spotlight.logo || content.spotlight.backgroundImage;
+      }
+    }
+    
+    if (response.leadgenCallToAction) {
+      contentDetails.callToAction = contentDetails.callToAction || response.leadgenCallToAction.buttonLabel;
+      contentDetails.leadFormId = response.leadgenCallToAction.leadgenCreativeFormId;
+      contentDetails.destinationUrl = contentDetails.destinationUrl || response.leadgenCallToAction.destinationUrl;
+    }
+    
+    const result = {
+      id: response.id,
+      name: response.name,
+      intendedStatus: response.intendedStatus,
+      campaign: response.campaign,
+      content: response.content,
+      leadgenCallToAction: response.leadgenCallToAction,
+      parsedContent: Object.keys(contentDetails).length > 0 ? contentDetails : null
+    };
+    
+    console.log(`Returning creative result:`, JSON.stringify(result, null, 2));
+    
+    res.json(result);
+  } catch (err: any) {
+    console.error('Creative detail error:', err.response?.data || err.message);
+    res.status(err.response?.status || 500).json({ 
+      error: err.response?.data || err.message 
+    });
+  }
+});
+
 if (isProduction) {
   const distPath = path.join(__dirname, '..', 'dist');
   app.use(express.static(distPath));

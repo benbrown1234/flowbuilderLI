@@ -60,6 +60,16 @@ export const getAccountSegments = async (accountId: string): Promise<any[]> => {
   return response.data.elements || [];
 };
 
+export const getAdPreview = async (accountId: string, creativeId: string): Promise<any> => {
+  const response = await api.get(`/linkedin/account/${accountId}/ad-preview/${creativeId}`);
+  return response.data;
+};
+
+export const getCreativeDetails = async (accountId: string, creativeId: string): Promise<any> => {
+  const response = await api.get(`/linkedin/account/${accountId}/creative/${creativeId}`);
+  return response.data;
+};
+
 const FACET_MAPPING: Record<string, string> = {
   'urn:li:adTargetingFacet:locations': 'geos',
   'urn:li:adTargetingFacet:geoLocations': 'geos',

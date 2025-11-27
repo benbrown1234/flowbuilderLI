@@ -1,19 +1,22 @@
 
-import React from 'react';
-import { TargetingSummary, NodeType, CreativeNode } from '../types';
-import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin, Building2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { TargetingSummary, NodeType, CreativeNode, CreativeContent } from '../types';
+import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin, Building2, ExternalLink, MousePointer, FileText, Link2, Loader2 } from 'lucide-react';
+import { getAdPreview, getCreativeDetails } from '../services/linkedinApi';
 
 interface InspectorProps {
   node: {
     type: NodeType;
     name: string;
     targeting?: TargetingSummary;
-    creatives?: CreativeNode[]; // List of creatives if it's a campaign
-    singleCreative?: CreativeNode; // Specific creative data if it's a creative node
-    objective?: string;        // NEW: Passed for Campaigns
-    biddingStrategy?: string;  // NEW: Passed for Campaigns
+    creatives?: CreativeNode[];
+    singleCreative?: CreativeNode;
+    objective?: string;
+    biddingStrategy?: string;
   } | null;
   onClose: () => void;
+  accountId?: string;
+  isLiveData?: boolean;
 }
 
 const TargetingSection = ({ title, items, icon: Icon, colorClass, borderColor }: { title: string, items: string[], icon: any, colorClass: string, borderColor: string }) => {
@@ -35,7 +38,48 @@ const TargetingSection = ({ title, items, icon: Icon, colorClass, borderColor }:
   );
 };
 
-const CreativePreview: React.FC<{ creative: CreativeNode, compact?: boolean }> = ({ creative, compact = false }) => {
+interface RichCreativePreviewProps {
+  creative: CreativeNode;
+  accountId?: string;
+  isLiveData?: boolean;
+  compact?: boolean;
+}
+
+const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, accountId, isLiveData = false, compact = false }) => {
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [creativeDetails, setCreativeDetails] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!compact && isLiveData && accountId && creative.id) {
+      setLoading(true);
+      setError(null);
+      
+      Promise.all([
+        getAdPreview(accountId, creative.id).catch(err => {
+          console.warn('Ad preview fetch failed:', err);
+          return null;
+        }),
+        getCreativeDetails(accountId, creative.id).catch(err => {
+          console.warn('Creative details fetch failed:', err);
+          return null;
+        })
+      ]).then(([previewData, detailsData]) => {
+        if (previewData?.elements?.[0]?.preview) {
+          setPreviewHtml(previewData.elements[0].preview);
+        }
+        if (detailsData) {
+          setCreativeDetails(detailsData);
+        }
+        setLoading(false);
+      }).catch(err => {
+        setError('Failed to load preview');
+        setLoading(false);
+      });
+    }
+  }, [creative.id, accountId, isLiveData, compact]);
+
   const getIcon = () => {
     switch (creative.format) {
       case 'VIDEO': return <FileVideo className={compact ? "w-5 h-5" : "w-12 h-12"} />;
@@ -49,6 +93,15 @@ const CreativePreview: React.FC<{ creative: CreativeNode, compact?: boolean }> =
       case 'VIDEO': return 'bg-purple-100 text-purple-600';
       case 'CAROUSEL': return 'bg-orange-100 text-orange-600';
       default: return 'bg-blue-100 text-blue-600';
+    }
+  };
+
+  const getStatusColor = (status?: string) => {
+    switch (status) {
+      case 'ACTIVE': return 'bg-green-100 text-green-700';
+      case 'PAUSED': return 'bg-yellow-100 text-yellow-700';
+      case 'DRAFT': return 'bg-gray-100 text-gray-700';
+      default: return 'bg-gray-100 text-gray-600';
     }
   };
 
@@ -66,36 +119,140 @@ const CreativePreview: React.FC<{ creative: CreativeNode, compact?: boolean }> =
     );
   }
 
-  // Full detail view
+  const parsedContent = creativeDetails?.parsedContent;
+  const leadgenCta = creativeDetails?.leadgenCallToAction;
+
   return (
     <div className="space-y-4">
-      <div className={`w-full aspect-video rounded-lg flex flex-col items-center justify-center ${getBgColor()} relative overflow-hidden group`}>
-         {/* Mock Preview Content */}
-         {getIcon()}
-         {creative.format === 'VIDEO' && (
-           <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all">
+      {loading && (
+        <div className="w-full aspect-video rounded-lg flex flex-col items-center justify-center bg-gray-100">
+          <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+          <span className="text-sm text-gray-500 mt-2">Loading preview...</span>
+        </div>
+      )}
+      
+      {!loading && previewHtml && (
+        <div className="w-full rounded-lg overflow-hidden border border-gray-200">
+          <div 
+            className="w-full" 
+            dangerouslySetInnerHTML={{ __html: previewHtml }} 
+          />
+        </div>
+      )}
+      
+      {!loading && !previewHtml && (
+        <div className={`w-full aspect-video rounded-lg flex flex-col items-center justify-center ${getBgColor()} relative overflow-hidden group`}>
+          {getIcon()}
+          {creative.format === 'VIDEO' && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all">
               <div className="bg-white p-3 rounded-full shadow-lg opacity-80">
                 <Play className="w-6 h-6 text-black fill-current" />
               </div>
-           </div>
-         )}
-         <span className="absolute bottom-2 right-2 text-[10px] font-bold uppercase bg-white bg-opacity-90 px-2 py-1 rounded text-gray-800">
-           {creative.format}
-         </span>
+            </div>
+          )}
+          <span className="absolute bottom-2 right-2 text-[10px] font-bold uppercase bg-white bg-opacity-90 px-2 py-1 rounded text-gray-800">
+            {creative.format}
+          </span>
+        </div>
+      )}
+      
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${getStatusColor(creativeDetails?.intendedStatus || creative.status)}`}>
+            {creativeDetails?.intendedStatus || creative.status || 'Unknown'}
+          </span>
+          <span className="text-[10px] font-bold px-2 py-1 rounded bg-gray-100 text-gray-600 uppercase">
+            {creative.format}
+          </span>
+        </div>
+        
+        <div>
+          <label className="text-xs font-bold text-gray-400 uppercase">Ad Name</label>
+          <p className="text-lg font-medium text-gray-900 leading-tight">{creative.name}</p>
+        </div>
+        
+        <div>
+          <label className="text-xs font-bold text-gray-400 uppercase">Creative ID</label>
+          <p className="text-sm font-mono text-gray-600">{creative.id}</p>
+        </div>
       </div>
-      <div>
-        <label className="text-xs font-bold text-gray-400 uppercase">Ad Name</label>
-        <p className="text-lg font-medium text-gray-900 leading-tight">{creative.name}</p>
-      </div>
-      <div>
-        <label className="text-xs font-bold text-gray-400 uppercase">Asset ID</label>
-        <p className="text-sm font-mono text-gray-600">{creative.id}</p>
-      </div>
+      
+      {(parsedContent || leadgenCta) && (
+        <div className="border-t border-gray-100 pt-4 space-y-3">
+          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center">
+            <FileText className="w-3.5 h-3.5 mr-1.5" /> Ad Content
+          </h4>
+          
+          {parsedContent?.headline && (
+            <div>
+              <label className="text-xs font-bold text-gray-400 uppercase">Headline</label>
+              <p className="text-sm text-gray-900 font-medium">{parsedContent.headline}</p>
+            </div>
+          )}
+          
+          {parsedContent?.description && (
+            <div>
+              <label className="text-xs font-bold text-gray-400 uppercase">Description</label>
+              <p className="text-sm text-gray-700 leading-relaxed">{parsedContent.description}</p>
+            </div>
+          )}
+          
+          {(parsedContent?.callToAction || leadgenCta?.buttonLabel) && (
+            <div className="flex items-center gap-2">
+              <MousePointer className="w-4 h-4 text-blue-500" />
+              <div>
+                <label className="text-xs font-bold text-gray-400 uppercase">Call to Action</label>
+                <p className="text-sm font-semibold text-blue-600">
+                  {parsedContent?.callToAction || leadgenCta?.buttonLabel}
+                </p>
+              </div>
+            </div>
+          )}
+          
+          {(parsedContent?.destinationUrl || parsedContent?.landingPageUrl || leadgenCta?.destinationUrl) && (
+            <div>
+              <label className="text-xs font-bold text-gray-400 uppercase flex items-center">
+                <Link2 className="w-3 h-3 mr-1" /> Destination URL
+              </label>
+              <a 
+                href={parsedContent?.destinationUrl || parsedContent?.landingPageUrl || leadgenCta?.destinationUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-blue-600 hover:text-blue-800 underline break-all flex items-center gap-1"
+              >
+                {(parsedContent?.destinationUrl || parsedContent?.landingPageUrl || leadgenCta?.destinationUrl)?.substring(0, 50)}...
+                <ExternalLink className="w-3 h-3 flex-shrink-0" />
+              </a>
+            </div>
+          )}
+          
+          {(parsedContent?.leadFormId || leadgenCta?.leadgenCreativeFormId) && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+              <label className="text-xs font-bold text-green-700 uppercase flex items-center">
+                <FileText className="w-3 h-3 mr-1" /> Lead Form
+              </label>
+              <p className="text-sm text-green-800 font-mono mt-1">
+                Form ID: {parsedContent?.leadFormId || leadgenCta?.leadgenCreativeFormId}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+      
+      {error && (
+        <div className="text-xs text-red-500 bg-red-50 p-2 rounded">
+          {error}
+        </div>
+      )}
     </div>
   );
 };
 
-export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose }) => {
+const CreativePreview: React.FC<{ creative: CreativeNode, compact?: boolean }> = ({ creative, compact = false }) => {
+  return <RichCreativePreview creative={creative} compact={compact} />;
+};
+
+export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, accountId, isLiveData }) => {
   if (!node) return null;
 
   // Helper to determine primary creative format from list
@@ -129,7 +286,11 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose }) 
         {/* 1. If it's a CREATIVE Node, show preview */}
         {node.type === NodeType.CREATIVE && node.singleCreative && (
           <div className="mb-8">
-            <CreativePreview creative={node.singleCreative} />
+            <RichCreativePreview 
+              creative={node.singleCreative} 
+              accountId={accountId}
+              isLiveData={isLiveData}
+            />
           </div>
         )}
 

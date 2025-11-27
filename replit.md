@@ -43,6 +43,8 @@ Required secrets for LinkedIn API:
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-27: Added rich creative preview panel - clicking on ads shows live LinkedIn ad preview iframe, ad type, headline, description, call-to-action, destination URL, and lead form info (requires live data)
+- 2025-11-27: Added /adPreviews and /creatives/:id API endpoints for fetching ad preview iframes and creative content details
 - 2025-11-27: Added categorized exclusions - exclusions now display by type (Locations, Company Lists, Audiences, Industries, Job Titles) instead of flat list
 - 2025-11-27: Removed language/locale from Locations - interfaceLocales facet and locale URNs are now filtered out; only geographic locations show in Locations section
 - 2025-11-27: Added human-readable names for company lists in targeting sidebar - uses segment name map from adSegments API

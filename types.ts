@@ -35,10 +35,25 @@ export interface BaseNode {
   type: NodeType;
 }
 
+export interface CreativeContent {
+  headline?: string;
+  description?: string;
+  callToAction?: string;
+  destinationUrl?: string;
+  landingPageUrl?: string;
+  leadFormId?: string;
+  leadFormName?: string;
+  imageUrl?: string;
+  videoUrl?: string;
+}
+
 export interface CreativeNode extends BaseNode {
   type: NodeType.CREATIVE;
   previewUrl?: string;
   format: string;
+  status?: string;
+  contentReference?: string;
+  content?: CreativeContent;
 }
 
 export interface CampaignNode extends BaseNode {

@@ -405,7 +405,9 @@ const App: React.FC = () => {
       {/* Side Panel */}
       <TargetingInspector 
         node={selectedNode} 
-        onClose={handleCloseInspector} 
+        onClose={handleCloseInspector}
+        accountId={selectedAccountId}
+        isLiveData={useRealData}
       />
 
       {/* Overlay for side panel on mobile */}
