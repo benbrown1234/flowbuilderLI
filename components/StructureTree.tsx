@@ -207,15 +207,17 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
                    node.type === NodeType.CAMPAIGN ? 'Campaign' : 
                    node.type === NodeType.CREATIVE ? (() => {
                      const format = (node.data as CreativeNode).format?.toUpperCase() || '';
-                     if (format.includes('VIDEO')) return 'Video Ad';
-                     if (format.includes('CAROUSEL')) return 'Carousel Ad';
-                     if (format.includes('MESSAGE') || format.includes('INMAIL')) return 'Message Ad';
-                     if (format.includes('TEXT')) return 'Text Ad';
-                     if (format.includes('SPOTLIGHT')) return 'Spotlight Ad';
-                     if (format.includes('FOLLOWER')) return 'Follower Ad';
-                     if (format.includes('CONVERSATION')) return 'Conversation Ad';
-                     if (format.includes('DOCUMENT')) return 'Document Ad';
-                     if (format.includes('EVENT')) return 'Event Ad';
+                     if (format === 'VIDEO' || format.includes('VIDEO')) return 'Video Ad';
+                     if (format === 'CAROUSEL' || format.includes('CAROUSEL')) return 'Carousel Ad';
+                     if (format === 'MESSAGE' || format.includes('MESSAGE') || format.includes('INMAIL')) return 'Message Ad';
+                     if (format === 'TEXT_AD' || format.includes('TEXT')) return 'Text Ad';
+                     if (format === 'SPOTLIGHT' || format.includes('SPOTLIGHT')) return 'Spotlight Ad';
+                     if (format === 'FOLLOWER' || format.includes('FOLLOWER')) return 'Follower Ad';
+                     if (format === 'CONVERSATION' || format.includes('CONVERSATION')) return 'Conversation Ad';
+                     if (format === 'DOCUMENT' || format.includes('DOCUMENT')) return 'Document Ad';
+                     if (format === 'EVENT' || format.includes('EVENT')) return 'Event Ad';
+                     if (format === 'ARTICLE' || format.includes('ARTICLE')) return 'Article Ad';
+                     if (format === 'JOBS' || format.includes('JOBS')) return 'Jobs Ad';
                      return 'Image Ad';
                    })() : 'Account'}
                 </span>

@@ -509,7 +509,7 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
         for (let i = 0; i < campaignUrns.length; i += batchSize) {
           const batch = campaignUrns.slice(i, i + batchSize);
           const campaignListEncoded = batch.map(u => encodeURIComponent(u)).join(',');
-          const rawQuery = `q=criteria&campaigns=List(${campaignListEncoded})&pageSize=100`;
+          const rawQuery = `q=criteria&campaigns=List(${campaignListEncoded})&pageSize=100&fields=id,name,campaign,intendedStatus,content,variables,type,createdAt,lastModifiedAt,servingHoldReasons`;
           
           const response = await linkedinApiRequest(sessionId, `/adAccounts/${accountId}/creatives`, {}, rawQuery);
           if (response.elements && Array.isArray(response.elements)) {
