@@ -422,6 +422,7 @@ export interface TreeNode {
   name: string;
   x: number;
   y: number;
+  columnOffset?: number; // For 2-column ad layout
   data: any;
 }
 
@@ -484,7 +485,9 @@ export const getTreeGraph = (account: AccountStructure) => {
         const row = Math.floor(index / 2);
         const col = index % 2;
         
-        const x = level * X_SPACING + (col * (AD_WIDTH + AD_GAP));
+        // Keep x at the canonical level position, store column offset separately
+        const x = level * X_SPACING;
+        const columnOffset = col * (AD_WIDTH + AD_GAP);
         const y = startY + (row * (AD_HEIGHT + AD_GAP)) + (AD_HEIGHT / 2);
         
         nodes.push({
@@ -493,6 +496,7 @@ export const getTreeGraph = (account: AccountStructure) => {
           name: child.name,
           x,
           y,
+          columnOffset,
           data: child
         });
         
@@ -500,7 +504,8 @@ export const getTreeGraph = (account: AccountStructure) => {
         links.push({ source: node.id, target: child.id });
       });
       
-      currentY = startY + (numRows * (AD_HEIGHT + AD_GAP));
+      // Tighten vertical spacing calculation
+      currentY = startY + (numRows * AD_HEIGHT) + ((numRows - 1) * AD_GAP) + AD_GAP;
     } else {
       children.forEach((child: any, index: number) => {
          // If we are processing sibling Ad Groups (Campaigns), add some visual separation

@@ -136,9 +136,12 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
               const sourceWidth = source.type === NodeType.CREATIVE ? 130 : 280;
               const targetHeight = target.type === NodeType.CREATIVE ? 21 : 30;
               
+              // Apply columnOffset for creative nodes
+              const targetColumnOffset = target.columnOffset || 0;
+              
               const startX = source.x + sourceWidth;
               const startY = source.y + 30;
-              const endX = target.x;
+              const endX = target.x + targetColumnOffset;
               const endY = target.y + targetHeight;
 
               const cp1x = (startX + endX) / 2;
@@ -159,7 +162,11 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
             })}
           </svg>
 
-          {graph.nodes.map(node => (
+          {graph.nodes.map(node => {
+            // Apply columnOffset for creative nodes
+            const actualLeft = node.x + (node.columnOffset || 0);
+            
+            return (
             <div
               key={node.id}
               onClick={() => node.type !== NodeType.ACCOUNT && handleNodeClick(node)}
@@ -174,7 +181,7 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
                 ${node.type === NodeType.CREATIVE ? 'bg-white border-green-200 border-l-2 border-l-green-500 min-h-[42px]' : ''}
               `}
               style={{ 
-                left: node.x, 
+                left: actualLeft, 
                 top: node.y,
               }}
             >
@@ -218,7 +225,8 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
