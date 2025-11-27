@@ -8,12 +8,15 @@ export const MOCK_ACCOUNTS_LIST = [
 ];
 
 // Mock Segments for demo data
+// sourceCampaigns shows which campaigns are included in engagement retargeting segments (from /dmpEngagementRules API)
 export const MOCK_SEGMENTS: Record<string, any[]> = {
   '502962649': [
     { id: 'urn:li:adSegment:5001', name: 'Website Visitors (30D)', type: 'WEBSITE', status: 'READY', audienceCount: 12500 },
     { id: 'urn:li:adSegment:9999', name: 'Converted Leads', type: 'CONTACT', status: 'ACTIVE', audienceCount: 850 },
-    { id: 'urn:li:adSegment:6001', name: 'Video Viewers 50%+', type: 'VIDEO', status: 'READY', audienceCount: 3200 },
-    { id: 'urn:li:adSegment:6002', name: 'Ad Engagers (Last 90D)', type: 'ENGAGED', status: 'READY', audienceCount: 4800 },
+    { id: 'urn:li:adSegment:6001', name: 'Video Viewers 50%+', type: 'VIDEO', status: 'READY', audienceCount: 3200, 
+      sourceCampaigns: ['cp_ft_02', 'cp_wl_03', 'cp_wl_04'], engagementTrigger: 'MIDPOINT_VIEWERS' },
+    { id: 'urn:li:adSegment:6002', name: 'Ad Engagers (Last 90D)', type: 'ENGAGED', status: 'READY', audienceCount: 4800,
+      sourceCampaigns: ['cp_ft_01', 'cp_ft_04', 'cp_wl_02'], engagementTrigger: 'CLICK' },
   ],
   'act_55123412': [
     { id: 'urn:li:adSegment:5001', name: 'Website Visitors (30D)', type: 'WEBSITE', status: 'READY', audienceCount: 45000 },
@@ -23,7 +26,8 @@ export const MOCK_SEGMENTS: Record<string, any[]> = {
   ],
   'act_99999999': [
     { id: 'urn:li:adSegment:5001', name: 'Career Page Visitors', type: 'WEBSITE', status: 'READY', audienceCount: 8500 },
-    { id: 'urn:li:adSegment:6001', name: 'Video Viewers 75%+', type: 'VIDEO', status: 'READY', audienceCount: 2100 },
+    { id: 'urn:li:adSegment:6001', name: 'Video Viewers 75%+', type: 'VIDEO', status: 'READY', audienceCount: 2100,
+      sourceCampaigns: ['camp_eng_hiring'], engagementTrigger: 'THIRD_QUARTILE_VIEWERS' },
   ],
 };
 

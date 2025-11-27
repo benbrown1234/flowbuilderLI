@@ -183,7 +183,9 @@ export const buildAccountHierarchy = (accountId?: string): AccountStructure | nu
     name: seg.name,
     type: seg.type || 'OTHER',
     status: seg.status || 'ACTIVE',
-    audienceCount: seg.audienceCount
+    audienceCount: seg.audienceCount,
+    sourceCampaigns: seg.sourceCampaigns,
+    engagementTrigger: seg.engagementTrigger
   }));
 
   return {
