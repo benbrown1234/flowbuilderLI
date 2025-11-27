@@ -134,15 +134,15 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
 
               // Different widths for different node types
               const sourceWidth = source.type === NodeType.CREATIVE ? 130 : 280;
-              const targetHeight = target.type === NodeType.CREATIVE ? 21 : 30;
               
               // Apply columnOffset for creative nodes
               const targetColumnOffset = target.columnOffset || 0;
               
+              // Use node.y as center point for links
               const startX = source.x + sourceWidth;
-              const startY = source.y + 30;
+              const startY = source.y; // Center Y of source
               const endX = target.x + targetColumnOffset;
-              const endY = target.y + targetHeight;
+              const endY = target.y; // Center Y of target
 
               const cp1x = (startX + endX) / 2;
               const cp1y = startY;
@@ -165,6 +165,8 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
           {graph.nodes.map(node => {
             // Apply columnOffset for creative nodes
             const actualLeft = node.x + (node.columnOffset || 0);
+            // Position from center (y is center, so top = y - height/2)
+            const actualTop = node.y - (node.height / 2);
             
             return (
             <div
@@ -182,7 +184,7 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
               `}
               style={{ 
                 left: actualLeft, 
-                top: node.y,
+                top: actualTop,
               }}
             >
               <div className={`flex items-center gap-1.5 ${node.type === NodeType.CREATIVE ? 'mb-0.5' : 'mb-1'}`}>

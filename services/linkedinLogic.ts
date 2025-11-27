@@ -422,6 +422,7 @@ export interface TreeNode {
   name: string;
   x: number;
   y: number;
+  height: number; // Estimated height for proper positioning
   columnOffset?: number; // For 2-column ad layout
   data: any;
 }
@@ -439,6 +440,19 @@ export const getTreeGraph = (account: AccountStructure) => {
   const AD_WIDTH = 130; // Half width for 2-column layout
   const AD_HEIGHT = 50; // Compact ad height
   const AD_GAP = 8; // Gap between ads
+  const CAMPAIGN_GAP = 25; // Gap between campaigns
+  const GROUP_GAP = 50; // Gap between campaign groups
+  
+  // Estimate node height based on name length and type
+  const estimateHeight = (name: string, type: NodeType): number => {
+    if (type === NodeType.CREATIVE) return AD_HEIGHT;
+    // Estimate lines based on character count (280px width, ~28 chars per line)
+    const charsPerLine = 28;
+    const lines = Math.ceil(name.length / charsPerLine);
+    const baseHeight = 70; // Base height for header + padding
+    const lineHeight = 22; // Height per line of text
+    return baseHeight + (lines * lineHeight);
+  };
   
   // Use a mutable cursor to track vertical position in pixels
   let currentY = 0;
@@ -450,11 +464,11 @@ export const getTreeGraph = (account: AccountStructure) => {
     const hasChildren = children.length > 0;
 
     if (!hasChildren) {
-      // Determine slot height: Creatives are packed tighter, Groups/Campaigns get more room for text wrapping
-      const slotHeight = type === NodeType.CREATIVE ? AD_HEIGHT : 140;
+      // Estimate height based on name length
+      const nodeHeight = estimateHeight(node.name, type);
       
-      const y = currentY + (slotHeight / 2);
-      currentY += slotHeight;
+      const y = currentY + (nodeHeight / 2);
+      currentY += nodeHeight;
       
       nodes.push({
         id: node.id,
@@ -462,6 +476,7 @@ export const getTreeGraph = (account: AccountStructure) => {
         name: node.name,
         x: level * X_SPACING,
         y,
+        height: nodeHeight,
         data: node
       });
       return y;
@@ -496,6 +511,7 @@ export const getTreeGraph = (account: AccountStructure) => {
           name: child.name,
           x,
           y,
+          height: AD_HEIGHT,
           columnOffset,
           data: child
         });
@@ -511,9 +527,13 @@ export const getTreeGraph = (account: AccountStructure) => {
       currentY = startY + (numRows * AD_HEIGHT) + ((numRows - 1) * AD_GAP) + AD_GAP;
     } else {
       children.forEach((child: any, index: number) => {
-         // If we are processing sibling Ad Groups (Campaigns), add visual separation
-         if (childType === NodeType.CAMPAIGN && index > 0) {
-            currentY += 20; // Spacing between Campaigns
+         // Add visual separation between siblings
+         if (index > 0) {
+            if (childType === NodeType.CAMPAIGN) {
+               currentY += CAMPAIGN_GAP; // Gap between campaigns
+            } else if (childType === NodeType.GROUP) {
+               currentY += GROUP_GAP; // Larger gap between campaign groups
+            }
          }
 
          const cy = traverse(child, childType, level + 1);
@@ -526,6 +546,8 @@ export const getTreeGraph = (account: AccountStructure) => {
     const minY = Math.min(...childYs);
     const maxY = Math.max(...childYs);
     const y = (minY + maxY) / 2;
+    
+    const nodeHeight = estimateHeight(node.name, type);
 
     nodes.push({
       id: node.id,
@@ -533,6 +555,7 @@ export const getTreeGraph = (account: AccountStructure) => {
       name: node.name,
       x: level * X_SPACING,
       y,
+      height: nodeHeight,
       data: node
     });
 
