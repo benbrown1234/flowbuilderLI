@@ -157,7 +157,7 @@ const extractReadableName = (urn: string, resolvedNames?: Record<string, string>
     .trim();
 };
 
-const parseTargeting = (targetingCriteria: any): TargetingSummary => {
+const parseTargeting = (targetingCriteria: any, segmentNameMap: Record<string, string> = {}): TargetingSummary => {
   const summary: TargetingSummary = {
     geos: [],
     audiences: [],
@@ -174,11 +174,17 @@ const parseTargeting = (targetingCriteria: any): TargetingSummary => {
   const addToSummary = (facetKey: string, urns: string[]) => {
     const targetKey = FACET_MAPPING[facetKey];
     urns.forEach((urn: string) => {
-      const name = extractReadableName(urn);
-      if (!name) return;
-      
       const isAdSegment = urn.includes('urn:li:adSegment:');
       const isGeoUrn = urn.includes('urn:li:geo:') || urn.includes('urn:li:country:') || urn.includes('urn:li:region:');
+      
+      let name: string;
+      if (isAdSegment && segmentNameMap[urn]) {
+        name = segmentNameMap[urn];
+      } else {
+        name = extractReadableName(urn);
+      }
+      
+      if (!name) return;
       
       if (isAdSegment) {
         if (!summary.companyLists.includes(name)) {
@@ -384,6 +390,19 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
       console.warn('API returned errors:', rawData._debug.errors);
     }
 
+    const segmentNameMap: Record<string, string> = {};
+    segments.forEach((seg: any) => {
+      const segUrn = seg.id || seg.urn;
+      if (segUrn && seg.name) {
+        segmentNameMap[segUrn] = seg.name;
+        const segId = extractIdFromUrn(segUrn);
+        if (segId) {
+          segmentNameMap[`urn:li:adSegment:${segId}`] = seg.name;
+        }
+      }
+    });
+    console.log(`Built segment name map with ${Object.keys(segmentNameMap).length} entries`);
+
     try {
       console.log('Collecting targeting URNs from campaigns...');
       const targetingUrns = collectTargetingUrns(campaigns);
@@ -428,7 +447,7 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
         objective: raw.objectiveType || 'UNKNOWN',
         biddingStrategy: raw.costType || 'CPM',
         targetingRaw: raw.targetingCriteria || {},
-        targetingResolved: parseTargeting(raw.targetingCriteria),
+        targetingResolved: parseTargeting(raw.targetingCriteria, segmentNameMap),
         outputAudiences: [],
         children: matchingCreatives,
         campaignGroupUrn: raw.campaignGroup,

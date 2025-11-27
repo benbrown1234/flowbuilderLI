@@ -43,6 +43,7 @@ Required secrets for LinkedIn API:
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-27: Added human-readable names for company lists in targeting sidebar - uses segment name map from adSegments API
 - 2025-11-27: Separated Company Lists from Audience Segments in Targeting Rules sidebar - company list IDs now show in dedicated "Company Lists" section with cyan styling
 - 2025-11-27: Fixed geo/location detection - locations like "United Kingdom" now correctly appear under Locations instead of Audience Segments
 - 2025-11-27: Separated Company Lists from Audience Segments in Remarketing view - now shows distinct sections for Company Lists, Contact Lists, Website Visitors, and Lookalike Audiences
