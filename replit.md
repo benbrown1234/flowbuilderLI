@@ -43,6 +43,7 @@ Required secrets for LinkedIn API:
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-27: Fixed Remarketing Flow column categorization - company lists (BULK type segments) are now correctly placed in Cold Campaigns column. Only true remarketing segments (RETARGETING, LOOKALIKE, VIDEO, WEBSITE, ENGAGED) appear in the Remarketing Audiences middle column. Campaigns using only company lists are now categorized as cold, not remarketing.
 - 2025-11-27: Added REAL source campaign connections from LinkedIn's `/dmpEngagementRules` API endpoint. Segments now show their actual `sourceCampaigns` (which campaigns are included in the engagement retargeting audience). Orange dashed lines in Remarketing Flow show these real connections. Demo mode includes mock sourceCampaigns for Video Viewers and Ad Engagers segments.
 - 2025-11-27: Added click-to-filter behavior on Remarketing Flow - clicking any item filters the view to show only connected items across all three columns. Hovering highlights connections while clicking removes unrelated items entirely. Headers show filtered/total counts (e.g., "3/10") when selection is active.
 - 2025-11-27: Fixed Remarketing Flow segment extraction to handle LinkedIn API's `dynamicSegments` facet (in addition to `audienceMatchingSegments`). Added fallback for legacy campaigns without raw targeting data. Filtered native targeting values (company sizes, etc.) from appearing in the middle column - only actual remarketing segments now appear.

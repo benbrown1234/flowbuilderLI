@@ -281,26 +281,30 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
     });
 
     const filteredOutputLinks = outputLinks.filter(l => remarketingAudienceIds.has(l.audienceId));
+    const filteredTargetingLinks = targetingLinks.filter(l => remarketingAudienceIds.has(l.audienceId));
     const filteredSourceLinks = sourceLinks.filter(l => remarketingAudienceIds.has(l.audienceId));
 
     const usedAudienceIds = new Set<string>();
     filteredOutputLinks.forEach(l => usedAudienceIds.add(l.audienceId));
-    targetingLinks.forEach(l => usedAudienceIds.add(l.audienceId));
+    filteredTargetingLinks.forEach(l => usedAudienceIds.add(l.audienceId));
     filteredSourceLinks.forEach(l => usedAudienceIds.add(l.audienceId));
 
     const allAudiences = Array.from(audienceMap.values()).filter(a => 
       usedAudienceIds.has(a.id) && isRemarketingSegmentType(a.type)
     );
 
+    const finalRemarketingCampaigns = allCampaigns.filter(c => c.targetedAudiences.length > 0);
+    const finalColdCampaigns = allCampaigns.filter(c => c.targetedAudiences.length === 0);
+
     return { 
-      coldCampaigns: allColdCampaigns, 
-      remarketingCampaigns: allRemarketingCampaigns, 
+      coldCampaigns: finalColdCampaigns, 
+      remarketingCampaigns: finalRemarketingCampaigns, 
       audiences: allAudiences, 
       outputLinks: filteredOutputLinks, 
-      targetingLinks,
+      targetingLinks: filteredTargetingLinks,
       sourceLinks: filteredSourceLinks,
-      allColdCampaigns,
-      allRemarketingCampaigns,
+      allColdCampaigns: finalColdCampaigns,
+      allRemarketingCampaigns: finalRemarketingCampaigns,
       allAudiences
     };
   }, [data]);
