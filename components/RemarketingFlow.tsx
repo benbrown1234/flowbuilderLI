@@ -36,6 +36,16 @@ interface ConnectionLine {
   targetId: string;
 }
 
+const isRemarketingSegmentType = (type: string): boolean => {
+  const remarketingTypes = ['RETARGETING', 'LOOKALIKE', 'VIDEO', 'WEBSITE', 'ENGAGED'];
+  return remarketingTypes.includes(type.toUpperCase());
+};
+
+const isColdSegmentType = (type: string): boolean => {
+  const coldTypes = ['BULK', 'COMPANY', 'CONTACT'];
+  return coldTypes.includes(type.toUpperCase());
+};
+
 export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
   const [lines, setLines] = useState<ConnectionLine[]>([]);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
@@ -171,6 +181,8 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
     data.groups.forEach(group => {
       group.children.forEach(campaign => {
         const targetedAudiences: string[] = [];
+        const remarketingAudiences: string[] = [];
+        const coldAudiences: string[] = [];
         
         let segmentUrns = extractSegmentUrnsFromTargeting(campaign.targetingRaw);
         
@@ -181,8 +193,15 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
               const audId = segmentIdToAudId.get(nameLower)!;
               if (!targetedAudiences.includes(audId)) {
                 targetedAudiences.push(audId);
-                audienceMap.get(audId)!.targetingCampaigns.push(campaign.id);
-                targetingLinks.push({ audienceId: audId, campaignId: campaign.id });
+                const audience = audienceMap.get(audId)!;
+                audience.targetingCampaigns.push(campaign.id);
+                
+                if (isRemarketingSegmentType(audience.type)) {
+                  remarketingAudiences.push(audId);
+                  targetingLinks.push({ audienceId: audId, campaignId: campaign.id });
+                } else {
+                  coldAudiences.push(audId);
+                }
               }
             }
           });
@@ -191,8 +210,15 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
             const audId = findOrCreateAudienceByUrn(urn);
             if (audId) {
               targetedAudiences.push(audId);
-              audienceMap.get(audId)!.targetingCampaigns.push(campaign.id);
-              targetingLinks.push({ audienceId: audId, campaignId: campaign.id });
+              const audience = audienceMap.get(audId)!;
+              audience.targetingCampaigns.push(campaign.id);
+              
+              if (isRemarketingSegmentType(audience.type)) {
+                remarketingAudiences.push(audId);
+                targetingLinks.push({ audienceId: audId, campaignId: campaign.id });
+              } else {
+                coldAudiences.push(audId);
+              }
             }
           });
         }
@@ -215,7 +241,7 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
           name: campaign.name,
           groupName: group.name,
           outputAudiences: outputAudienceIds,
-          targetedAudiences,
+          targetedAudiences: remarketingAudiences,
           campaign
         });
       });
@@ -247,20 +273,32 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
       }
     });
 
-    const usedAudienceIds = new Set<string>();
-    outputLinks.forEach(l => usedAudienceIds.add(l.audienceId));
-    targetingLinks.forEach(l => usedAudienceIds.add(l.audienceId));
-    sourceLinks.forEach(l => usedAudienceIds.add(l.audienceId));
+    const remarketingAudienceIds = new Set<string>();
+    audienceMap.forEach((aud, id) => {
+      if (isRemarketingSegmentType(aud.type)) {
+        remarketingAudienceIds.add(id);
+      }
+    });
 
-    const allAudiences = Array.from(audienceMap.values()).filter(a => usedAudienceIds.has(a.id));
+    const filteredOutputLinks = outputLinks.filter(l => remarketingAudienceIds.has(l.audienceId));
+    const filteredSourceLinks = sourceLinks.filter(l => remarketingAudienceIds.has(l.audienceId));
+
+    const usedAudienceIds = new Set<string>();
+    filteredOutputLinks.forEach(l => usedAudienceIds.add(l.audienceId));
+    targetingLinks.forEach(l => usedAudienceIds.add(l.audienceId));
+    filteredSourceLinks.forEach(l => usedAudienceIds.add(l.audienceId));
+
+    const allAudiences = Array.from(audienceMap.values()).filter(a => 
+      usedAudienceIds.has(a.id) && isRemarketingSegmentType(a.type)
+    );
 
     return { 
       coldCampaigns: allColdCampaigns, 
       remarketingCampaigns: allRemarketingCampaigns, 
       audiences: allAudiences, 
-      outputLinks, 
+      outputLinks: filteredOutputLinks, 
       targetingLinks,
-      sourceLinks,
+      sourceLinks: filteredSourceLinks,
       allColdCampaigns,
       allRemarketingCampaigns,
       allAudiences
