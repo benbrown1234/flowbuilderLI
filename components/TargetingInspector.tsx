@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { TargetingSummary, NodeType, CreativeNode } from '../types';
-import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin } from 'lucide-react';
+import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin, Building2 } from 'lucide-react';
 
 interface InspectorProps {
   node: {
@@ -186,6 +186,14 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose }) 
                  />
 
                 <TargetingSection 
+                  title="Company Lists" 
+                  items={node.targeting.companyLists || []} 
+                  icon={Building2}
+                  colorClass="bg-cyan-50 text-cyan-700 border-cyan-200"
+                  borderColor="border-cyan-100"
+                />
+
+                <TargetingSection 
                   title="Audience Segments" 
                   items={node.targeting.audiences} 
                   icon={Users}
@@ -221,7 +229,7 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose }) 
                   </div>
                 )}
                 
-                {(node.targeting.geos.length === 0 && node.targeting.audiences.length === 0 && node.targeting.exclusions.length === 0 && node.targeting.industries.length === 0 && node.targeting.jobTitles.length === 0) && (
+                {(node.targeting.geos.length === 0 && node.targeting.audiences.length === 0 && (node.targeting.companyLists?.length || 0) === 0 && node.targeting.exclusions.length === 0 && node.targeting.industries.length === 0 && node.targeting.jobTitles.length === 0) && (
                   <div className="text-gray-400 italic text-sm text-center py-4 bg-gray-50 rounded border border-gray-100 border-dashed">
                     No specific targeting criteria found.
                   </div>

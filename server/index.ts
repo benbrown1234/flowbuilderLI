@@ -412,12 +412,13 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     
     try {
       const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
-      segments = await linkedinApiRequestPaginated(
+      const segmentsResponse = await linkedinApiRequest(
         sessionId, 
         '/adSegments',
         {},
         `q=accounts&accounts=List(${accountUrn})`
       );
+      segments = segmentsResponse.elements || [];
       console.log(`Segments fetched: ${segments.length} items`);
       if (segments.length > 0) {
         console.log(`First segment sample: ${JSON.stringify(segments[0], null, 2).substring(0, 500)}`);

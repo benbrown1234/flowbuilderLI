@@ -161,6 +161,7 @@ const parseTargeting = (targetingCriteria: any): TargetingSummary => {
   const summary: TargetingSummary = {
     geos: [],
     audiences: [],
+    companyLists: [],
     industries: [],
     jobTitles: [],
     exclusions: []
@@ -176,7 +177,18 @@ const parseTargeting = (targetingCriteria: any): TargetingSummary => {
       const name = extractReadableName(urn);
       if (!name) return;
       
-      if (targetKey) {
+      const isAdSegment = urn.includes('urn:li:adSegment:');
+      const isGeoUrn = urn.includes('urn:li:geo:') || urn.includes('urn:li:country:') || urn.includes('urn:li:region:');
+      
+      if (isAdSegment) {
+        if (!summary.companyLists.includes(name)) {
+          summary.companyLists.push(name);
+        }
+      } else if (isGeoUrn) {
+        if (!summary.geos.includes(name)) {
+          summary.geos.push(name);
+        }
+      } else if (targetKey) {
         if (!summary[targetKey].includes(name)) {
           summary[targetKey].push(name);
         }
@@ -242,12 +254,14 @@ const parseTargeting = (targetingCriteria: any): TargetingSummary => {
 const aggregateTargeting = (campaigns: CampaignNode[]): TargetingSummary => {
   const allGeos = new Set<string>();
   const allAudiences = new Set<string>();
+  const allCompanyLists = new Set<string>();
   const allIndustries = new Set<string>();
   const allJobTitles = new Set<string>();
   
   campaigns.forEach(camp => {
     camp.targetingResolved.geos.forEach(g => allGeos.add(g));
     camp.targetingResolved.audiences.forEach(a => allAudiences.add(a));
+    camp.targetingResolved.companyLists?.forEach(c => allCompanyLists.add(c));
     camp.targetingResolved.industries.forEach(i => allIndustries.add(i));
     camp.targetingResolved.jobTitles.forEach(j => allJobTitles.add(j));
   });
@@ -255,6 +269,7 @@ const aggregateTargeting = (campaigns: CampaignNode[]): TargetingSummary => {
   return {
     geos: Array.from(allGeos),
     audiences: Array.from(allAudiences),
+    companyLists: Array.from(allCompanyLists),
     industries: Array.from(allIndustries),
     jobTitles: Array.from(allJobTitles),
     exclusions: []

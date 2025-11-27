@@ -16,6 +16,7 @@ export interface TargetingFacet {
 export interface TargetingSummary {
   geos: string[];
   audiences: string[];
+  companyLists: string[];
   industries: string[];
   jobTitles: string[];
   exclusions: string[];

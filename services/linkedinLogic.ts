@@ -36,6 +36,7 @@ const parseTargeting = (criteria: MockRawCampaign['targetingCriteria']): Targeti
   const summary: TargetingSummary = {
     geos: [],
     audiences: [],
+    companyLists: [],
     industries: [],
     jobTitles: [],
     exclusions: []
@@ -75,12 +76,14 @@ const parseTargeting = (criteria: MockRawCampaign['targetingCriteria']): Targeti
 const aggregateTargeting = (campaigns: CampaignNode[]): TargetingSummary => {
   const allGeos = new Set<string>();
   const allAudiences = new Set<string>();
+  const allCompanyLists = new Set<string>();
   const allIndustries = new Set<string>();
   const allJobTitles = new Set<string>();
   
   campaigns.forEach(camp => {
     camp.targetingResolved.geos.forEach(g => allGeos.add(g));
     camp.targetingResolved.audiences.forEach(a => allAudiences.add(a));
+    camp.targetingResolved.companyLists?.forEach(c => allCompanyLists.add(c));
     camp.targetingResolved.industries.forEach(i => allIndustries.add(i));
     camp.targetingResolved.jobTitles.forEach(j => allJobTitles.add(j));
   });
@@ -88,9 +91,10 @@ const aggregateTargeting = (campaigns: CampaignNode[]): TargetingSummary => {
   return {
     geos: Array.from(allGeos),
     audiences: Array.from(allAudiences),
+    companyLists: Array.from(allCompanyLists),
     industries: Array.from(allIndustries),
     jobTitles: Array.from(allJobTitles),
-    exclusions: [] // Aggregating exclusions is tricky, leaving empty for summary for now
+    exclusions: []
   };
 };
 
