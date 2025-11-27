@@ -17,14 +17,44 @@ export interface TargetingSummary {
   geos: string[];
   audiences: string[];
   companyLists: string[];
-  industries: string[];
-  jobTitles: string[];
+  company: {
+    names: string[];
+    industries: string[];
+    sizes: string[];
+    followers: string[];
+    growthRate: string[];
+    category: string[];
+  };
+  demographics: {
+    ages: string[];
+    genders: string[];
+  };
+  education: {
+    fieldsOfStudy: string[];
+    degrees: string[];
+    schools: string[];
+  };
+  jobExperience: {
+    titles: string[];
+    functions: string[];
+    seniorities: string[];
+    yearsOfExperience: string[];
+    skills: string[];
+  };
+  interestsTraits: {
+    memberInterests: string[];
+    memberTraits: string[];
+    memberGroups: string[];
+  };
   exclusions: {
     geos: string[];
     audiences: string[];
     companyLists: string[];
-    industries: string[];
-    jobTitles: string[];
+    company: string[];
+    demographics: string[];
+    education: string[];
+    jobExperience: string[];
+    interestsTraits: string[];
     other: string[];
   };
 }

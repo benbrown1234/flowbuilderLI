@@ -13,12 +13,43 @@ import { MOCK_ACCOUNTS_LIST, MOCK_DATA_STORE, MOCK_URN_RESOLVER, MOCK_SEGMENTS }
 
 // --- Step 2: Parse the Facets (The Switch Statement) ---
 
-const FACET_MAPPING: Record<string, keyof TargetingSummary> = {
-  'urn:li:adTargetingFacet:locations': 'geos',
-  'urn:li:adTargetingFacet:industries': 'industries',
-  'urn:li:adTargetingFacet:jobTitles': 'jobTitles',
-  'urn:li:adTargetingFacet:audienceMatchingSegments': 'audiences',
-  'urn:li:adTargetingFacet:companySize': 'industries', // Simplified for demo
+const FACET_CATEGORY_MAPPING: Record<string, { category: string; field: string }> = {
+  'urn:li:adTargetingFacet:locations': { category: 'geos', field: '' },
+  'urn:li:adTargetingFacet:geoLocations': { category: 'geos', field: '' },
+  'urn:li:adTargetingFacet:industries': { category: 'company', field: 'industries' },
+  'urn:li:adTargetingFacet:employerIndustries': { category: 'company', field: 'industries' },
+  'urn:li:adTargetingFacet:companySize': { category: 'company', field: 'sizes' },
+  'urn:li:adTargetingFacet:companySizes': { category: 'company', field: 'sizes' },
+  'urn:li:adTargetingFacet:staffCountRanges': { category: 'company', field: 'sizes' },
+  'urn:li:adTargetingFacet:employers': { category: 'company', field: 'names' },
+  'urn:li:adTargetingFacet:companyNames': { category: 'company', field: 'names' },
+  'urn:li:adTargetingFacet:companyFollowers': { category: 'company', field: 'followers' },
+  'urn:li:adTargetingFacet:companyConnections': { category: 'company', field: 'followers' },
+  'urn:li:adTargetingFacet:growthRate': { category: 'company', field: 'growthRate' },
+  'urn:li:adTargetingFacet:companyCategory': { category: 'company', field: 'category' },
+  'urn:li:adTargetingFacet:ageRanges': { category: 'demographics', field: 'ages' },
+  'urn:li:adTargetingFacet:genders': { category: 'demographics', field: 'genders' },
+  'urn:li:adTargetingFacet:fieldsOfStudy': { category: 'education', field: 'fieldsOfStudy' },
+  'urn:li:adTargetingFacet:degrees': { category: 'education', field: 'degrees' },
+  'urn:li:adTargetingFacet:schools': { category: 'education', field: 'schools' },
+  'urn:li:adTargetingFacet:memberSchools': { category: 'education', field: 'schools' },
+  'urn:li:adTargetingFacet:jobTitles': { category: 'jobExperience', field: 'titles' },
+  'urn:li:adTargetingFacet:titles': { category: 'jobExperience', field: 'titles' },
+  'urn:li:adTargetingFacet:functions': { category: 'jobExperience', field: 'functions' },
+  'urn:li:adTargetingFacet:jobFunctions': { category: 'jobExperience', field: 'functions' },
+  'urn:li:adTargetingFacet:seniorities': { category: 'jobExperience', field: 'seniorities' },
+  'urn:li:adTargetingFacet:yearsOfExperience': { category: 'jobExperience', field: 'yearsOfExperience' },
+  'urn:li:adTargetingFacet:skills': { category: 'jobExperience', field: 'skills' },
+  'urn:li:adTargetingFacet:memberSkills': { category: 'jobExperience', field: 'skills' },
+  'urn:li:adTargetingFacet:interests': { category: 'interestsTraits', field: 'memberInterests' },
+  'urn:li:adTargetingFacet:memberInterests': { category: 'interestsTraits', field: 'memberInterests' },
+  'urn:li:adTargetingFacet:memberBehaviors': { category: 'interestsTraits', field: 'memberTraits' },
+  'urn:li:adTargetingFacet:memberTraits': { category: 'interestsTraits', field: 'memberTraits' },
+  'urn:li:adTargetingFacet:memberGroups': { category: 'interestsTraits', field: 'memberGroups' },
+  'urn:li:adTargetingFacet:groups': { category: 'interestsTraits', field: 'memberGroups' },
+  'urn:li:adTargetingFacet:audienceMatchingSegments': { category: 'audiences', field: '' },
+  'urn:li:adTargetingFacet:similarAudiences': { category: 'audiences', field: '' },
+  'urn:li:adTargetingFacet:dynamicSegments': { category: 'audiences', field: '' },
 };
 
 /**
@@ -37,43 +68,60 @@ const parseTargeting = (criteria: MockRawCampaign['targetingCriteria']): Targeti
     geos: [],
     audiences: [],
     companyLists: [],
-    industries: [],
-    jobTitles: [],
-    exclusions: {
-      geos: [],
-      audiences: [],
-      companyLists: [],
-      industries: [],
-      jobTitles: [],
-      other: []
+    company: { names: [], industries: [], sizes: [], followers: [], growthRate: [], category: [] },
+    demographics: { ages: [], genders: [] },
+    education: { fieldsOfStudy: [], degrees: [], schools: [] },
+    jobExperience: { titles: [], functions: [], seniorities: [], yearsOfExperience: [], skills: [] },
+    interestsTraits: { memberInterests: [], memberTraits: [], memberGroups: [] },
+    exclusions: { geos: [], audiences: [], companyLists: [], company: [], demographics: [], education: [], jobExperience: [], interestsTraits: [], other: [] }
+  };
+
+  const addToSummary = (facetKey: string, urns: string[], isExclusion: boolean = false) => {
+    const names = resolveUrns(urns);
+    const mapping = FACET_CATEGORY_MAPPING[facetKey];
+    
+    if (!mapping) {
+      if (isExclusion) summary.exclusions.other.push(...names);
+      return;
+    }
+    
+    if (isExclusion) {
+      const exclusionKey = mapping.category as keyof typeof summary.exclusions;
+      if (exclusionKey in summary.exclusions) {
+        (summary.exclusions[exclusionKey] as string[]).push(...names);
+      }
+    } else if (mapping.category === 'geos') {
+      summary.geos.push(...names);
+    } else if (mapping.category === 'audiences') {
+      summary.audiences.push(...names);
+    } else if (mapping.category === 'company' && mapping.field) {
+      (summary.company[mapping.field as keyof typeof summary.company] as string[]).push(...names);
+    } else if (mapping.category === 'jobExperience' && mapping.field) {
+      (summary.jobExperience[mapping.field as keyof typeof summary.jobExperience] as string[]).push(...names);
+    } else if (mapping.category === 'interestsTraits' && mapping.field) {
+      (summary.interestsTraits[mapping.field as keyof typeof summary.interestsTraits] as string[]).push(...names);
+    } else if (mapping.category === 'demographics' && mapping.field) {
+      (summary.demographics[mapping.field as keyof typeof summary.demographics] as string[]).push(...names);
+    } else if (mapping.category === 'education' && mapping.field) {
+      (summary.education[mapping.field as keyof typeof summary.education] as string[]).push(...names);
     }
   };
 
-  // Process INCLUDES (The "AND" logic)
   if (criteria.include?.and) {
     criteria.include.and.forEach((facetObj) => {
       Object.entries(facetObj).forEach(([facetKey, urns]) => {
-        const targetKey = FACET_MAPPING[facetKey];
-        if (targetKey && Array.isArray(urns) && targetKey !== 'exclusions') {
-          const names = resolveUrns(urns);
-          (summary[targetKey] as string[]).push(...names);
+        if (Array.isArray(urns)) {
+          addToSummary(facetKey, urns, false);
         }
       });
     });
   }
 
-  // Process EXCLUDES (The "OR" logic) - categorize by facet type
   if (criteria.exclude?.or && Array.isArray(criteria.exclude.or)) {
     criteria.exclude.or.forEach((facetObj) => {
       Object.entries(facetObj).forEach(([facetKey, urns]) => {
         if (Array.isArray(urns)) {
-          const names = resolveUrns(urns);
-          const targetKey = FACET_MAPPING[facetKey];
-          if (targetKey && targetKey !== 'exclusions' && summary.exclusions[targetKey as keyof typeof summary.exclusions]) {
-            (summary.exclusions[targetKey as keyof typeof summary.exclusions] as string[]).push(...names);
-          } else {
-            summary.exclusions.other.push(...names);
-          }
+          addToSummary(facetKey, urns, true);
         }
       });
     });
@@ -89,24 +137,85 @@ const aggregateTargeting = (campaigns: CampaignNode[]): TargetingSummary => {
   const allGeos = new Set<string>();
   const allAudiences = new Set<string>();
   const allCompanyLists = new Set<string>();
-  const allIndustries = new Set<string>();
+  const allCompanyNames = new Set<string>();
+  const allCompanyIndustries = new Set<string>();
+  const allCompanySizes = new Set<string>();
+  const allCompanyFollowers = new Set<string>();
+  const allCompanyGrowthRate = new Set<string>();
+  const allCompanyCategory = new Set<string>();
+  const allAges = new Set<string>();
+  const allGenders = new Set<string>();
+  const allFieldsOfStudy = new Set<string>();
+  const allDegrees = new Set<string>();
+  const allSchools = new Set<string>();
   const allJobTitles = new Set<string>();
+  const allJobFunctions = new Set<string>();
+  const allSeniorities = new Set<string>();
+  const allYearsOfExperience = new Set<string>();
+  const allSkills = new Set<string>();
+  const allMemberInterests = new Set<string>();
+  const allMemberTraits = new Set<string>();
+  const allMemberGroups = new Set<string>();
   
   campaigns.forEach(camp => {
     camp.targetingResolved.geos.forEach(g => allGeos.add(g));
     camp.targetingResolved.audiences.forEach(a => allAudiences.add(a));
     camp.targetingResolved.companyLists?.forEach(c => allCompanyLists.add(c));
-    camp.targetingResolved.industries.forEach(i => allIndustries.add(i));
-    camp.targetingResolved.jobTitles.forEach(j => allJobTitles.add(j));
+    camp.targetingResolved.company?.names?.forEach(n => allCompanyNames.add(n));
+    camp.targetingResolved.company?.industries?.forEach(i => allCompanyIndustries.add(i));
+    camp.targetingResolved.company?.sizes?.forEach(s => allCompanySizes.add(s));
+    camp.targetingResolved.company?.followers?.forEach(f => allCompanyFollowers.add(f));
+    camp.targetingResolved.company?.growthRate?.forEach(g => allCompanyGrowthRate.add(g));
+    camp.targetingResolved.company?.category?.forEach(c => allCompanyCategory.add(c));
+    camp.targetingResolved.demographics?.ages?.forEach(a => allAges.add(a));
+    camp.targetingResolved.demographics?.genders?.forEach(g => allGenders.add(g));
+    camp.targetingResolved.education?.fieldsOfStudy?.forEach(f => allFieldsOfStudy.add(f));
+    camp.targetingResolved.education?.degrees?.forEach(d => allDegrees.add(d));
+    camp.targetingResolved.education?.schools?.forEach(s => allSchools.add(s));
+    camp.targetingResolved.jobExperience?.titles?.forEach(j => allJobTitles.add(j));
+    camp.targetingResolved.jobExperience?.functions?.forEach(f => allJobFunctions.add(f));
+    camp.targetingResolved.jobExperience?.seniorities?.forEach(s => allSeniorities.add(s));
+    camp.targetingResolved.jobExperience?.yearsOfExperience?.forEach(y => allYearsOfExperience.add(y));
+    camp.targetingResolved.jobExperience?.skills?.forEach(s => allSkills.add(s));
+    camp.targetingResolved.interestsTraits?.memberInterests?.forEach(i => allMemberInterests.add(i));
+    camp.targetingResolved.interestsTraits?.memberTraits?.forEach(t => allMemberTraits.add(t));
+    camp.targetingResolved.interestsTraits?.memberGroups?.forEach(g => allMemberGroups.add(g));
   });
 
   return {
     geos: Array.from(allGeos),
     audiences: Array.from(allAudiences),
     companyLists: Array.from(allCompanyLists),
-    industries: Array.from(allIndustries),
-    jobTitles: Array.from(allJobTitles),
-    exclusions: { geos: [], audiences: [], companyLists: [], industries: [], jobTitles: [], other: [] }
+    company: {
+      names: Array.from(allCompanyNames),
+      industries: Array.from(allCompanyIndustries),
+      sizes: Array.from(allCompanySizes),
+      followers: Array.from(allCompanyFollowers),
+      growthRate: Array.from(allCompanyGrowthRate),
+      category: Array.from(allCompanyCategory),
+    },
+    demographics: {
+      ages: Array.from(allAges),
+      genders: Array.from(allGenders),
+    },
+    education: {
+      fieldsOfStudy: Array.from(allFieldsOfStudy),
+      degrees: Array.from(allDegrees),
+      schools: Array.from(allSchools),
+    },
+    jobExperience: {
+      titles: Array.from(allJobTitles),
+      functions: Array.from(allJobFunctions),
+      seniorities: Array.from(allSeniorities),
+      yearsOfExperience: Array.from(allYearsOfExperience),
+      skills: Array.from(allSkills),
+    },
+    interestsTraits: {
+      memberInterests: Array.from(allMemberInterests),
+      memberTraits: Array.from(allMemberTraits),
+      memberGroups: Array.from(allMemberGroups),
+    },
+    exclusions: { geos: [], audiences: [], companyLists: [], company: [], demographics: [], education: [], jobExperience: [], interestsTraits: [], other: [] }
   };
 };
 
@@ -240,13 +349,13 @@ export const getAllTargetingConnections = (data: AccountStructure): FlowData => 
 
       camp.targetingResolved.geos.forEach(t => register(t, 'GEO'));
       camp.targetingResolved.audiences.forEach(t => register(t, 'AUDIENCE'));
-      camp.targetingResolved.industries.forEach(t => register(t, 'INDUSTRY'));
-      camp.targetingResolved.jobTitles.forEach(t => register(t, 'JOB'));
+      camp.targetingResolved.company?.industries?.forEach(t => register(t, 'INDUSTRY'));
+      camp.targetingResolved.jobExperience?.titles?.forEach(t => register(t, 'JOB'));
       camp.targetingResolved.exclusions.geos.forEach(t => register(t, 'EXCLUSION'));
       camp.targetingResolved.exclusions.audiences.forEach(t => register(t, 'EXCLUSION'));
       camp.targetingResolved.exclusions.companyLists.forEach(t => register(t, 'EXCLUSION'));
-      camp.targetingResolved.exclusions.industries.forEach(t => register(t, 'EXCLUSION'));
-      camp.targetingResolved.exclusions.jobTitles.forEach(t => register(t, 'EXCLUSION'));
+      camp.targetingResolved.exclusions.company?.forEach(t => register(t, 'EXCLUSION'));
+      camp.targetingResolved.exclusions.jobExperience?.forEach(t => register(t, 'EXCLUSION'));
       camp.targetingResolved.exclusions.other.forEach(t => register(t, 'EXCLUSION'));
     });
   });
@@ -394,7 +503,7 @@ export const getRemarketingGraph = (data: AccountStructure): RemarketingGraph =>
         });
         
         // Also targets standard attributes?
-        [...campaign.targetingResolved.geos, ...campaign.targetingResolved.industries].forEach(attr => {
+        [...campaign.targetingResolved.geos, ...(campaign.targetingResolved.company?.industries || [])].forEach(attr => {
            addNode(attr, attr, 'SOURCE', 0);
            links.push({ source: attr, target: campaign.id });
         });
@@ -404,8 +513,8 @@ export const getRemarketingGraph = (data: AccountStructure): RemarketingGraph =>
         // Consumes Lists (Level 0) and Attributes (Level 0)
         [
            ...campaign.targetingResolved.geos, 
-           ...campaign.targetingResolved.industries,
-           ...campaign.targetingResolved.jobTitles,
+           ...(campaign.targetingResolved.company?.industries || []),
+           ...(campaign.targetingResolved.jobExperience?.titles || []),
            ...campaign.targetingResolved.audiences // These are Lists/Cold audiences
         ].forEach(attr => {
            addNode(attr, attr, 'SOURCE', 0); 

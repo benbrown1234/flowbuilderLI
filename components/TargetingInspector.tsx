@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { TargetingSummary, NodeType, CreativeNode, CreativeContent } from '../types';
-import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin, Building2, ExternalLink, MousePointer, FileText, Link2, Loader2, Maximize2, X } from 'lucide-react';
+import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin, Building2, ExternalLink, MousePointer, FileText, Link2, Loader2, Maximize2, X, GraduationCap, User, Heart, Zap, ChevronDown, ChevronUp } from 'lucide-react';
 import { getAdPreview, getCreativeDetails } from '../services/linkedinApi';
 
 const isThoughtLeaderAd = (name: string): boolean => {
@@ -38,6 +38,57 @@ const TargetingSection = ({ title, items, icon: Icon, colorClass, borderColor }:
           </span>
         ))}
       </div>
+    </div>
+  );
+};
+
+interface CategoryBoxProps {
+  title: string;
+  icon: any;
+  items: { label: string; values: string[] }[];
+  colorClass: string;
+  borderColor: string;
+  bgColor: string;
+}
+
+const CategoryBox: React.FC<CategoryBoxProps> = ({ title, icon: Icon, items, colorClass, borderColor, bgColor }) => {
+  const [isExpanded, setIsExpanded] = useState(true);
+  
+  const hasData = items.some(item => item.values.length > 0);
+  if (!hasData) return null;
+  
+  return (
+    <div className={`mb-4 rounded-lg border ${borderColor} ${bgColor} overflow-hidden`}>
+      <button 
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-opacity-80 transition-colors"
+      >
+        <h4 className="flex items-center text-sm font-bold text-gray-700 uppercase tracking-wide">
+          <Icon className="w-4 h-4 mr-2" />
+          {title}
+        </h4>
+        {isExpanded ? <ChevronUp className="w-4 h-4 text-gray-500" /> : <ChevronDown className="w-4 h-4 text-gray-500" />}
+      </button>
+      
+      {isExpanded && (
+        <div className="px-4 pb-3 space-y-3">
+          {items.map((item, idx) => {
+            if (item.values.length === 0) return null;
+            return (
+              <div key={idx}>
+                <p className="text-xs font-medium text-gray-500 mb-1.5">{item.label}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {item.values.map((value, vIdx) => (
+                    <span key={vIdx} className={`px-2 py-1 rounded text-xs font-medium border ${colorClass}`}>
+                      {value}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };
@@ -131,7 +182,6 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
 
   return (
     <div className="space-y-4">
-      {/* Preview Section - Compact with Expander */}
       <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
         {loading && (
           <div className="w-full h-48 flex flex-col items-center justify-center bg-gray-50">
@@ -209,7 +259,6 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
         )}
       </div>
 
-      {/* Status & Type Badges */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className={`text-xs font-semibold px-2.5 py-1 rounded border ${getStatusColor(status)}`}>
           {status || 'UNKNOWN'}
@@ -219,7 +268,6 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
         </span>
       </div>
 
-      {/* Ad Name Section */}
       <div className="space-y-1">
         <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Ad Name</label>
         <p className="text-base font-semibold text-gray-900 leading-snug">{creative.name}</p>
@@ -230,13 +278,11 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
         )}
       </div>
       
-      {/* Creative ID Section */}
       <div className="space-y-1">
         <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Creative ID</label>
         <p className="text-sm font-mono text-gray-600">{creative.id}</p>
       </div>
 
-      {/* Description Section */}
       {parsedContent?.description && (
         <div className="space-y-1 pt-2 border-t border-gray-100">
           <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Description</label>
@@ -244,7 +290,6 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
         </div>
       )}
 
-      {/* Call to Action Section */}
       {(parsedContent?.callToAction || leadgenCta?.buttonLabel) && (
         <div className="space-y-1">
           <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide flex items-center gap-1">
@@ -256,7 +301,6 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
         </div>
       )}
       
-      {/* Destination URL Section */}
       {(parsedContent?.destinationUrl || parsedContent?.landingPageUrl || leadgenCta?.destinationUrl) && (
         <div className="space-y-1">
           <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide flex items-center gap-1">
@@ -274,7 +318,6 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
         </div>
       )}
       
-      {/* Lead Form Section */}
       {(parsedContent?.leadFormId || leadgenCta?.leadgenCreativeFormId) && (
         <div className="space-y-1 bg-green-50 border border-green-200 rounded-lg p-3">
           <label className="text-[11px] font-semibold text-green-700 uppercase tracking-wide flex items-center gap-1">
@@ -302,11 +345,47 @@ const CreativePreview: React.FC<{ creative: CreativeNode, compact?: boolean }> =
 export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, accountId, isLiveData }) => {
   if (!node) return null;
 
-  // Helper to determine primary creative format from list
   const getPrimaryFormat = () => {
     if (!node.creatives || node.creatives.length === 0) return 'Unknown';
-    return node.creatives[0].format; // Just take the first one for summary
+    return node.creatives[0].format;
   };
+
+  const hasAnyExclusions = node.targeting?.exclusions && (
+    node.targeting.exclusions.geos.length > 0 ||
+    node.targeting.exclusions.companyLists.length > 0 ||
+    node.targeting.exclusions.audiences.length > 0 ||
+    node.targeting.exclusions.company.length > 0 ||
+    node.targeting.exclusions.demographics.length > 0 ||
+    node.targeting.exclusions.education.length > 0 ||
+    node.targeting.exclusions.jobExperience.length > 0 ||
+    node.targeting.exclusions.interestsTraits.length > 0 ||
+    node.targeting.exclusions.other.length > 0
+  );
+
+  const hasAnyTargeting = node.targeting && (
+    node.targeting.geos.length > 0 ||
+    node.targeting.audiences.length > 0 ||
+    (node.targeting.companyLists?.length || 0) > 0 ||
+    node.targeting.company?.industries?.length > 0 ||
+    node.targeting.company?.sizes?.length > 0 ||
+    node.targeting.company?.names?.length > 0 ||
+    node.targeting.company?.followers?.length > 0 ||
+    node.targeting.company?.category?.length > 0 ||
+    node.targeting.demographics?.ages?.length > 0 ||
+    node.targeting.demographics?.genders?.length > 0 ||
+    node.targeting.education?.fieldsOfStudy?.length > 0 ||
+    node.targeting.education?.degrees?.length > 0 ||
+    node.targeting.education?.schools?.length > 0 ||
+    node.targeting.jobExperience?.titles?.length > 0 ||
+    node.targeting.jobExperience?.functions?.length > 0 ||
+    node.targeting.jobExperience?.seniorities?.length > 0 ||
+    node.targeting.jobExperience?.yearsOfExperience?.length > 0 ||
+    node.targeting.jobExperience?.skills?.length > 0 ||
+    node.targeting.interestsTraits?.memberInterests?.length > 0 ||
+    node.targeting.interestsTraits?.memberTraits?.length > 0 ||
+    node.targeting.interestsTraits?.memberGroups?.length > 0 ||
+    hasAnyExclusions
+  );
 
   return (
     <div className="fixed inset-y-0 right-0 w-full md:w-[400px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-gray-200 z-50 overflow-y-auto">
@@ -321,7 +400,6 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
               {node.type === NodeType.GROUP ? 'CAMPAIGN GROUP' : 
                node.type === NodeType.CAMPAIGN ? 'CAMPAIGN' : 'AD'}
             </span>
-            {/* Only show name in header for non-CREATIVE nodes - creatives show name below */}
             {node.type !== NodeType.CREATIVE && (
               <h2 className="text-xl font-bold text-gray-900 mt-3 leading-snug break-words">{node.name}</h2>
             )}
@@ -333,7 +411,6 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
           </button>
         </div>
 
-        {/* 1. If it's a CREATIVE Node, show preview */}
         {node.type === NodeType.CREATIVE && node.singleCreative && (
           <div className="mb-8">
             <RichCreativePreview 
@@ -344,7 +421,6 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
           </div>
         )}
 
-        {/* 2. If it's a CAMPAIGN (AD GROUP), show Configuration Grid FIRST */}
         {node.type === NodeType.CAMPAIGN && (
           <>
             <div className="mb-6">
@@ -381,7 +457,6 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
               </div>
             </div>
 
-            {/* 3. If it's a CAMPAIGN, show Targeting Details */}
             {node.targeting && (
               <div className="mb-6">
                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center">
@@ -395,6 +470,75 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
                    colorClass="bg-blue-50 text-blue-700 border-blue-200"
                    borderColor="border-blue-100"
                  />
+
+                <CategoryBox
+                  title="Company"
+                  icon={Building2}
+                  items={[
+                    { label: 'Company Names', values: node.targeting.company?.names || [] },
+                    { label: 'Industries', values: node.targeting.company?.industries || [] },
+                    { label: 'Company Sizes', values: node.targeting.company?.sizes || [] },
+                    { label: 'Followers / Connections', values: node.targeting.company?.followers || [] },
+                    { label: 'Growth Rate', values: node.targeting.company?.growthRate || [] },
+                    { label: 'Company Category', values: node.targeting.company?.category || [] },
+                  ]}
+                  colorClass="bg-indigo-50 text-indigo-700 border-indigo-200"
+                  borderColor="border-indigo-200"
+                  bgColor="bg-indigo-50/50"
+                />
+
+                <CategoryBox
+                  title="Demographics"
+                  icon={User}
+                  items={[
+                    { label: 'Age Ranges', values: node.targeting.demographics?.ages || [] },
+                    { label: 'Gender', values: node.targeting.demographics?.genders || [] },
+                  ]}
+                  colorClass="bg-pink-50 text-pink-700 border-pink-200"
+                  borderColor="border-pink-200"
+                  bgColor="bg-pink-50/50"
+                />
+
+                <CategoryBox
+                  title="Education"
+                  icon={GraduationCap}
+                  items={[
+                    { label: 'Fields of Study', values: node.targeting.education?.fieldsOfStudy || [] },
+                    { label: 'Degrees', values: node.targeting.education?.degrees || [] },
+                    { label: 'Schools / Institutions', values: node.targeting.education?.schools || [] },
+                  ]}
+                  colorClass="bg-amber-50 text-amber-700 border-amber-200"
+                  borderColor="border-amber-200"
+                  bgColor="bg-amber-50/50"
+                />
+
+                <CategoryBox
+                  title="Job Experience"
+                  icon={Briefcase}
+                  items={[
+                    { label: 'Job Titles', values: node.targeting.jobExperience?.titles || [] },
+                    { label: 'Job Functions', values: node.targeting.jobExperience?.functions || [] },
+                    { label: 'Seniority Levels', values: node.targeting.jobExperience?.seniorities || [] },
+                    { label: 'Years of Experience', values: node.targeting.jobExperience?.yearsOfExperience || [] },
+                    { label: 'Skills', values: node.targeting.jobExperience?.skills || [] },
+                  ]}
+                  colorClass="bg-orange-50 text-orange-700 border-orange-200"
+                  borderColor="border-orange-200"
+                  bgColor="bg-orange-50/50"
+                />
+
+                <CategoryBox
+                  title="Interests & Traits"
+                  icon={Heart}
+                  items={[
+                    { label: 'Member Interests', values: node.targeting.interestsTraits?.memberInterests || [] },
+                    { label: 'Member Traits / Behaviors', values: node.targeting.interestsTraits?.memberTraits || [] },
+                    { label: 'Groups', values: node.targeting.interestsTraits?.memberGroups || [] },
+                  ]}
+                  colorClass="bg-rose-50 text-rose-700 border-rose-200"
+                  borderColor="border-rose-200"
+                  bgColor="bg-rose-50/50"
+                />
 
                 <TargetingSection 
                   title="Company Lists" 
@@ -412,30 +556,7 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
                   borderColor="border-purple-100"
                 />
 
-                <TargetingSection 
-                  title="Industries" 
-                  items={node.targeting.industries} 
-                  icon={Briefcase}
-                  colorClass="bg-indigo-50 text-indigo-700 border-indigo-200"
-                  borderColor="border-indigo-100"
-                />
-
-                <TargetingSection 
-                  title="Job Titles" 
-                  items={node.targeting.jobTitles} 
-                  icon={Target}
-                  colorClass="bg-orange-50 text-orange-700 border-orange-200"
-                  borderColor="border-orange-100"
-                />
-
-                {node.targeting.exclusions && (
-                  node.targeting.exclusions.geos.length > 0 ||
-                  node.targeting.exclusions.companyLists.length > 0 ||
-                  node.targeting.exclusions.audiences.length > 0 ||
-                  node.targeting.exclusions.industries.length > 0 ||
-                  node.targeting.exclusions.jobTitles.length > 0 ||
-                  node.targeting.exclusions.other.length > 0
-                ) && (
+                {hasAnyExclusions && (
                   <div className="mt-6 pt-4 border-t border-red-100">
                     <h4 className="flex items-center text-xs font-bold text-red-600 mb-3 uppercase tracking-wide">
                       <UserX className="w-3.5 h-3.5 mr-2" />
@@ -467,17 +588,17 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
                     />
                     
                     <TargetingSection 
-                      title="Excluded Industries" 
-                      items={node.targeting.exclusions.industries} 
-                      icon={Briefcase}
+                      title="Excluded Company Criteria" 
+                      items={node.targeting.exclusions.company} 
+                      icon={Building2}
                       colorClass="bg-red-50 text-red-700 border-red-200"
                       borderColor="border-red-100"
                     />
                     
                     <TargetingSection 
-                      title="Excluded Job Titles" 
-                      items={node.targeting.exclusions.jobTitles} 
-                      icon={Target}
+                      title="Excluded Job Experience" 
+                      items={node.targeting.exclusions.jobExperience} 
+                      icon={Briefcase}
                       colorClass="bg-red-50 text-red-700 border-red-200"
                       borderColor="border-red-100"
                     />
@@ -492,8 +613,7 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
                   </div>
                 )}
                 
-                {(node.targeting.geos.length === 0 && node.targeting.audiences.length === 0 && (node.targeting.companyLists?.length || 0) === 0 && node.targeting.industries.length === 0 && node.targeting.jobTitles.length === 0 && 
-                  node.targeting.exclusions.geos.length === 0 && node.targeting.exclusions.audiences.length === 0 && node.targeting.exclusions.companyLists.length === 0 && node.targeting.exclusions.industries.length === 0 && node.targeting.exclusions.jobTitles.length === 0 && node.targeting.exclusions.other.length === 0) && (
+                {!hasAnyTargeting && (
                   <div className="text-gray-400 italic text-sm text-center py-4 bg-gray-50 rounded border border-gray-100 border-dashed">
                     No specific targeting criteria found.
                   </div>
@@ -503,7 +623,6 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
           </>
         )}
 
-        {/* 4. If it's a GROUP, just show minimal info */}
         {node.type === NodeType.GROUP && (
            <div className="text-gray-500 text-sm">
              <p className="mb-4">This contains specific ad groups that define targeting.</p>
@@ -514,7 +633,6 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
            </div>
         )}
 
-        {/* 5. If it's a CAMPAIGN, show List of Creatives */}
         {node.type === NodeType.CAMPAIGN && node.creatives && node.creatives.length > 0 && (
           <div className="mt-8 pt-6 border-t border-gray-100">
             <h3 className="text-xs font-bold uppercase text-gray-500 mb-4 flex items-center tracking-wider">
