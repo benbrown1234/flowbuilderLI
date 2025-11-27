@@ -1,8 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { TargetingSummary, NodeType, CreativeNode, CreativeContent } from '../types';
-import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin, Building2, ExternalLink, MousePointer, FileText, Link2, Loader2, Maximize2, Minimize2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin, Building2, ExternalLink, MousePointer, FileText, Link2, Loader2, Maximize2, X } from 'lucide-react';
 import { getAdPreview, getCreativeDetails } from '../services/linkedinApi';
+
+const isThoughtLeaderAd = (name: string): boolean => {
+  return /^Creative\s*\d+$/i.test(name.trim());
+};
 
 interface InspectorProps {
   node: {
@@ -137,40 +141,57 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
         )}
         
         {!loading && previewHtml && (
-          <div className="relative">
-            <div 
-              className={`w-full overflow-hidden transition-all duration-300 ${isPreviewExpanded ? 'max-h-none' : 'max-h-72'}`}
-            >
-              <div 
-                className="w-full origin-top-left"
-                style={{ 
-                  transform: isPreviewExpanded ? 'scale(1)' : 'scale(0.55)',
-                  transformOrigin: 'top left',
-                  width: isPreviewExpanded ? '100%' : '182%'
-                }}
-                dangerouslySetInnerHTML={{ __html: previewHtml }} 
-              />
-            </div>
-            {!isPreviewExpanded && (
+          <>
+            <div className="relative">
+              <div className="w-full overflow-hidden max-h-72">
+                <div 
+                  className="w-full origin-top-left"
+                  style={{ 
+                    transform: 'scale(0.55)',
+                    transformOrigin: 'top left',
+                    width: '182%'
+                  }}
+                  dangerouslySetInnerHTML={{ __html: previewHtml }} 
+                />
+              </div>
               <div className="absolute bottom-8 left-0 right-0 h-8 bg-gradient-to-t from-white to-transparent pointer-events-none" />
+              <button
+                onClick={() => setIsPreviewExpanded(true)}
+                className="w-full py-2 flex items-center justify-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 border-t border-gray-100 transition-colors"
+              >
+                <Maximize2 className="w-4 h-4" />
+                View Full Preview
+              </button>
+            </div>
+            
+            {isPreviewExpanded && (
+              <div 
+                className="fixed inset-0 bg-black bg-opacity-50 z-[100] flex items-center justify-center p-4"
+                onClick={() => setIsPreviewExpanded(false)}
+              >
+                <div 
+                  className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-auto relative"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between z-10">
+                    <h3 className="font-semibold text-gray-900">Ad Preview</h3>
+                    <button
+                      onClick={() => setIsPreviewExpanded(false)}
+                      className="p-1.5 hover:bg-gray-100 rounded-full text-gray-500 hover:text-gray-700 transition-colors"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div className="p-4">
+                    <div 
+                      className="w-full"
+                      dangerouslySetInnerHTML={{ __html: previewHtml }} 
+                    />
+                  </div>
+                </div>
+              </div>
             )}
-            <button
-              onClick={() => setIsPreviewExpanded(!isPreviewExpanded)}
-              className="w-full py-2 flex items-center justify-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 border-t border-gray-100 transition-colors"
-            >
-              {isPreviewExpanded ? (
-                <>
-                  <ChevronUp className="w-4 h-4" />
-                  Collapse Preview
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="w-4 h-4" />
-                  Expand Preview
-                </>
-              )}
-            </button>
-          </div>
+          </>
         )}
         
         {!loading && !previewHtml && (
@@ -202,6 +223,11 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
       <div className="space-y-1">
         <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Ad Name</label>
         <p className="text-base font-semibold text-gray-900 leading-snug">{creative.name}</p>
+        {isThoughtLeaderAd(creative.name) && (
+          <span className="inline-block mt-1 text-xs font-medium px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200">
+            Thought Leader Ad
+          </span>
+        )}
       </div>
       
       {/* Creative ID Section */}
