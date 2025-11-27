@@ -526,9 +526,41 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
       });
     }
 
+    const engagementRules = rawData.engagementRules || [];
+    
+    const segmentToSourceCampaigns: Record<string, string[]> = {};
+    const segmentToTrigger: Record<string, string> = {};
+    
+    engagementRules.forEach((rule: any) => {
+      const segmentUrn = rule.segment;
+      const segmentId = extractIdFromUrn(segmentUrn);
+      
+      if (rule.engagementSources && Array.isArray(rule.engagementSources)) {
+        const campaignIds = rule.engagementSources
+          .filter((src: string) => src.includes('sponsoredCampaign'))
+          .map((src: string) => extractIdFromUrn(src));
+        
+        if (campaignIds.length > 0) {
+          if (!segmentToSourceCampaigns[segmentId]) {
+            segmentToSourceCampaigns[segmentId] = [];
+          }
+          segmentToSourceCampaigns[segmentId].push(...campaignIds);
+        }
+      }
+      
+      if (rule.engagementTrigger) {
+        const triggerMatch = rule.engagementTrigger.match(/,([A-Z_]+)\)/);
+        if (triggerMatch) {
+          segmentToTrigger[segmentId] = triggerMatch[1];
+        }
+      }
+    });
+    
+    console.log(`Built source campaign map for ${Object.keys(segmentToSourceCampaigns).length} segments from ${engagementRules.length} engagement rules`);
+
     const processedSegments = segments.map((seg: any) => {
       const segId = extractIdFromUrn(seg.id);
-      let segType: 'WEBSITE' | 'COMPANY' | 'CONTACT' | 'LOOKALIKE' | 'OTHER' = 'OTHER';
+      let segType: 'WEBSITE' | 'VIDEO' | 'COMPANY' | 'CONTACT' | 'LOOKALIKE' | 'ENGAGED' | 'OTHER' = 'OTHER';
       
       console.log(`Segment ${segId}: type=${seg.type}, sourceSegmentSubType=${seg.sourceSegmentSubType}, entityType=${seg.entityType}, name=${seg.name}`);
       
@@ -554,12 +586,21 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
         segType = 'LOOKALIKE';
       }
       
+      const sourceCampaigns = segmentToSourceCampaigns[segId] || [];
+      const engagementTrigger = segmentToTrigger[segId];
+      
+      if (sourceCampaigns.length > 0) {
+        console.log(`Segment ${segId} (${seg.name}) has ${sourceCampaigns.length} source campaigns: ${sourceCampaigns.join(', ')}`);
+      }
+      
       return {
         id: segId,
         name: seg.name || `Segment ${segId}`,
         type: segType,
         status: seg.status || 'UNKNOWN',
         audienceCount: seg.approximateMemberCount || seg.audienceCount,
+        sourceCampaigns: sourceCampaigns.length > 0 ? sourceCampaigns : undefined,
+        engagementTrigger,
       };
     });
 

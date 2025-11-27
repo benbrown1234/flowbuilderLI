@@ -83,6 +83,8 @@ export interface SegmentNode {
   type: 'WEBSITE' | 'VIDEO' | 'COMPANY' | 'CONTACT' | 'LOOKALIKE' | 'ENGAGED' | 'OTHER';
   status: string;
   audienceCount?: number;
+  sourceCampaigns?: string[];
+  engagementTrigger?: string;
 }
 
 export interface AccountStructure {

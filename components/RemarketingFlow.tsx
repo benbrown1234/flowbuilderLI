@@ -224,44 +224,27 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
     const allColdCampaigns = allCampaigns.filter(c => c.targetedAudiences.length === 0);
     const allRemarketingCampaigns = allCampaigns.filter(c => c.targetedAudiences.length > 0);
 
-    // Infer source connections: which cold campaigns could generate which audiences
-    const isVideoCampaign = (campaign: CampaignInfo): boolean => {
-      const objective = campaign.campaign.objective?.toLowerCase() || '';
-      const name = campaign.name.toLowerCase();
-      return objective.includes('video') || 
-             name.includes('video') || 
-             name.includes('tla') || // Thought Leader Ads often video
-             objective.includes('awareness'); // Awareness campaigns often run video
-    };
+    // Build source connections from actual engagement rules data (sourceCampaigns on segments)
+    // This shows which campaigns are actually included in each remarketing audience
+    data.segments?.forEach(seg => {
+      if (seg.sourceCampaigns && seg.sourceCampaigns.length > 0) {
+        const audId = segmentIdToAudId.get(seg.id) || segmentIdToAudId.get(`urn:li:adSegment:${seg.id}`);
+        if (audId && audienceMap.has(audId)) {
+          seg.sourceCampaigns.forEach(campaignId => {
+            // Skip if already linked via outputAudiences
+            const alreadyLinked = outputLinks.some(
+              l => l.campaignId === campaignId && l.audienceId === audId
+            );
+            if (alreadyLinked) return;
 
-    const isEngagementCampaign = (campaign: CampaignInfo): boolean => {
-      const objective = campaign.campaign.objective?.toLowerCase() || '';
-      return objective.includes('engagement') || objective.includes('consideration');
-    };
-
-    // For each cold campaign, check which audiences it might have generated
-    allColdCampaigns.forEach(coldCampaign => {
-      const campaignIsVideo = isVideoCampaign(coldCampaign);
-      const campaignIsEngagement = isEngagementCampaign(coldCampaign);
-
-      audienceMap.forEach((audience, audId) => {
-        // Skip if already linked via outputAudiences
-        const alreadyLinked = outputLinks.some(
-          l => l.campaignId === coldCampaign.id && l.audienceId === audId
-        );
-        if (alreadyLinked) return;
-
-        // Video campaigns → Video viewer audiences
-        if (campaignIsVideo && audience.type === 'VIDEO') {
-          sourceLinks.push({ campaignId: coldCampaign.id, audienceId: audId });
-          audience.feedingCampaigns.push(coldCampaign.id);
+            sourceLinks.push({ campaignId, audienceId: audId });
+            const audience = audienceMap.get(audId)!;
+            if (!audience.feedingCampaigns.includes(campaignId)) {
+              audience.feedingCampaigns.push(campaignId);
+            }
+          });
         }
-        // Any cold campaign with ads → Ad engagement audiences
-        else if (campaignIsEngagement && audience.type === 'ENGAGED') {
-          sourceLinks.push({ campaignId: coldCampaign.id, audienceId: audId });
-          audience.feedingCampaigns.push(coldCampaign.id);
-        }
-      });
+      }
     });
 
     const usedAudienceIds = new Set<string>();

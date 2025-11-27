@@ -429,6 +429,26 @@ app.get('/api/linkedin/account/:accountId/segments', requireAuth, async (req, re
   }
 });
 
+app.get('/api/linkedin/account/:accountId/engagement-rules', requireAuth, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+    const data = await linkedinApiRequest(
+      (req as any).sessionId, 
+      '/dmpEngagementRules',
+      {},
+      `q=account&account=${accountUrn}`
+    );
+    console.log('Engagement rules response:', JSON.stringify(data, null, 2).substring(0, 1000));
+    res.json(data);
+  } catch (err: any) {
+    console.error('Engagement rules error:', err.response?.data || err.message);
+    res.status(err.response?.status || 500).json({ 
+      error: err.response?.data || err.message 
+    });
+  }
+});
+
 app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, res) => {
   try {
     const { accountId } = req.params;
@@ -441,6 +461,7 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     let campaigns: any[] = [];
     let creatives: any[] = [];
     let segments: any[] = [];
+    let engagementRules: any[] = [];
     const errors: string[] = [];
     
     try {
@@ -529,13 +550,33 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
       errors.push(errorMsg);
     }
     
-    console.log(`=== Summary: ${groups.length} groups, ${campaigns.length} campaigns, ${creatives.length} creatives, ${segments.length} segments ===\n`);
+    try {
+      const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+      const rulesResponse = await linkedinApiRequest(
+        sessionId, 
+        '/dmpEngagementRules',
+        {},
+        `q=account&account=${accountUrn}`
+      );
+      engagementRules = rulesResponse.elements || [];
+      console.log(`Engagement rules fetched: ${engagementRules.length} items`);
+      if (engagementRules.length > 0) {
+        console.log(`First engagement rule sample: ${JSON.stringify(engagementRules[0], null, 2).substring(0, 800)}`);
+      }
+    } catch (err: any) {
+      const errorMsg = `Engagement rules error: ${JSON.stringify(err.response?.data || err.message)}`;
+      console.error(errorMsg);
+      errors.push(errorMsg);
+    }
+    
+    console.log(`=== Summary: ${groups.length} groups, ${campaigns.length} campaigns, ${creatives.length} creatives, ${segments.length} segments, ${engagementRules.length} engagement rules ===\n`);
     
     res.json({
       groups,
       campaigns,
       creatives,
       segments,
+      engagementRules,
       _debug: errors.length > 0 ? { errors } : undefined,
     });
   } catch (err: any) {
