@@ -434,7 +434,10 @@ export const getTreeGraph = (account: AccountStructure) => {
   const nodes: TreeNode[] = [];
   const links: TreeLink[] = [];
   
-  const X_SPACING = 360;
+  const X_SPACING = 320;
+  const AD_WIDTH = 130; // Half width for 2-column layout
+  const AD_HEIGHT = 50; // Compact ad height
+  const AD_GAP = 8; // Gap between ads
   
   // Use a mutable cursor to track vertical position in pixels
   let currentY = 0;
@@ -446,8 +449,8 @@ export const getTreeGraph = (account: AccountStructure) => {
     const hasChildren = children.length > 0;
 
     if (!hasChildren) {
-      // Determine slot height: Creatives are packed tighter (80px), Groups/Campaigns get more room (180px)
-      const slotHeight = type === NodeType.CREATIVE ? 80 : 180;
+      // Determine slot height: Creatives are packed tighter, Groups/Campaigns get more room
+      const slotHeight = type === NodeType.CREATIVE ? AD_HEIGHT : 120;
       
       const y = currentY + (slotHeight / 2);
       currentY += slotHeight;
@@ -472,17 +475,44 @@ export const getTreeGraph = (account: AccountStructure) => {
 
     const childYs: number[] = [];
     
-    children.forEach((child: any, index: number) => {
-       // If we are processing sibling Ad Groups (Campaigns), add some visual separation
-       // We don't want Ad Group A overlapping Ad Group B just because Ads are tight.
-       if (childType === NodeType.CAMPAIGN && index > 0) {
-          currentY += 60; // Padding between Ad Groups
-       }
+    // Special handling for creatives - 2 column layout
+    if (childType === NodeType.CREATIVE && children.length > 0) {
+      const startY = currentY;
+      const numRows = Math.ceil(children.length / 2);
+      
+      children.forEach((child: any, index: number) => {
+        const row = Math.floor(index / 2);
+        const col = index % 2;
+        
+        const x = level * X_SPACING + (col * (AD_WIDTH + AD_GAP));
+        const y = startY + (row * (AD_HEIGHT + AD_GAP)) + (AD_HEIGHT / 2);
+        
+        nodes.push({
+          id: child.id,
+          type: NodeType.CREATIVE,
+          name: child.name,
+          x,
+          y,
+          data: child
+        });
+        
+        childYs.push(y);
+        links.push({ source: node.id, target: child.id });
+      });
+      
+      currentY = startY + (numRows * (AD_HEIGHT + AD_GAP));
+    } else {
+      children.forEach((child: any, index: number) => {
+         // If we are processing sibling Ad Groups (Campaigns), add some visual separation
+         if (childType === NodeType.CAMPAIGN && index > 0) {
+            currentY += 30; // Reduced padding between Campaigns
+         }
 
-       const cy = traverse(child, childType, level + 1);
-       childYs.push(cy);
-       links.push({ source: node.id, target: child.id });
-    });
+         const cy = traverse(child, childType, level + 1);
+         childYs.push(cy);
+         links.push({ source: node.id, target: child.id });
+      });
+    }
 
     // Center parent based on children
     const minY = Math.min(...childYs);

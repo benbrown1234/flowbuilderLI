@@ -43,6 +43,7 @@ Required secrets for LinkedIn API:
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-27: Compact structure layout - campaigns closer together, ads displayed in 2-column grid layout to save space for large accounts
 - 2025-11-27: Added full-screen modal popup for ad preview - "View Full Preview" opens centered modal with full-size ad preview
 - 2025-11-27: Added "Thought Leader Ad" label - automatically shown when ad name is "Creative" + number format
 - 2025-11-27: Improved creative preview UI - scaled preview fits within panel, properly labeled sections (AD NAME, CREATIVE ID, DESCRIPTION, CALL TO ACTION, DESTINATION URL, LEAD FORM)
