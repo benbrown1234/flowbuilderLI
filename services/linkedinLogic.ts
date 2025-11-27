@@ -198,6 +198,7 @@ export interface FlowData {
   campaigns: {
     id: string;
     name: string;
+    groupId: string;
     groupName: string;
   }[];
   connections: {
@@ -207,7 +208,7 @@ export interface FlowData {
 }
 
 export const getAllTargetingConnections = (data: AccountStructure): FlowData => {
-  const campaignsList: { id: string; name: string; groupName: string }[] = [];
+  const campaignsList: { id: string; name: string; groupId: string; groupName: string }[] = [];
   
   // 1. Collect all "Edges" (Targeting Facet -> Campaign ID)
   // We store them as: FacetName -> Set<CampaignID>
@@ -217,7 +218,7 @@ export const getAllTargetingConnections = (data: AccountStructure): FlowData => 
 
   data.groups.forEach(group => {
     group.children.forEach(camp => {
-      campaignsList.push({ id: camp.id, name: camp.name, groupName: group.name });
+      campaignsList.push({ id: camp.id, name: camp.name, groupId: group.id, groupName: group.name });
 
       const register = (val: string, type: 'GEO' | 'AUDIENCE' | 'INDUSTRY' | 'JOB' | 'EXCLUSION') => {
          if (!facetToCampaigns.has(val)) facetToCampaigns.set(val, new Set());

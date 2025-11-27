@@ -2,7 +2,7 @@
 import React, { useLayoutEffect, useRef, useState, useEffect } from 'react';
 import { AccountStructure, NodeType, TargetingSummary, CreativeNode, OnSelectHandler } from '../types';
 import { getAllTargetingConnections, FlowData } from '../services/linkedinLogic';
-import { Globe, Users, Briefcase, Target, UserX, ArrowRight, MousePointerClick, Layers, ChevronDown, X } from 'lucide-react';
+import { Globe, Users, Briefcase, Target, UserX, ArrowRight, Layers, ChevronDown, X } from 'lucide-react';
 
 interface AudienceFlowProps {
   data: AccountStructure;
@@ -19,26 +19,73 @@ interface TooltipState {
 export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) => {
   const [flowData, setFlowData] = useState<FlowData | null>(null);
   const [lines, setLines] = useState<{ x1: number, y1: number, x2: number, y2: number, key: string, type: string }[]>([]);
-  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
   const [showGroupDropdown, setShowGroupDropdown] = useState(false);
+  const [lineRecalcKey, setLineRecalcKey] = useState(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   useEffect(() => {
-    setFlowData(getAllTargetingConnections(data));
+    const fd = getAllTargetingConnections(data);
+    setFlowData(fd);
   }, [data]);
 
+  const campaignGroups = data.groups.map(g => ({ id: g.id, name: g.name }));
+
+  const getFilteredData = () => {
+    if (!flowData) return { campaigns: [], facets: [], connections: [] };
+    
+    let campaigns = flowData.campaigns;
+    let connections = flowData.connections;
+    let facets = flowData.facets;
+    
+    if (selectedGroupId !== 'all') {
+      campaigns = flowData.campaigns.filter(c => c.groupId === selectedGroupId);
+      const campaignIds = new Set(campaigns.map(c => c.id));
+      connections = flowData.connections.filter(conn => campaignIds.has(conn.targetId));
+      const connectedFacetIds = new Set(connections.map(c => c.sourceId));
+      facets = flowData.facets.filter(f => connectedFacetIds.has(f.id));
+    }
+    
+    if (selectedNode) {
+      const isCampaign = campaigns.some(c => c.id === selectedNode);
+      const isFacet = facets.some(f => f.id === selectedNode);
+      
+      if (isCampaign) {
+        const connectedFacetIds = new Set(
+          connections.filter(c => c.targetId === selectedNode).map(c => c.sourceId)
+        );
+        facets = facets.filter(f => connectedFacetIds.has(f.id));
+        campaigns = campaigns.filter(c => c.id === selectedNode);
+        connections = connections.filter(c => c.targetId === selectedNode);
+      } else if (isFacet) {
+        const connectedCampaignIds = new Set(
+          connections.filter(c => c.sourceId === selectedNode).map(c => c.targetId)
+        );
+        campaigns = campaigns.filter(c => connectedCampaignIds.has(c.id));
+        facets = facets.filter(f => f.id === selectedNode);
+        connections = connections.filter(c => c.sourceId === selectedNode);
+      }
+    }
+    
+    return { campaigns, facets, connections };
+  };
+
+  const { campaigns: filteredCampaigns, facets: filteredFacets, connections: filteredConnections } = getFilteredData();
+
+  const includedFacets = filteredFacets.filter(f => f.type !== 'EXCLUSION');
+  const excludedFacets = filteredFacets.filter(f => f.type === 'EXCLUSION');
+
   const calculateLines = () => {
-    if (!flowData || !containerRef.current) return;
+    if (!containerRef.current) return;
 
     const containerRect = containerRef.current.getBoundingClientRect();
     const newLines: typeof lines = [];
 
-    flowData.connections.forEach((conn) => {
+    filteredConnections.forEach((conn) => {
       const sourceEl = itemRefs.current.get(conn.sourceId);
       const targetEl = itemRefs.current.get(conn.targetId);
 
@@ -46,14 +93,19 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
         const sourceRect = sourceEl.getBoundingClientRect();
         const targetRect = targetEl.getBoundingClientRect();
 
-        newLines.push({
-          x1: sourceRect.right - containerRect.left,
-          y1: sourceRect.top + sourceRect.height / 2 - containerRect.top,
-          x2: targetRect.left - containerRect.left,
-          y2: targetRect.top + targetRect.height / 2 - containerRect.top,
-          key: `${conn.sourceId}-${conn.targetId}`,
-          type: flowData.facets.find(f => f.id === conn.sourceId)?.type || 'UNKNOWN'
-        });
+        const x1 = sourceRect.right - containerRect.left;
+        const y1 = sourceRect.top + sourceRect.height / 2 - containerRect.top;
+        const x2 = targetRect.left - containerRect.left;
+        const y2 = targetRect.top + targetRect.height / 2 - containerRect.top;
+
+        if (x1 > 0 && y1 > 0 && x2 > 0 && y2 > 0) {
+          const facet = filteredFacets.find(f => f.id === conn.sourceId);
+          newLines.push({
+            x1, y1, x2, y2,
+            key: `${conn.sourceId}-${conn.targetId}`,
+            type: facet?.type || 'UNKNOWN'
+          });
+        }
       }
     });
 
@@ -61,62 +113,27 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
   };
 
   useLayoutEffect(() => {
-    calculateLines();
-    window.addEventListener('resize', calculateLines);
-    const timer = setTimeout(calculateLines, 100);
-    return () => {
-        window.removeEventListener('resize', calculateLines);
-        clearTimeout(timer);
-    };
-  }, [flowData, selectedNode, selectedGroupId]);
+    itemRefs.current.clear();
+  }, [selectedGroupId, selectedNode]);
+
+  useLayoutEffect(() => {
+    const timer = setTimeout(calculateLines, 150);
+    return () => clearTimeout(timer);
+  }, [filteredConnections, lineRecalcKey]);
 
   useEffect(() => {
-    const timer = setTimeout(calculateLines, 50);
-    return () => clearTimeout(timer);
-  }, [selectedNode, selectedGroupId]);
+    const handleResize = () => {
+      setLineRecalcKey(k => k + 1);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    setLineRecalcKey(k => k + 1);
+  }, [selectedGroupId, selectedNode]);
 
   if (!flowData) return null;
-
-  const campaignGroups = data.groups.map(g => ({ id: g.id, name: g.name }));
-
-  const filteredCampaigns = selectedGroupId 
-    ? flowData.campaigns.filter(camp => camp.groupId === selectedGroupId)
-    : flowData.campaigns;
-
-  const filteredCampaignIds = new Set(filteredCampaigns.map(c => c.id));
-  
-  const filteredConnections = selectedGroupId
-    ? flowData.connections.filter(conn => filteredCampaignIds.has(conn.targetId))
-    : flowData.connections;
-
-  const connectedFacetIds = new Set(filteredConnections.map(c => c.sourceId));
-  
-  const filteredFacets = selectedGroupId
-    ? flowData.facets.filter(f => connectedFacetIds.has(f.id))
-    : flowData.facets;
-
-  const getConnectedFacetIds = (nodeId: string): Set<string> => {
-    const connected = new Set<string>();
-    filteredConnections.forEach(conn => {
-      if (conn.targetId === nodeId) {
-        connected.add(conn.sourceId);
-      }
-      if (conn.sourceId === nodeId) {
-        connected.add(conn.targetId);
-      }
-    });
-    return connected;
-  };
-
-  const getConnectedCampaignIds = (facetId: string): Set<string> => {
-    const connected = new Set<string>();
-    filteredConnections.forEach(conn => {
-      if (conn.sourceId === facetId) {
-        connected.add(conn.targetId);
-      }
-    });
-    return connected;
-  };
 
   const handleCampaignClick = (id: string) => {
     if (selectedNode === id) {
@@ -151,10 +168,6 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
   };
 
   const handleMouseEnterFacet = (item: typeof flowData.facets[0], e: React.MouseEvent) => {
-    if (!selectedNode) {
-      setHoveredNode(item.id);
-    }
-    
     if (item.count > 1 && item.items) {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       setTooltip({
@@ -167,73 +180,12 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
   };
 
   const handleMouseLeaveFacet = () => {
-    if (!selectedNode) {
-      setHoveredNode(null);
-    }
     setTooltip(null);
-  };
-
-  const handleMouseEnterCampaign = (id: string) => {
-    if (!selectedNode) {
-      setHoveredNode(id);
-    }
-  };
-
-  const handleMouseLeaveCampaign = () => {
-    if (!selectedNode) {
-      setHoveredNode(null);
-    }
   };
 
   const clearSelection = () => {
     setSelectedNode(null);
-    setHoveredNode(null);
   };
-
-  const activeNode = selectedNode || hoveredNode;
-
-  const includedFacets = filteredFacets.filter(f => f.type !== 'EXCLUSION');
-  const excludedFacets = filteredFacets.filter(f => f.type === 'EXCLUSION');
-
-  const getVisibleFacets = (facets: typeof flowData.facets) => {
-    if (!activeNode) return facets;
-    
-    const isCampaignSelected = filteredCampaigns.some(c => c.id === activeNode);
-    const isFacetSelected = filteredFacets.some(f => f.id === activeNode);
-    
-    if (isCampaignSelected) {
-      const connectedIds = getConnectedFacetIds(activeNode);
-      return facets.filter(f => connectedIds.has(f.id));
-    }
-    
-    if (isFacetSelected) {
-      return facets.filter(f => f.id === activeNode);
-    }
-    
-    return facets;
-  };
-
-  const getVisibleCampaigns = () => {
-    if (!activeNode) return filteredCampaigns;
-    
-    const isCampaignSelected = filteredCampaigns.some(c => c.id === activeNode);
-    const isFacetSelected = filteredFacets.some(f => f.id === activeNode);
-    
-    if (isCampaignSelected) {
-      return filteredCampaigns.filter(c => c.id === activeNode);
-    }
-    
-    if (isFacetSelected) {
-      const connectedIds = getConnectedCampaignIds(activeNode);
-      return filteredCampaigns.filter(c => connectedIds.has(c.id));
-    }
-    
-    return filteredCampaigns;
-  };
-
-  const visibleIncludedFacets = getVisibleFacets(includedFacets);
-  const visibleExcludedFacets = getVisibleFacets(excludedFacets);
-  const visibleCampaigns = getVisibleCampaigns();
 
   const getIcon = (type: string) => {
     switch(type) {
@@ -264,33 +216,8 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
       case 'JOB': return '#ea580c';
       case 'INDUSTRY': return '#4f46e5';
       case 'EXCLUSION': return '#dc2626';
-      default: return '#9ca3af';
+      default: return '#6b7280';
     }
-  };
-
-  const isHighlighted = (id: string) => {
-    if (!activeNode) return true;
-    if (activeNode === id) return true;
-    
-    const related = filteredConnections.some(conn => 
-      (conn.sourceId === activeNode && conn.targetId === id) || 
-      (conn.targetId === activeNode && conn.sourceId === id)
-    );
-    return related;
-  };
-
-  const isLineHighlighted = (source: string, target: string) => {
-    if (!activeNode) return true;
-    return activeNode === source || activeNode === target;
-  };
-
-  const isLineVisible = (sourceId: string, targetId: string) => {
-    if (!activeNode) return true;
-    
-    const visibleFacetIds = new Set([...visibleIncludedFacets, ...visibleExcludedFacets].map(f => f.id));
-    const visibleCampaignIds = new Set(visibleCampaigns.map(c => c.id));
-    
-    return visibleFacetIds.has(sourceId) && visibleCampaignIds.has(targetId);
   };
 
   const renderFacetItem = (item: typeof flowData.facets[0]) => {
@@ -306,9 +233,9 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
          onClick={() => handleFacetClick(item.id)}
          className={`
            relative
-           p-3 rounded-lg border cursor-pointer transition-all duration-300 flex items-center justify-between group mb-2
+           p-3 rounded-lg border cursor-pointer transition-all duration-200 flex items-center justify-between group mb-2
            ${getColor(item.type)}
-           ${isSelected ? 'ring-2 ring-offset-2 ring-blue-500 shadow-lg' : ''}
+           ${isSelected ? 'ring-2 ring-offset-1 ring-blue-500 shadow-lg scale-105' : 'hover:shadow-md'}
            ${isBundle ? 'border-b-4 border-r-4' : ''}
          `}
        >
@@ -323,13 +250,11 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
               {item.count}
             </span>
          )}
-         
-         {isHighlighted(item.id) && hoveredNode === item.id && !isBundle && <ArrowRight size={14} className="animate-pulse"/>}
        </div>
      );
   }
 
-  const selectedGroupName = selectedGroupId 
+  const selectedGroupName = selectedGroupId !== 'all'
     ? campaignGroups.find(g => g.id === selectedGroupId)?.name 
     : null;
 
@@ -341,23 +266,23 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
         <div className="relative">
           <button
             onClick={() => setShowGroupDropdown(!showGroupDropdown)}
-            className="flex items-center gap-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors min-w-[200px] justify-between"
+            className="flex items-center gap-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors min-w-[220px] justify-between"
           >
-            <span className="truncate">
+            <span className="truncate text-left flex-1">
               {selectedGroupName || 'All Campaign Groups'}
             </span>
-            <ChevronDown size={16} className={`transition-transform ${showGroupDropdown ? 'rotate-180' : ''}`} />
+            <ChevronDown size={16} className={`flex-shrink-0 transition-transform ${showGroupDropdown ? 'rotate-180' : ''}`} />
           </button>
           
           {showGroupDropdown && (
-            <div className="absolute top-full right-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-40 max-h-64 overflow-y-auto">
+            <div className="absolute top-full right-0 mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-50 max-h-64 overflow-y-auto">
               <button
                 onClick={() => {
-                  setSelectedGroupId(null);
+                  setSelectedGroupId('all');
                   setShowGroupDropdown(false);
                   setSelectedNode(null);
                 }}
-                className={`w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors ${!selectedGroupId ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'}`}
+                className={`w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors ${selectedGroupId === 'all' ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'}`}
               >
                 All Campaign Groups
               </button>
@@ -371,7 +296,7 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
                   }}
                   className={`w-full text-left px-4 py-2.5 text-sm hover:bg-gray-50 transition-colors border-t border-gray-100 ${selectedGroupId === group.id ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'}`}
                 >
-                  <span className="truncate block">{group.name}</span>
+                  <span className="block truncate">{group.name}</span>
                 </button>
               ))}
             </div>
@@ -391,26 +316,29 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
       )}
 
       {/* SVG Layer for Connections */}
-      <svg className="absolute inset-0 w-full h-full pointer-events-none z-10">
+      <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 5 }}>
+        <defs>
+          <filter id="glow">
+            <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+            <feMerge>
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
         {lines.map((line) => {
-           const [sourceId, targetId] = line.key.split('-');
-           
-           if (!isLineVisible(sourceId, targetId)) return null;
-           
-           const highlighted = isLineHighlighted(sourceId, targetId);
-           const opacity = highlighted ? 0.8 : 0.15;
-           const width = highlighted ? 2.5 : 1;
            const stroke = getStrokeColor(line.type);
+           const midX = (line.x1 + line.x2) / 2;
            
            return (
             <path
               key={line.key}
-              d={`M ${line.x1} ${line.y1} C ${line.x1 + 80} ${line.y1}, ${line.x2 - 80} ${line.y2}, ${line.x2} ${line.y2}`}
+              d={`M ${line.x1} ${line.y1} C ${midX} ${line.y1}, ${midX} ${line.y2}, ${line.x2} ${line.y2}`}
               fill="none"
               stroke={stroke}
-              strokeWidth={width}
-              strokeOpacity={opacity}
-              style={{ transition: 'all 0.3s ease' }}
+              strokeWidth={2}
+              strokeOpacity={0.7}
+              filter="url(#glow)"
             />
           );
         })}
@@ -434,36 +362,32 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
         </div>
       )}
 
-      <div className="flex h-full relative z-20 justify-between pt-8">
+      <div className="flex h-full relative z-10 justify-between pt-12">
         {/* Left Column: Facets */}
-        <div className="w-[300px] flex flex-col pr-4 h-full gap-4 flex-shrink-0">
+        <div className="w-[300px] flex flex-col pr-4 h-full gap-6 flex-shrink-0">
            
            {/* Inclusions */}
-           <div className={`overflow-y-auto pr-2 transition-all duration-300 ${activeNode ? 'flex-shrink-0' : 'flex-1'}`}>
-             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-4 border-b pb-2">
-               Targeting Inclusions
-               {activeNode && visibleIncludedFacets.length !== includedFacets.length && (
-                 <span className="ml-2 text-blue-500">({visibleIncludedFacets.length} connected)</span>
-               )}
+           <div className="overflow-y-auto pr-2 flex-1">
+             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-4 border-b pb-2 flex items-center justify-between">
+               <span>Targeting Inclusions</span>
+               <span className="text-gray-300">{includedFacets.length}</span>
              </h3>
-             {visibleIncludedFacets.length > 0 ? visibleIncludedFacets.map(renderFacetItem) : (
+             {includedFacets.length > 0 ? includedFacets.map(renderFacetItem) : (
                 <div className="text-sm text-gray-300 italic text-center py-4">
-                  {activeNode ? 'No connected inclusions' : 'No inclusions found'}
+                  No inclusions found
                 </div>
              )}
            </div>
 
            {/* Exclusions */}
-           <div className={`pt-4 border-t border-gray-100 overflow-y-auto pr-2 transition-all duration-300 ${activeNode ? 'flex-shrink-0' : 'flex-shrink-0 max-h-[40%]'}`}>
-             <h3 className="text-xs font-bold uppercase tracking-wider text-red-400 mb-4 border-b pb-2">
-               Exclusions
-               {activeNode && visibleExcludedFacets.length !== excludedFacets.length && (
-                 <span className="ml-2 text-red-300">({visibleExcludedFacets.length} connected)</span>
-               )}
+           <div className="pt-4 border-t border-gray-200 overflow-y-auto pr-2 max-h-[35%]">
+             <h3 className="text-xs font-bold uppercase tracking-wider text-red-400 mb-4 border-b border-red-100 pb-2 flex items-center justify-between">
+               <span>Exclusions</span>
+               <span className="text-red-300">{excludedFacets.length}</span>
              </h3>
-             {visibleExcludedFacets.length > 0 ? visibleExcludedFacets.map(renderFacetItem) : (
+             {excludedFacets.length > 0 ? excludedFacets.map(renderFacetItem) : (
                 <div className="text-sm text-gray-300 italic text-center py-4">
-                  {activeNode ? 'No connected exclusions' : 'No exclusions found'}
+                  No exclusions found
                 </div>
              )}
            </div>
@@ -471,28 +395,22 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
 
         {/* Right Column: Campaigns */}
         <div className="w-[300px] pl-4 border-l border-gray-100 overflow-y-auto flex-shrink-0">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-4 border-b pb-2">
-            Destination Campaigns
-            {activeNode && visibleCampaigns.length !== filteredCampaigns.length && (
-              <span className="ml-2 text-orange-500">({visibleCampaigns.length} connected)</span>
-            )}
+          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-4 border-b pb-2 flex items-center justify-between">
+            <span>Destination Campaigns</span>
+            <span className="text-gray-300">{filteredCampaigns.length}</span>
           </h3>
           <div className="flex flex-col gap-3">
-            {visibleCampaigns.length > 0 ? visibleCampaigns.map((camp) => {
+            {filteredCampaigns.length > 0 ? filteredCampaigns.map((camp) => {
               const isSelected = selectedNode === camp.id;
               
               return (
                 <div
                   key={camp.id}
                   ref={el => { if (el) itemRefs.current.set(camp.id, el) }}
-                  onMouseEnter={() => handleMouseEnterCampaign(camp.id)}
-                  onMouseLeave={handleMouseLeaveCampaign}
                   onClick={() => handleCampaignClick(camp.id)}
                   className={`
-                    p-2.5 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer
-                    group
-                    ${isSelected ? 'ring-2 ring-offset-2 ring-orange-500 shadow-lg' : ''}
-                    ${isHighlighted(camp.id) ? 'opacity-100' : 'opacity-30 grayscale'}
+                    p-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer
+                    ${isSelected ? 'ring-2 ring-offset-1 ring-orange-500 shadow-lg scale-105' : ''}
                   `}
                 >
                   <div className="flex items-center justify-between mb-1">
@@ -503,7 +421,7 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
               );
             }) : (
               <div className="text-sm text-gray-300 italic text-center py-4">
-                {activeNode ? 'No connected campaigns' : 'No campaigns found'}
+                No campaigns found
               </div>
             )}
           </div>
