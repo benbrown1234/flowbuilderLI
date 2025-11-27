@@ -20,6 +20,7 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
   const [flowData, setFlowData] = useState<FlowData | null>(null);
   const [lines, setLines] = useState<{ x1: number, y1: number, x2: number, y2: number, key: string, type: string }[]>([]);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
   const [showGroupDropdown, setShowGroupDropdown] = useState(false);
@@ -168,6 +169,7 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
   };
 
   const handleMouseEnterFacet = (item: typeof flowData.facets[0], e: React.MouseEvent) => {
+    setHoveredNode(item.id);
     if (item.count > 1 && item.items) {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       setTooltip({
@@ -180,7 +182,32 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
   };
 
   const handleMouseLeaveFacet = () => {
+    setHoveredNode(null);
     setTooltip(null);
+  };
+
+  const handleMouseEnterCampaign = (id: string) => {
+    setHoveredNode(id);
+  };
+
+  const handleMouseLeaveCampaign = () => {
+    setHoveredNode(null);
+  };
+
+  const isHighlighted = (id: string) => {
+    if (!hoveredNode) return true;
+    if (hoveredNode === id) return true;
+    
+    const isConnected = filteredConnections.some(conn => 
+      (conn.sourceId === hoveredNode && conn.targetId === id) || 
+      (conn.targetId === hoveredNode && conn.sourceId === id)
+    );
+    return isConnected;
+  };
+
+  const isLineHighlighted = (sourceId: string, targetId: string) => {
+    if (!hoveredNode) return false;
+    return hoveredNode === sourceId || hoveredNode === targetId;
   };
 
   const clearSelection = () => {
@@ -223,6 +250,7 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
   const renderFacetItem = (item: typeof flowData.facets[0]) => {
      const isBundle = item.count > 1;
      const isSelected = selectedNode === item.id;
+     const highlighted = isHighlighted(item.id);
      
      return (
        <div
@@ -237,6 +265,7 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
            ${getColor(item.type)}
            ${isSelected ? 'ring-2 ring-offset-1 ring-blue-500 shadow-lg scale-105' : 'hover:shadow-md'}
            ${isBundle ? 'border-b-4 border-r-4' : ''}
+           ${!highlighted ? 'opacity-30 grayscale' : 'opacity-100'}
          `}
        >
          <span className="flex items-center gap-2 text-xs font-semibold">
@@ -327,8 +356,12 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
           </filter>
         </defs>
         {lines.map((line) => {
+           const [sourceId, targetId] = line.key.split('-');
            const stroke = getStrokeColor(line.type);
            const midX = (line.x1 + line.x2) / 2;
+           const highlighted = isLineHighlighted(sourceId, targetId);
+           const opacity = hoveredNode ? (highlighted ? 0.9 : 0.15) : 0.6;
+           const width = hoveredNode ? (highlighted ? 3 : 1) : 2;
            
            return (
             <path
@@ -336,9 +369,10 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
               d={`M ${line.x1} ${line.y1} C ${midX} ${line.y1}, ${midX} ${line.y2}, ${line.x2} ${line.y2}`}
               fill="none"
               stroke={stroke}
-              strokeWidth={2}
-              strokeOpacity={0.7}
-              filter="url(#glow)"
+              strokeWidth={width}
+              strokeOpacity={opacity}
+              filter={highlighted || !hoveredNode ? "url(#glow)" : undefined}
+              style={{ transition: 'all 0.2s ease' }}
             />
           );
         })}
@@ -402,15 +436,19 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
           <div className="flex flex-col gap-3">
             {filteredCampaigns.length > 0 ? filteredCampaigns.map((camp) => {
               const isSelected = selectedNode === camp.id;
+              const highlighted = isHighlighted(camp.id);
               
               return (
                 <div
                   key={camp.id}
                   ref={el => { if (el) itemRefs.current.set(camp.id, el) }}
+                  onMouseEnter={() => handleMouseEnterCampaign(camp.id)}
+                  onMouseLeave={handleMouseLeaveCampaign}
                   onClick={() => handleCampaignClick(camp.id)}
                   className={`
                     p-3 rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow-md transition-all cursor-pointer
                     ${isSelected ? 'ring-2 ring-offset-1 ring-orange-500 shadow-lg scale-105' : ''}
+                    ${!highlighted ? 'opacity-30 grayscale' : 'opacity-100'}
                   `}
                 >
                   <div className="flex items-center justify-between mb-1">
