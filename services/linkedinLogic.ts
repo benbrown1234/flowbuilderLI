@@ -485,8 +485,8 @@ export const getTreeGraph = (account: AccountStructure) => {
         const row = Math.floor(index / 2);
         const col = index % 2;
         
-        // Keep x at the canonical level position, store column offset separately
-        const x = level * X_SPACING;
+        // Creatives are at level+1 (one level to the right of their parent campaign)
+        const x = (level + 1) * X_SPACING;
         const columnOffset = col * (AD_WIDTH + AD_GAP);
         const y = startY + (row * (AD_HEIGHT + AD_GAP)) + (AD_HEIGHT / 2);
         
