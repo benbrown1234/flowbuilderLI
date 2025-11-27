@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { TargetingSummary, NodeType, CreativeNode, CreativeContent } from '../types';
-import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin, Building2, ExternalLink, MousePointer, FileText, Link2, Loader2 } from 'lucide-react';
+import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin, Building2, ExternalLink, MousePointer, FileText, Link2, Loader2, Maximize2, Minimize2, ChevronDown, ChevronUp } from 'lucide-react';
 import { getAdPreview, getCreativeDetails } from '../services/linkedinApi';
 
 interface InspectorProps {
@@ -50,6 +50,7 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
   const [creativeDetails, setCreativeDetails] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
 
   useEffect(() => {
     if (!compact && isLiveData && accountId && creative.id) {
@@ -82,9 +83,9 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
 
   const getIcon = () => {
     switch (creative.format) {
-      case 'VIDEO': return <FileVideo className={compact ? "w-5 h-5" : "w-12 h-12"} />;
-      case 'CAROUSEL': return <Layers className={compact ? "w-5 h-5" : "w-12 h-12"} />;
-      default: return <FileImage className={compact ? "w-5 h-5" : "w-12 h-12"} />;
+      case 'VIDEO': return <FileVideo className={compact ? "w-5 h-5" : "w-8 h-8"} />;
+      case 'CAROUSEL': return <Layers className={compact ? "w-5 h-5" : "w-8 h-8"} />;
+      default: return <FileImage className={compact ? "w-5 h-5" : "w-8 h-8"} />;
     }
   };
 
@@ -98,10 +99,10 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
 
   const getStatusColor = (status?: string) => {
     switch (status) {
-      case 'ACTIVE': return 'bg-green-100 text-green-700';
-      case 'PAUSED': return 'bg-yellow-100 text-yellow-700';
-      case 'DRAFT': return 'bg-gray-100 text-gray-700';
-      default: return 'bg-gray-100 text-gray-600';
+      case 'ACTIVE': return 'bg-green-100 text-green-700 border-green-200';
+      case 'PAUSED': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
+      case 'DRAFT': return 'bg-gray-100 text-gray-700 border-gray-200';
+      default: return 'bg-gray-100 text-gray-600 border-gray-200';
     }
   };
 
@@ -121,126 +122,142 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
 
   const parsedContent = creativeDetails?.parsedContent;
   const leadgenCta = creativeDetails?.leadgenCallToAction;
+  const status = creativeDetails?.intendedStatus || creative.status;
+  const adType = creative.format || 'SPONSORED_UPDATE';
 
   return (
     <div className="space-y-4">
-      {loading && (
-        <div className="w-full aspect-video rounded-lg flex flex-col items-center justify-center bg-gray-100">
-          <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
-          <span className="text-sm text-gray-500 mt-2">Loading preview...</span>
-        </div>
-      )}
-      
-      {!loading && previewHtml && (
-        <div className="w-full rounded-lg overflow-hidden border border-gray-200">
-          <div 
-            className="w-full" 
-            dangerouslySetInnerHTML={{ __html: previewHtml }} 
-          />
-        </div>
-      )}
-      
-      {!loading && !previewHtml && (
-        <div className={`w-full aspect-video rounded-lg flex flex-col items-center justify-center ${getBgColor()} relative overflow-hidden group`}>
-          {getIcon()}
-          {creative.format === 'VIDEO' && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all">
-              <div className="bg-white p-3 rounded-full shadow-lg opacity-80">
-                <Play className="w-6 h-6 text-black fill-current" />
-              </div>
+      {/* Preview Section - Compact with Expander */}
+      <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+        {loading && (
+          <div className="w-full h-48 flex flex-col items-center justify-center bg-gray-50">
+            <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+            <span className="text-xs text-gray-500 mt-2">Loading preview...</span>
+          </div>
+        )}
+        
+        {!loading && previewHtml && (
+          <div className="relative">
+            <div 
+              className={`w-full overflow-hidden transition-all duration-300 ${isPreviewExpanded ? 'max-h-none' : 'max-h-64'}`}
+              style={{ transform: isPreviewExpanded ? 'none' : 'scale(0.95)', transformOrigin: 'top center' }}
+            >
+              <div 
+                className="w-full" 
+                dangerouslySetInnerHTML={{ __html: previewHtml }} 
+              />
             </div>
-          )}
-          <span className="absolute bottom-2 right-2 text-[10px] font-bold uppercase bg-white bg-opacity-90 px-2 py-1 rounded text-gray-800">
-            {creative.format}
-          </span>
-        </div>
-      )}
-      
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${getStatusColor(creativeDetails?.intendedStatus || creative.status)}`}>
-            {creativeDetails?.intendedStatus || creative.status || 'Unknown'}
-          </span>
-          <span className="text-[10px] font-bold px-2 py-1 rounded bg-gray-100 text-gray-600 uppercase">
-            {creative.format}
-          </span>
-        </div>
+            {!isPreviewExpanded && (
+              <div className="absolute bottom-0 left-0 right-0 h-12 bg-gradient-to-t from-white to-transparent pointer-events-none" />
+            )}
+            <button
+              onClick={() => setIsPreviewExpanded(!isPreviewExpanded)}
+              className="w-full py-2 flex items-center justify-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 border-t border-gray-100 transition-colors"
+            >
+              {isPreviewExpanded ? (
+                <>
+                  <ChevronUp className="w-4 h-4" />
+                  Collapse Preview
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="w-4 h-4" />
+                  Expand Preview
+                </>
+              )}
+            </button>
+          </div>
+        )}
         
-        <div>
-          <label className="text-xs font-bold text-gray-400 uppercase">Ad Name</label>
-          <p className="text-lg font-medium text-gray-900 leading-tight">{creative.name}</p>
-        </div>
-        
-        <div>
-          <label className="text-xs font-bold text-gray-400 uppercase">Creative ID</label>
-          <p className="text-sm font-mono text-gray-600">{creative.id}</p>
-        </div>
+        {!loading && !previewHtml && (
+          <div className={`w-full h-40 flex flex-col items-center justify-center ${getBgColor()} relative`}>
+            {getIcon()}
+            {creative.format === 'VIDEO' && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="bg-white p-2 rounded-full shadow-lg opacity-80">
+                  <Play className="w-5 h-5 text-black fill-current" />
+                </div>
+              </div>
+            )}
+            <span className="text-xs font-medium mt-2 opacity-75">{creative.format} Preview</span>
+          </div>
+        )}
+      </div>
+
+      {/* Status & Type Badges */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className={`text-xs font-semibold px-2.5 py-1 rounded border ${getStatusColor(status)}`}>
+          {status || 'UNKNOWN'}
+        </span>
+        <span className="text-xs font-semibold px-2.5 py-1 rounded bg-gray-50 text-gray-600 border border-gray-200">
+          {adType}
+        </span>
+      </div>
+
+      {/* Ad Name Section */}
+      <div className="space-y-1">
+        <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Ad Name</label>
+        <p className="text-base font-semibold text-gray-900 leading-snug">{creative.name}</p>
       </div>
       
-      {(parsedContent || leadgenCta) && (
-        <div className="border-t border-gray-100 pt-4 space-y-3">
-          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center">
-            <FileText className="w-3.5 h-3.5 mr-1.5" /> Ad Content
-          </h4>
-          
-          {parsedContent?.headline && (
-            <div>
-              <label className="text-xs font-bold text-gray-400 uppercase">Headline</label>
-              <p className="text-sm text-gray-900 font-medium">{parsedContent.headline}</p>
-            </div>
-          )}
-          
-          {parsedContent?.description && (
-            <div>
-              <label className="text-xs font-bold text-gray-400 uppercase">Description</label>
-              <p className="text-sm text-gray-700 leading-relaxed">{parsedContent.description}</p>
-            </div>
-          )}
-          
-          {(parsedContent?.callToAction || leadgenCta?.buttonLabel) && (
-            <div className="flex items-center gap-2">
-              <MousePointer className="w-4 h-4 text-blue-500" />
-              <div>
-                <label className="text-xs font-bold text-gray-400 uppercase">Call to Action</label>
-                <p className="text-sm font-semibold text-blue-600">
-                  {parsedContent?.callToAction || leadgenCta?.buttonLabel}
-                </p>
-              </div>
-            </div>
-          )}
-          
-          {(parsedContent?.destinationUrl || parsedContent?.landingPageUrl || leadgenCta?.destinationUrl) && (
-            <div>
-              <label className="text-xs font-bold text-gray-400 uppercase flex items-center">
-                <Link2 className="w-3 h-3 mr-1" /> Destination URL
-              </label>
-              <a 
-                href={parsedContent?.destinationUrl || parsedContent?.landingPageUrl || leadgenCta?.destinationUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm text-blue-600 hover:text-blue-800 underline break-all flex items-center gap-1"
-              >
-                {(parsedContent?.destinationUrl || parsedContent?.landingPageUrl || leadgenCta?.destinationUrl)?.substring(0, 50)}...
-                <ExternalLink className="w-3 h-3 flex-shrink-0" />
-              </a>
-            </div>
-          )}
-          
-          {(parsedContent?.leadFormId || leadgenCta?.leadgenCreativeFormId) && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-              <label className="text-xs font-bold text-green-700 uppercase flex items-center">
-                <FileText className="w-3 h-3 mr-1" /> Lead Form
-              </label>
-              <p className="text-sm text-green-800 font-mono mt-1">
-                Form ID: {parsedContent?.leadFormId || leadgenCta?.leadgenCreativeFormId}
-              </p>
-            </div>
-          )}
+      {/* Creative ID Section */}
+      <div className="space-y-1">
+        <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Creative ID</label>
+        <p className="text-sm font-mono text-gray-600">{creative.id}</p>
+      </div>
+
+      {/* Description Section */}
+      {parsedContent?.description && (
+        <div className="space-y-1 pt-2 border-t border-gray-100">
+          <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Description</label>
+          <p className="text-sm text-gray-700 leading-relaxed">{parsedContent.description}</p>
+        </div>
+      )}
+
+      {/* Call to Action Section */}
+      {(parsedContent?.callToAction || leadgenCta?.buttonLabel) && (
+        <div className="space-y-1">
+          <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide flex items-center gap-1">
+            <MousePointer className="w-3 h-3" /> Call to Action
+          </label>
+          <p className="text-sm font-semibold text-blue-600">
+            {parsedContent?.callToAction || leadgenCta?.buttonLabel}
+          </p>
+        </div>
+      )}
+      
+      {/* Destination URL Section */}
+      {(parsedContent?.destinationUrl || parsedContent?.landingPageUrl || leadgenCta?.destinationUrl) && (
+        <div className="space-y-1">
+          <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide flex items-center gap-1">
+            <Link2 className="w-3 h-3" /> Destination URL
+          </label>
+          <a 
+            href={parsedContent?.destinationUrl || parsedContent?.landingPageUrl || leadgenCta?.destinationUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-blue-600 hover:text-blue-800 hover:underline break-all flex items-start gap-1"
+          >
+            <span className="flex-1">{parsedContent?.destinationUrl || parsedContent?.landingPageUrl || leadgenCta?.destinationUrl}</span>
+            <ExternalLink className="w-3 h-3 flex-shrink-0 mt-0.5" />
+          </a>
+        </div>
+      )}
+      
+      {/* Lead Form Section */}
+      {(parsedContent?.leadFormId || leadgenCta?.leadgenCreativeFormId) && (
+        <div className="space-y-1 bg-green-50 border border-green-200 rounded-lg p-3">
+          <label className="text-[11px] font-semibold text-green-700 uppercase tracking-wide flex items-center gap-1">
+            <FileText className="w-3 h-3" /> Lead Form
+          </label>
+          <p className="text-sm text-green-800 font-mono">
+            {parsedContent?.leadFormId || leadgenCta?.leadgenCreativeFormId}
+          </p>
         </div>
       )}
       
       {error && (
-        <div className="text-xs text-red-500 bg-red-50 p-2 rounded">
+        <div className="text-xs text-red-500 bg-red-50 p-2 rounded border border-red-100">
           {error}
         </div>
       )}
