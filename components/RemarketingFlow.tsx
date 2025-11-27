@@ -50,8 +50,8 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
     const outputLinks: { campaignId: string; audienceId: string }[] = [];
     const targetingLinks: { audienceId: string; campaignId: string }[] = [];
 
-    const knownSegmentNames = new Set<string>();
     const segmentIdToAudId = new Map<string, string>();
+    const knownSegmentIds = new Set<string>();
 
     data.segments?.forEach(seg => {
       const audId = `seg-${seg.id}`;
@@ -63,16 +63,73 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
         feedingCampaigns: [],
         targetingCampaigns: []
       });
-      knownSegmentNames.add(seg.name.toLowerCase());
+      knownSegmentIds.add(seg.id);
       segmentIdToAudId.set(seg.id, audId);
+      segmentIdToAudId.set(`urn:li:adSegment:${seg.id}`, audId);
       segmentIdToAudId.set(seg.name.toLowerCase(), audId);
     });
 
-    const findOrCreateAudience = (audName: string): string => {
-      if (segmentIdToAudId.has(audName)) {
-        return segmentIdToAudId.get(audName)!;
+    const extractSegmentUrnsFromTargeting = (targetingRaw: any): string[] => {
+      const segmentUrns: string[] = [];
+      
+      const addIfSegmentUrn = (urn: string) => {
+        if (typeof urn === 'string' && urn.startsWith('urn:li:adSegment:')) {
+          if (!segmentUrns.includes(urn)) {
+            segmentUrns.push(urn);
+          }
+        }
+      };
+      
+      const isSegmentFacet = (facetKey: string) => {
+        return facetKey.includes('audienceMatchingSegments') || 
+               facetKey.includes('dynamicSegments') ||
+               facetKey.includes('similarAudiences');
+      };
+      
+      const processObject = (obj: any) => {
+        if (!obj || typeof obj !== 'object') return;
+        
+        Object.entries(obj).forEach(([key, value]: [string, any]) => {
+          if (key === 'or' && typeof value === 'object' && !Array.isArray(value)) {
+            Object.entries(value).forEach(([facetKey, urns]: [string, any]) => {
+              if (isSegmentFacet(facetKey) && Array.isArray(urns)) {
+                urns.forEach(addIfSegmentUrn);
+              }
+            });
+          } else if (isSegmentFacet(key) && Array.isArray(value)) {
+            value.forEach(addIfSegmentUrn);
+          }
+        });
+      };
+
+      if (targetingRaw?.include?.and && Array.isArray(targetingRaw.include.and)) {
+        targetingRaw.include.and.forEach((item: any) => processObject(item));
       }
       
+      return segmentUrns;
+    };
+
+    const findOrCreateAudienceByUrn = (segmentUrn: string): string | null => {
+      if (segmentIdToAudId.has(segmentUrn)) {
+        return segmentIdToAudId.get(segmentUrn)!;
+      }
+      
+      const audId = `seg-${segmentUrn}`;
+      if (!audienceMap.has(audId)) {
+        const segmentId = segmentUrn.replace('urn:li:adSegment:', '');
+        audienceMap.set(audId, {
+          id: audId,
+          name: `Segment ${segmentId}`,
+          type: 'OTHER',
+          feedingCampaigns: [],
+          targetingCampaigns: []
+        });
+        segmentIdToAudId.set(segmentUrn, audId);
+      }
+      return audId;
+    };
+
+    const findOrCreateAudienceByName = (audName: string): string => {
       const nameLower = audName.toLowerCase();
       if (segmentIdToAudId.has(nameLower)) {
         return segmentIdToAudId.get(nameLower)!;
@@ -105,6 +162,7 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
           feedingCampaigns: [],
           targetingCampaigns: []
         });
+        segmentIdToAudId.set(nameLower, audId);
       }
       return audId;
     };
@@ -113,19 +171,42 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
       group.children.forEach(campaign => {
         const targetedAudiences: string[] = [];
         
-        campaign.targetingResolved.audiences.forEach(audName => {
-          const audId = findOrCreateAudience(audName);
-          targetedAudiences.push(audId);
-          audienceMap.get(audId)!.targetingCampaigns.push(campaign.id);
-          targetingLinks.push({ audienceId: audId, campaignId: campaign.id });
-        });
+        let segmentUrns = extractSegmentUrnsFromTargeting(campaign.targetingRaw);
+        
+        if (segmentUrns.length === 0 && campaign.targetingResolved?.audiences?.length > 0) {
+          campaign.targetingResolved.audiences.forEach(audName => {
+            const nameLower = audName.toLowerCase();
+            if (segmentIdToAudId.has(nameLower)) {
+              const audId = segmentIdToAudId.get(nameLower)!;
+              if (!targetedAudiences.includes(audId)) {
+                targetedAudiences.push(audId);
+                audienceMap.get(audId)!.targetingCampaigns.push(campaign.id);
+                targetingLinks.push({ audienceId: audId, campaignId: campaign.id });
+              }
+            }
+          });
+        } else {
+          segmentUrns.forEach(urn => {
+            const audId = findOrCreateAudienceByUrn(urn);
+            if (audId) {
+              targetedAudiences.push(audId);
+              audienceMap.get(audId)!.targetingCampaigns.push(campaign.id);
+              targetingLinks.push({ audienceId: audId, campaignId: campaign.id });
+            }
+          });
+        }
 
         const outputAudienceIds: string[] = [];
         campaign.outputAudiences?.forEach(outAud => {
-          const audId = findOrCreateAudience(outAud);
-          outputAudienceIds.push(audId);
-          audienceMap.get(audId)!.feedingCampaigns.push(campaign.id);
-          outputLinks.push({ campaignId: campaign.id, audienceId: audId });
+          const nameLower = outAud.toLowerCase();
+          if (segmentIdToAudId.has(nameLower)) {
+            const audId = segmentIdToAudId.get(nameLower)!;
+            if (!outputAudienceIds.includes(audId)) {
+              outputAudienceIds.push(audId);
+              audienceMap.get(audId)!.feedingCampaigns.push(campaign.id);
+              outputLinks.push({ campaignId: campaign.id, audienceId: audId });
+            }
+          }
         });
 
         allCampaigns.push({
@@ -139,23 +220,8 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
       });
     });
 
-    const isRemarketingCampaign = (camp: CampaignInfo) => {
-      return camp.targetedAudiences.some(audId => {
-        const aud = audienceMap.get(audId);
-        if (!aud) return false;
-        if (aud.segment) return true;
-        if (audId.startsWith('seg-')) return true;
-        const audType = aud.type;
-        return audType === 'WEBSITE' || 
-               audType === 'VIDEO' || 
-               audType === 'ENGAGED' ||
-               audType === 'LOOKALIKE' ||
-               audType === 'CONTACT';
-      });
-    };
-
-    const coldCampaigns = allCampaigns.filter(c => !isRemarketingCampaign(c));
-    const remarketingCampaigns = allCampaigns.filter(c => isRemarketingCampaign(c));
+    const coldCampaigns = allCampaigns.filter(c => c.targetedAudiences.length === 0);
+    const remarketingCampaigns = allCampaigns.filter(c => c.targetedAudiences.length > 0);
 
     const usedAudienceIds = new Set<string>();
     outputLinks.forEach(l => usedAudienceIds.add(l.audienceId));
