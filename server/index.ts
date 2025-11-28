@@ -1007,13 +1007,12 @@ const openai = new OpenAI({
 
 app.post('/api/ai/audit', async (req, res) => {
   try {
-    const { message, taggedEntities, accountId, isLiveData, conversationHistory } = req.body;
+    const { message, taggedEntities, accountId, isLiveData, accountData: clientAccountData, conversationHistory } = req.body;
     const sessionId = req.cookies.linkedinSession;
     
-    let accountData: any = null;
-    let analyticsData: any = null;
+    let accountData: any = clientAccountData || null;
     
-    if (isLiveData && sessionId && sessions[sessionId]?.accessToken) {
+    if (!accountData && isLiveData && sessionId && sessions[sessionId]?.accessToken) {
       try {
         const hierarchyResponse = await axios.get(
           `http://localhost:${PORT}/api/linkedin/account/${accountId}/hierarchy?activeOnly=false`,
@@ -1025,50 +1024,100 @@ app.post('/api/ai/audit', async (req, res) => {
       }
     }
     
+    const formatCampaignDetails = (campaign: any, indent: string = '  ') => {
+      let details = '';
+      details += `${indent}Status: ${campaign.status}\n`;
+      details += `${indent}Objective: ${campaign.objective || 'Not set'}\n`;
+      details += `${indent}Daily Budget: ${campaign.dailyBudget || 'Not set'}\n`;
+      details += `${indent}Bidding Strategy: ${campaign.biddingStrategy || 'Not set'}\n`;
+      details += `${indent}Cost Type: ${campaign.costType || 'Not set'}\n`;
+      
+      if (campaign.targetingResolved) {
+        const t = campaign.targetingResolved;
+        details += `${indent}Targeting:\n`;
+        if (t.geos?.length) details += `${indent}  Locations: ${t.geos.join(', ')}\n`;
+        if (t.company?.industries?.length) details += `${indent}  Industries: ${t.company.industries.join(', ')}\n`;
+        if (t.company?.sizes?.length) details += `${indent}  Company Sizes: ${t.company.sizes.join(', ')}\n`;
+        if (t.company?.names?.length) details += `${indent}  Company Names: ${t.company.names.slice(0, 10).join(', ')}${t.company.names.length > 10 ? ` (+${t.company.names.length - 10} more)` : ''}\n`;
+        if (t.jobExperience?.titles?.length) details += `${indent}  Job Titles: ${t.jobExperience.titles.slice(0, 10).join(', ')}${t.jobExperience.titles.length > 10 ? ` (+${t.jobExperience.titles.length - 10} more)` : ''}\n`;
+        if (t.jobExperience?.functions?.length) details += `${indent}  Job Functions: ${t.jobExperience.functions.join(', ')}\n`;
+        if (t.jobExperience?.seniorities?.length) details += `${indent}  Seniorities: ${t.jobExperience.seniorities.join(', ')}\n`;
+        if (t.jobExperience?.skills?.length) details += `${indent}  Skills: ${t.jobExperience.skills.slice(0, 10).join(', ')}${t.jobExperience.skills.length > 10 ? ` (+${t.jobExperience.skills.length - 10} more)` : ''}\n`;
+        if (t.demographics?.ages?.length) details += `${indent}  Age Ranges: ${t.demographics.ages.join(', ')}\n`;
+        if (t.demographics?.genders?.length) details += `${indent}  Genders: ${t.demographics.genders.join(', ')}\n`;
+        if (t.education?.degrees?.length) details += `${indent}  Degrees: ${t.education.degrees.join(', ')}\n`;
+        if (t.education?.fieldsOfStudy?.length) details += `${indent}  Fields of Study: ${t.education.fieldsOfStudy.slice(0, 5).join(', ')}${t.education.fieldsOfStudy.length > 5 ? '...' : ''}\n`;
+        if (t.audiences?.length) details += `${indent}  Audiences/Segments: ${t.audiences.join(', ')}\n`;
+        if (t.companyLists?.length) details += `${indent}  Company Lists: ${t.companyLists.join(', ')}\n`;
+        if (t.interestsTraits?.memberInterests?.length) details += `${indent}  Member Interests: ${t.interestsTraits.memberInterests.slice(0, 5).join(', ')}${t.interestsTraits.memberInterests.length > 5 ? '...' : ''}\n`;
+      }
+      
+      if (campaign.children?.length > 0) {
+        details += `${indent}Ads (${campaign.children.length}):\n`;
+        campaign.children.forEach((ad: any) => {
+          details += `${indent}  - "${ad.name || 'Unnamed Ad'}" (ID: ${ad.id}): Status=${ad.status}, Type=${ad.type || 'Unknown'}\n`;
+        });
+      }
+      
+      return details;
+    };
+    
     let entityContext = '';
     if (taggedEntities && taggedEntities.length > 0 && accountData) {
-      entityContext = '\n\nTagged entities the user is asking about:\n';
+      entityContext = '\n\n=== TAGGED ENTITIES (User is asking specifically about these) ===\n';
       for (const entity of taggedEntities) {
         if (entity.type === 'group') {
           const group = accountData.groups?.find((g: any) => g.id === entity.id || g.name === entity.name);
           if (group) {
-            entityContext += `\n- Campaign Group "${group.name}" (ID: ${group.id}):\n`;
-            entityContext += `  Status: ${group.status}\n`;
-            entityContext += `  Campaigns: ${group.children?.length || 0}\n`;
-            if (group.children) {
-              entityContext += `  Campaign names: ${group.children.map((c: any) => c.name).join(', ')}\n`;
+            entityContext += `\n### Campaign Group: "${group.name}" (ID: ${group.id})\n`;
+            entityContext += `Status: ${group.status}\n`;
+            entityContext += `Total Campaigns: ${group.children?.length || 0}\n`;
+            
+            if (group.children && group.children.length > 0) {
+              entityContext += `\n--- All Campaigns in this Group ---\n`;
+              group.children.forEach((campaign: any, idx: number) => {
+                entityContext += `\n[Campaign ${idx + 1}] "${campaign.name}" (ID: ${campaign.id}):\n`;
+                entityContext += formatCampaignDetails(campaign, '  ');
+              });
             }
           }
         } else if (entity.type === 'campaign') {
           for (const group of accountData.groups || []) {
             const campaign = group.children?.find((c: any) => c.id === entity.id || c.name === entity.name);
             if (campaign) {
-              entityContext += `\n- Campaign "${campaign.name}" (ID: ${campaign.id}):\n`;
-              entityContext += `  Status: ${campaign.status}\n`;
-              entityContext += `  Objective: ${campaign.objective}\n`;
-              entityContext += `  Daily Budget: ${campaign.dailyBudget}\n`;
-              entityContext += `  Bidding Strategy: ${campaign.biddingStrategy}\n`;
-              entityContext += `  Ads: ${campaign.children?.length || 0}\n`;
-              if (campaign.targetingResolved) {
-                const t = campaign.targetingResolved;
-                if (t.geos?.length) entityContext += `  Locations: ${t.geos.join(', ')}\n`;
-                if (t.jobExperience?.titles?.length) entityContext += `  Job Titles: ${t.jobExperience.titles.slice(0, 5).join(', ')}${t.jobExperience.titles.length > 5 ? '...' : ''}\n`;
-                if (t.company?.industries?.length) entityContext += `  Industries: ${t.company.industries.join(', ')}\n`;
-                if (t.audiences?.length) entityContext += `  Audiences: ${t.audiences.join(', ')}\n`;
-              }
+              entityContext += `\n### Campaign: "${campaign.name}" (ID: ${campaign.id})\n`;
+              entityContext += `Part of Group: "${group.name}"\n`;
+              entityContext += formatCampaignDetails(campaign, '');
               break;
+            }
+          }
+        } else if (entity.type === 'creative') {
+          for (const group of accountData.groups || []) {
+            for (const campaign of group.children || []) {
+              const ad = campaign.children?.find((a: any) => a.id === entity.id || a.name === entity.name);
+              if (ad) {
+                entityContext += `\n### Ad/Creative: "${ad.name || 'Unnamed'}" (ID: ${ad.id})\n`;
+                entityContext += `Part of Campaign: "${campaign.name}" > Group: "${group.name}"\n`;
+                entityContext += `Status: ${ad.status}\n`;
+                entityContext += `Type: ${ad.type || 'Unknown'}\n`;
+                break;
+              }
             }
           }
         } else if (entity.type === 'audience') {
           const segment = accountData.segments?.find((s: any) => s.id === entity.id || s.name === entity.name);
           if (segment) {
-            entityContext += `\n- Audience "${segment.name}" (ID: ${segment.id}):\n`;
-            entityContext += `  Type: ${segment.type}\n`;
-            entityContext += `  Status: ${segment.status}\n`;
-            if (segment.audienceCount) entityContext += `  Size: ${segment.audienceCount.toLocaleString()}\n`;
+            entityContext += `\n### Audience Segment: "${segment.name}" (ID: ${segment.id})\n`;
+            entityContext += `Type: ${segment.type}\n`;
+            entityContext += `Status: ${segment.status}\n`;
+            if (segment.audienceCount) entityContext += `Size: ${segment.audienceCount.toLocaleString()} members\n`;
+            if (segment.sourceCampaigns?.length) {
+              entityContext += `Source Campaigns (building this audience): ${segment.sourceCampaigns.map((c: any) => c.name || c.id).join(', ')}\n`;
+            }
           }
         }
       }
+      entityContext += '\n=== END TAGGED ENTITIES ===\n';
     }
     
     let accountSummary = '';

@@ -200,6 +200,7 @@ export const AIAuditor: React.FC<AIAuditorProps> = ({ data, accountId, isLiveDat
           taggedEntities,
           accountId,
           isLiveData,
+          accountData: data,
           conversationHistory: messages.slice(-10).map(m => ({
             role: m.role,
             content: m.content
