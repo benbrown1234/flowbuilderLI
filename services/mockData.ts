@@ -266,35 +266,60 @@ export const MOCK_DATA_STORE: Record<string, {
       }
     ],
     creatives: [
-      // FT Group Creatives
-      { id: 'cr_ft_01_1', campaign: 'cp_ft_01', name: 'Ad 1', format: 'IMAGE' },
-      { id: 'cr_ft_01_2', campaign: 'cp_ft_01', name: 'Ad 2', format: 'IMAGE' },
-      { id: 'cr_ft_01_3', campaign: 'cp_ft_01', name: 'Ad 3', format: 'IMAGE' },
+      // FT Group Creatives - Image Ads with content.media structure
+      { id: 'cr_ft_01_1', campaign: 'cp_ft_01', name: 'Ad 1', format: 'IMAGE', 
+        content: { media: { id: 'urn:li:image:12345' } } },
+      { id: 'cr_ft_01_2', campaign: 'cp_ft_01', name: 'Ad 2', format: 'IMAGE',
+        content: { media: { id: 'urn:li:digitalmediaAsset:67890' } } },
+      { id: 'cr_ft_01_3', campaign: 'cp_ft_01', name: 'Ad 3', format: 'IMAGE',
+        content: { media: { id: 'urn:li:image:11111' } } },
 
-      { id: 'cr_ft_02_1', campaign: 'cp_ft_02', name: 'Ad 1', format: 'VIDEO' },
-      { id: 'cr_ft_02_2', campaign: 'cp_ft_02', name: 'Ad 2', format: 'VIDEO' },
-      { id: 'cr_ft_02_3', campaign: 'cp_ft_02', name: 'Ad 3', format: 'VIDEO' },
+      // Video Ads with content.media structure
+      { id: 'cr_ft_02_1', campaign: 'cp_ft_02', name: 'Ad 1', format: 'VIDEO',
+        content: { media: { id: 'urn:li:video:C5510AQE12345' } } },
+      { id: 'cr_ft_02_2', campaign: 'cp_ft_02', name: 'Ad 2', format: 'VIDEO',
+        content: { media: { id: 'urn:li:ugcVideo:99999' } } },
+      { id: 'cr_ft_02_3', campaign: 'cp_ft_02', name: 'Ad 3', format: 'VIDEO',
+        content: { media: { id: 'urn:li:video:ABCDE12345' } } },
 
-      { id: 'cr_ft_03_1', campaign: 'cp_ft_03', name: 'Ad 1', format: 'CAROUSEL' },
-      { id: 'cr_ft_03_2', campaign: 'cp_ft_03', name: 'Ad 2', format: 'CAROUSEL' },
-      { id: 'cr_ft_03_3', campaign: 'cp_ft_03', name: 'Ad 3', format: 'CAROUSEL' },
+      // Carousel Ads with content.carousel structure
+      { id: 'cr_ft_03_1', campaign: 'cp_ft_03', name: 'Ad 1', format: 'CAROUSEL',
+        content: { carousel: { cards: [{}, {}, {}] } } },
+      { id: 'cr_ft_03_2', campaign: 'cp_ft_03', name: 'Ad 2', format: 'CAROUSEL',
+        content: { carousel: { cards: [{}, {}] } } },
+      { id: 'cr_ft_03_3', campaign: 'cp_ft_03', name: 'Ad 3', format: 'CAROUSEL',
+        content: { carousel: { cards: [{}, {}, {}, {}] } } },
 
-      { id: 'cr_ft_04_1', campaign: 'cp_ft_04', name: 'Ad 1', format: 'IMAGE' },
-      { id: 'cr_ft_04_2', campaign: 'cp_ft_04', name: 'Ad 2', format: 'IMAGE' },
-      { id: 'cr_ft_04_3', campaign: 'cp_ft_04', name: 'Ad 3', format: 'IMAGE' },
+      // More Image Ads
+      { id: 'cr_ft_04_1', campaign: 'cp_ft_04', name: 'Ad 1', format: 'IMAGE',
+        content: { media: { id: 'urn:li:image:22222' } } },
+      { id: 'cr_ft_04_2', campaign: 'cp_ft_04', name: 'Ad 2', format: 'IMAGE',
+        content: { media: { id: 'urn:li:image:33333' } } },
+      { id: 'cr_ft_04_3', campaign: 'cp_ft_04', name: 'Ad 3', format: 'IMAGE',
+        content: { media: { id: 'urn:li:image:44444' } } },
 
-      // WL Group Creatives
-      { id: 'cr_wl_01_1', campaign: 'cp_wl_01', name: 'Ad 1', format: 'IMAGE' },
-      { id: 'cr_wl_01_2', campaign: 'cp_wl_01', name: 'Ad 2', format: 'IMAGE' },
-      { id: 'cr_wl_01_3', campaign: 'cp_wl_01', name: 'Ad 3', format: 'IMAGE' },
+      // WL Group Creatives - Image Ads
+      { id: 'cr_wl_01_1', campaign: 'cp_wl_01', name: 'Ad 1', format: 'IMAGE',
+        content: { media: { id: 'urn:li:image:55555' } } },
+      { id: 'cr_wl_01_2', campaign: 'cp_wl_01', name: 'Ad 2', format: 'IMAGE',
+        content: { media: { id: 'urn:li:image:66666' } } },
+      { id: 'cr_wl_01_3', campaign: 'cp_wl_01', name: 'Ad 3', format: 'IMAGE',
+        content: { media: { id: 'urn:li:image:77777' } } },
 
-      { id: 'cr_wl_02_1', campaign: 'cp_wl_02', name: 'Ad 1', format: 'IMAGE' },
-      { id: 'cr_wl_02_2', campaign: 'cp_wl_02', name: 'Ad 2', format: 'IMAGE' },
-      { id: 'cr_wl_02_3', campaign: 'cp_wl_02', name: 'Ad 3', format: 'IMAGE' },
+      { id: 'cr_wl_02_1', campaign: 'cp_wl_02', name: 'Ad 1', format: 'IMAGE',
+        content: { media: { id: 'urn:li:image:88888' } } },
+      { id: 'cr_wl_02_2', campaign: 'cp_wl_02', name: 'Ad 2', format: 'IMAGE',
+        content: { media: { id: 'urn:li:image:99999' } } },
+      { id: 'cr_wl_02_3', campaign: 'cp_wl_02', name: 'Ad 3', format: 'IMAGE',
+        content: { media: { id: 'urn:li:image:10101' } } },
 
-      { id: 'cr_wl_03_1', campaign: 'cp_wl_03', name: 'Ad 1', format: 'VIDEO' },
-      { id: 'cr_wl_03_2', campaign: 'cp_wl_03', name: 'Ad 2', format: 'VIDEO' },
-      { id: 'cr_wl_03_3', campaign: 'cp_wl_03', name: 'Ad 3', format: 'VIDEO' },
+      // Video Ads
+      { id: 'cr_wl_03_1', campaign: 'cp_wl_03', name: 'Ad 1', format: 'VIDEO',
+        content: { media: { id: 'urn:li:video:VID001' } } },
+      { id: 'cr_wl_03_2', campaign: 'cp_wl_03', name: 'Ad 2', format: 'VIDEO',
+        content: { media: { id: 'urn:li:video:VID002' } } },
+      { id: 'cr_wl_03_3', campaign: 'cp_wl_03', name: 'Ad 3', format: 'VIDEO',
+        content: { media: { id: 'urn:li:video:VID003' } } },
 
       { id: 'cr_wl_04_1', campaign: 'cp_wl_04', name: 'Ad 1', format: 'VIDEO' },
       { id: 'cr_wl_04_2', campaign: 'cp_wl_04', name: 'Ad 2', format: 'VIDEO' },

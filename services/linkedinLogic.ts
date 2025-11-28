@@ -240,33 +240,62 @@ export const buildAccountHierarchy = (accountId?: string): AccountStructure | nu
   // 1. Process Campaigns first to get their resolved targeting
   const processedCampaigns: CampaignNode[] = rawData.campaigns.map(raw => {
     // Find children
-    // Map format to human-readable media type
+    // Detect creative type from content structure (mirrors LinkedIn API detection)
     // Returns format WITHOUT "Ad" suffix - the UI adds it
-    const getMediaType = (format: string): string => {
-      switch (format) {
+    const getCreativeType = (creative: any, formatFallback: string): string => {
+      // First check creative.type field (highest priority for special types)
+      const creativeType = creative.type || '';
+      if (creativeType === 'SPONSORED_INMAILS' || creativeType.includes('INMAIL')) return 'Message';
+      if (creativeType === 'TEXT_AD') return 'Text';
+      if (creativeType === 'DYNAMIC') return 'Spotlight';
+      
+      const content = creative.content;
+      
+      // Check content structure (like real LinkedIn API)
+      if (content) {
+        if (content.carousel || content.carousel?.cards) return 'Carousel';
+        if (content.spotlight) return 'Spotlight';
+        if (content.textAd) return 'Text';
+        if (content.eventAd) return 'Event';
+        if (content.followerAd || content.followCompany) return 'Follower';
+        if (content.jobAd) return 'Jobs';
+        if (content.message || content.inMail) return 'Message';
+        
+        // Check media URN for video vs image
+        const mediaId = content.media?.id || '';
+        if (mediaId.includes('video') || mediaId.includes('ugcVideo')) return 'Video';
+        if (mediaId.includes('image') || mediaId.includes('digitalmediaAsset')) return 'Image';
+      }
+      
+      // Fall back to format field
+      switch (formatFallback) {
         case 'VIDEO': return 'Video';
         case 'CAROUSEL': return 'Carousel';
         case 'IMAGE': return 'Image';
         case 'TEXT': return 'Text';
         case 'DOCUMENT': return 'Document';
+        case 'MESSAGE': return 'Message';
         default: return 'Image';
       }
     };
     
     const creatives: CreativeNode[] = rawData.creatives
       .filter(c => c.campaign === raw.id)
-      .map((c, idx) => ({
-        id: c.id,
-        name: c.name,
-        type: NodeType.CREATIVE,
-        format: c.format,
-        content: {
-          imageUrl: c.format === 'VIDEO' 
-            ? undefined 
-            : `https://picsum.photos/seed/${c.id}/200/200`,
-          mediaType: getMediaType(c.format)
-        }
-      }));
+      .map((c, idx) => {
+        const mediaType = getCreativeType(c, c.format);
+        return {
+          id: c.id,
+          name: c.name,
+          type: NodeType.CREATIVE,
+          format: c.format,
+          content: {
+            imageUrl: mediaType === 'Video' 
+              ? undefined 
+              : `https://picsum.photos/seed/${c.id}/200/200`,
+            mediaType: mediaType
+          }
+        };
+      });
     
     // Resolve output audiences names
     const resolvedOutputs = raw.outputAudiences ? resolveUrns(raw.outputAudiences) : [];

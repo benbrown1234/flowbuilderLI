@@ -891,9 +891,9 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
         ? `urn:li:sponsoredCampaign:${raw.id}` 
         : raw.id;
       
-      // Get ad format from campaign type/format fields
+      // Get ad format from campaign type/format fields (fallback)
       // Returns format WITHOUT "Ad" suffix - the UI adds it
-      const getAdFormat = (campaignType: string, campaignFormat: string): string => {
+      const getCampaignFormat = (campaignType: string, campaignFormat: string): string => {
         // Campaign type determines the main category
         if (campaignType === 'TEXT_AD') return 'Text';
         if (campaignType === 'SPONSORED_INMAILS') return 'Message';
@@ -916,7 +916,56 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
         return 'Image';
       };
       
-      const campaignAdFormat = getAdFormat(raw.type || '', raw.format || '');
+      // Detect creative type from content structure (more accurate than campaign-level)
+      const getCreativeType = (creative: any, fallbackFormat: string): string => {
+        // First check creative.type field (highest priority for special types)
+        const creativeType = creative.type || '';
+        if (creativeType === 'SPONSORED_INMAILS' || creativeType.includes('INMAIL')) return 'Message';
+        if (creativeType === 'TEXT_AD') return 'Text';
+        if (creativeType === 'DYNAMIC') return 'Spotlight';
+        
+        const content = creative.content;
+        if (!content) return fallbackFormat;
+        
+        // Check for specific content structures
+        if (content.carousel || content.carousel?.cards) return 'Carousel';
+        if (content.spotlight) return 'Spotlight';
+        if (content.textAd) return 'Text';
+        if (content.eventAd) return 'Event';
+        if (content.followerAd || content.followCompany) return 'Follower';
+        if (content.jobAd) return 'Jobs';
+        if (content.message || content.inMail) return 'Message';
+        
+        // Check media URN for video vs image
+        const mediaId = content.media?.id || '';
+        if (mediaId.includes('video') || mediaId.includes('ugcVideo')) return 'Video';
+        if (mediaId.includes('image') || mediaId.includes('digitalmediaAsset')) return 'Image';
+        
+        // Check reference URN type
+        const reference = content.reference || '';
+        if (reference.includes('video')) return 'Video';
+        
+        // Check variables for type hints
+        const variables = creative.variables?.data;
+        if (variables) {
+          const varKey = Object.keys(variables)[0] || '';
+          if (varKey.includes('Carousel')) return 'Carousel';
+          if (varKey.includes('Video')) return 'Video';
+          if (varKey.includes('InMail') || varKey.includes('Message')) return 'Message';
+          if (varKey.includes('Text')) return 'Text';
+          if (varKey.includes('Spotlight')) return 'Spotlight';
+          if (varKey.includes('Follower')) return 'Follower';
+          if (varKey.includes('Document')) return 'Document';
+          if (varKey.includes('Event')) return 'Event';
+        }
+        
+        // Check if mediaType was already set by server
+        if (content.mediaType) return content.mediaType;
+        
+        return fallbackFormat;
+      };
+      
+      const campaignFallbackFormat = getCampaignFormat(raw.type || '', raw.format || '');
       
       const matchingCreatives: CreativeNode[] = creatives
         .filter((c: any) => {
@@ -924,16 +973,19 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
           const creativeCampaignId = extractIdFromUrn(creativeCampaignUrn);
           return creativeCampaignId === campaignId || creativeCampaignUrn === campaignUrn;
         })
-        .map((c: any) => ({
-          id: extractIdFromUrn(c.id),
-          name: c.name || `Creative ${extractIdFromUrn(c.id)}`,
-          type: NodeType.CREATIVE,
-          format: c.type || 'SPONSORED_UPDATE',
-          content: {
-            ...(c.content || {}),
-            mediaType: c.content?.mediaType || campaignAdFormat,
-          },
-        }));
+        .map((c: any) => {
+          const detectedType = getCreativeType(c, campaignFallbackFormat);
+          return {
+            id: extractIdFromUrn(c.id),
+            name: c.name || `Creative ${extractIdFromUrn(c.id)}`,
+            type: NodeType.CREATIVE,
+            format: c.type || 'SPONSORED_UPDATE',
+            content: {
+              ...(c.content || {}),
+              mediaType: detectedType,
+            },
+          };
+        });
 
       const dailyBudget = parseBudget(raw.dailyBudget);
 
