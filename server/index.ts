@@ -172,7 +172,7 @@ app.get('/api/auth/url', (req, res) => {
   const state = crypto.randomBytes(16).toString('hex');
   session.state = state;
   
-  const scope = 'rw_ads r_basicprofile r_organization_social';
+  const scope = 'rw_ads r_ads_reporting r_basicprofile r_organization_social';
   const redirectUri = getRedirectUri(req);
   
   const authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${LINKEDIN_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=${encodeURIComponent(scope)}`;
