@@ -496,6 +496,11 @@ const RichCreativePreview: React.FC<RichCreativePreviewProps> = ({ creative, acc
         <p className="text-sm font-mono text-gray-600">{creative.id}</p>
       </div>
 
+      <div className="space-y-1">
+        <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Creative Type</label>
+        <p className="text-sm text-gray-700">{creative.content?.mediaType || creative.format || 'Standard'}</p>
+      </div>
+
       {parsedContent?.description && (
         <div className="space-y-1 pt-2 border-t border-gray-100">
           <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide">Description</label>
