@@ -1,16 +1,16 @@
 # LinkedIn Audience Visualizer
 
 ## Overview
-A React-based visualization tool for LinkedIn advertising account structures. Shows account hierarchies, targeting flows, and remarketing strategies through interactive visualizations. Supports both demo data and real LinkedIn Marketing API data via OAuth 2.0 authentication.
+A React-based visualization tool for LinkedIn advertising account structures. Shows account hierarchies, targeting flows, and remarketing strategies through interactive visualizations. Supports both demo data and real LinkedIn Marketing API data via OAuth 2.0 authentication. Features an AI-powered auditor chatbot for campaign insights.
 
 ## Tech Stack
 - **Frontend**: React 19 + TypeScript + Vite (port 5000)
 - **Backend**: Express.js + TypeScript (port 3001)
 - **UI**: Tailwind CSS (CDN), Lucide React icons
-- **API**: LinkedIn Marketing API (OAuth 2.0)
+- **API**: LinkedIn Marketing API (OAuth 2.0), OpenAI (via Replit AI Integrations)
 
 ## Project Structure
-- `/components/` - React components (AudienceFlow, HierarchyNode, RemarketingFlow, StructureTree, TargetingInspector)
+- `/components/` - React components (AudienceFlow, HierarchyNode, RemarketingFlow, StructureTree, TargetingInspector, AIAuditor)
 - `/services/` - Business logic
   - `linkedinLogic.ts` - Mock data logic
   - `mockData.ts` - Demo data
@@ -37,12 +37,22 @@ Required secrets for LinkedIn API:
 2. Targeting Flow - Audience composition visualization
 3. Remarketing - Campaign flow visualization
 
+## AI Auditor
+Click the sparkle button in the bottom right corner to open the AI Auditor chatbot. Features:
+- Ask natural language questions about campaigns, targeting, and performance
+- Tag specific entities using `/` followed by the name (autocomplete dropdown appears)
+- Supports tagging: Campaign Groups, Campaigns, Ads, Audiences
+- Streaming responses with context from your account data
+- Works with both demo and live data modes
+
 ## Running
 - `npm run dev` - Starts both frontend (port 5000) and backend (port 3001)
 - `npm run client` - Frontend only
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-28: Added AI Auditor chatbot - floating chat widget in bottom right corner for natural language campaign insights. Features entity tagging with '/' autocomplete, streaming responses, and context-aware answers about targeting, performance, and audiences. Uses OpenAI via Replit AI Integrations.
+- 2025-11-28: Added `r_ads_reporting` OAuth scope to enable LinkedIn adAnalytics API access for performance metrics
 - 2025-11-27: Restructured TargetingSummary to support 8 organized categories: geos, audiences, companyLists, company (names/industries/sizes/followers/growthRate/category), demographics (ages/genders), education (fieldsOfStudy/degrees/schools), jobExperience (titles/functions/seniorities/yearsOfExperience/skills), interestsTraits (memberInterests/memberTraits/memberGroups). Updated TargetingInspector with collapsible CategoryBox components for organized display of targeting criteria.
 - 2025-11-27: Fixed Remarketing Flow column categorization - company lists (BULK type segments) are now correctly placed in Cold Campaigns column. Only true remarketing segments (RETARGETING, LOOKALIKE, VIDEO, WEBSITE, ENGAGED) appear in the Remarketing Audiences middle column. Campaigns using only company lists are now categorized as cold, not remarketing.
 - 2025-11-27: Added REAL source campaign connections from LinkedIn's `/dmpEngagementRules` API endpoint. Segments now show their actual `sourceCampaigns` (which campaigns are included in the engagement retargeting audience). Orange dashed lines in Remarketing Flow show these real connections. Demo mode includes mock sourceCampaigns for Video Viewers and Ad Engagers segments.

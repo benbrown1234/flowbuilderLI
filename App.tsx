@@ -7,6 +7,7 @@ import { StructureTree } from './components/StructureTree';
 import { AudienceFlow } from './components/AudienceFlow';
 import { RemarketingFlow } from './components/RemarketingFlow';
 import { TargetingInspector } from './components/TargetingInspector';
+import { AIAuditor } from './components/AIAuditor';
 import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, Database } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -420,6 +421,13 @@ const App: React.FC = () => {
           onClick={handleCloseInspector}
         />
       )}
+
+      {/* AI Auditor Chat Widget */}
+      <AIAuditor
+        data={data}
+        accountId={selectedAccountId}
+        isLiveData={useRealData}
+      />
     </div>
   );
 };

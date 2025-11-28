@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import OpenAI from 'openai';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -996,6 +997,155 @@ app.get('/api/linkedin/account/:accountId/creative/:creativeId', requireAuth, as
     res.status(err.response?.status || 500).json({ 
       error: err.response?.data || err.message 
     });
+  }
+});
+
+const openai = new OpenAI({
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+});
+
+app.post('/api/ai/audit', async (req, res) => {
+  try {
+    const { message, taggedEntities, accountId, isLiveData, conversationHistory } = req.body;
+    const sessionId = req.cookies.linkedinSession;
+    
+    let accountData: any = null;
+    let analyticsData: any = null;
+    
+    if (isLiveData && sessionId && sessions[sessionId]?.accessToken) {
+      try {
+        const hierarchyResponse = await axios.get(
+          `http://localhost:${PORT}/api/linkedin/account/${accountId}/hierarchy?activeOnly=false`,
+          { headers: { Cookie: `linkedinSession=${sessionId}` } }
+        );
+        accountData = hierarchyResponse.data;
+      } catch (err: any) {
+        console.warn('Failed to fetch account data for AI:', err.message);
+      }
+    }
+    
+    let entityContext = '';
+    if (taggedEntities && taggedEntities.length > 0 && accountData) {
+      entityContext = '\n\nTagged entities the user is asking about:\n';
+      for (const entity of taggedEntities) {
+        if (entity.type === 'group') {
+          const group = accountData.groups?.find((g: any) => g.id === entity.id || g.name === entity.name);
+          if (group) {
+            entityContext += `\n- Campaign Group "${group.name}" (ID: ${group.id}):\n`;
+            entityContext += `  Status: ${group.status}\n`;
+            entityContext += `  Campaigns: ${group.children?.length || 0}\n`;
+            if (group.children) {
+              entityContext += `  Campaign names: ${group.children.map((c: any) => c.name).join(', ')}\n`;
+            }
+          }
+        } else if (entity.type === 'campaign') {
+          for (const group of accountData.groups || []) {
+            const campaign = group.children?.find((c: any) => c.id === entity.id || c.name === entity.name);
+            if (campaign) {
+              entityContext += `\n- Campaign "${campaign.name}" (ID: ${campaign.id}):\n`;
+              entityContext += `  Status: ${campaign.status}\n`;
+              entityContext += `  Objective: ${campaign.objective}\n`;
+              entityContext += `  Daily Budget: ${campaign.dailyBudget}\n`;
+              entityContext += `  Bidding Strategy: ${campaign.biddingStrategy}\n`;
+              entityContext += `  Ads: ${campaign.children?.length || 0}\n`;
+              if (campaign.targetingResolved) {
+                const t = campaign.targetingResolved;
+                if (t.geos?.length) entityContext += `  Locations: ${t.geos.join(', ')}\n`;
+                if (t.jobExperience?.titles?.length) entityContext += `  Job Titles: ${t.jobExperience.titles.slice(0, 5).join(', ')}${t.jobExperience.titles.length > 5 ? '...' : ''}\n`;
+                if (t.company?.industries?.length) entityContext += `  Industries: ${t.company.industries.join(', ')}\n`;
+                if (t.audiences?.length) entityContext += `  Audiences: ${t.audiences.join(', ')}\n`;
+              }
+              break;
+            }
+          }
+        } else if (entity.type === 'audience') {
+          const segment = accountData.segments?.find((s: any) => s.id === entity.id || s.name === entity.name);
+          if (segment) {
+            entityContext += `\n- Audience "${segment.name}" (ID: ${segment.id}):\n`;
+            entityContext += `  Type: ${segment.type}\n`;
+            entityContext += `  Status: ${segment.status}\n`;
+            if (segment.audienceCount) entityContext += `  Size: ${segment.audienceCount.toLocaleString()}\n`;
+          }
+        }
+      }
+    }
+    
+    let accountSummary = '';
+    if (accountData) {
+      const totalCampaigns = accountData.groups?.reduce((sum: number, g: any) => sum + (g.children?.length || 0), 0) || 0;
+      const totalAds = accountData.groups?.reduce((sum: number, g: any) => 
+        sum + (g.children?.reduce((s: number, c: any) => s + (c.children?.length || 0), 0) || 0), 0) || 0;
+      const activeCampaigns = accountData.groups?.reduce((sum: number, g: any) => 
+        sum + (g.children?.filter((c: any) => c.status === 'ACTIVE')?.length || 0), 0) || 0;
+      
+      accountSummary = `
+Account Overview:
+- Account ID: ${accountId}
+- Currency: ${accountData.currency || 'Unknown'}
+- Campaign Groups: ${accountData.groups?.length || 0}
+- Total Campaigns: ${totalCampaigns} (${activeCampaigns} active)
+- Total Ads: ${totalAds}
+- Audience Segments: ${accountData.segments?.length || 0}
+
+Campaign Groups:
+${accountData.groups?.map((g: any) => `- ${g.name}: ${g.children?.length || 0} campaigns, Status: ${g.status}`).join('\n') || 'None'}
+`;
+    }
+    
+    const systemPrompt = `You are an AI Auditor for LinkedIn advertising campaigns. You help advertisers understand their campaign performance, targeting, and audiences.
+
+${isLiveData ? 'You have access to LIVE data from the user\'s actual LinkedIn Ads account.' : 'The user is viewing DEMO data, not their actual account.'}
+
+${accountSummary}
+${entityContext}
+
+Guidelines:
+- Be concise and actionable in your responses
+- When discussing metrics, provide context (e.g., "this CTR is above/below industry average")
+- Suggest optimizations when you see opportunities
+- If you don't have specific data, say so and suggest what the user could check
+- Format your responses with clear headings and bullet points when appropriate
+- Reference specific campaigns, groups, or audiences by name when relevant`;
+
+    const messages: any[] = [
+      { role: 'system', content: systemPrompt }
+    ];
+    
+    if (conversationHistory && conversationHistory.length > 0) {
+      messages.push(...conversationHistory);
+    }
+    
+    messages.push({ role: 'user', content: message });
+    
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+    
+    const stream = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages,
+      stream: true,
+      max_tokens: 1000,
+    });
+    
+    for await (const chunk of stream) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) {
+        res.write(content);
+      }
+    }
+    
+    res.end();
+  } catch (err: any) {
+    console.error('AI audit error:', err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Unable to process your request. Please try again.' });
+    } else {
+      res.end();
+    }
   }
 });
 
