@@ -76,6 +76,7 @@ export interface CreativeContent {
   imageUrl?: string;
   videoUrl?: string;
   mediaType?: string;
+  isThoughtLeader?: boolean;
 }
 
 export interface CreativeNode extends BaseNode {

@@ -935,6 +935,12 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
         
         // Check variables structure (LinkedIn API stores type info here)
         const variables = creative.variables?.data || creative.variables || {};
+        
+        // Check for carousel cards in variables (primary indicator for live carousel ads)
+        if (variables.carouselCards && Array.isArray(variables.carouselCards) && variables.carouselCards.length > 0) {
+          return 'Carousel';
+        }
+        
         const varKeys = Object.keys(variables);
         for (const key of varKeys) {
           const keyLower = key.toLowerCase();
@@ -952,6 +958,11 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
         // Check content structure (for mock data and some API responses)
         const content = creative.content;
         if (content) {
+          // Check referenceProperties.shareMediaCategory (live carousel indicator)
+          if (content.referenceProperties?.shareMediaCategory === 'CAROUSEL') return 'Carousel';
+          if (content.referenceProperties?.shareMediaCategory === 'VIDEO') return 'Video';
+          if (content.referenceProperties?.shareMediaCategory === 'IMAGE') return 'Image';
+          
           if (content.carousel || content.carousel?.cards) return 'Carousel';
           if (content.spotlight) return 'Spotlight';
           if (content.textAd) return 'Text';
@@ -978,6 +989,19 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
       
       const campaignFallbackFormat = getCampaignFormat(raw.type || '', raw.format || '');
       
+      // Detect if creative is a Thought Leader Ad (promoted by individual member) vs Company Ad
+      const isThoughtLeaderAd = (creative: any): boolean => {
+        const variables = creative.variables?.data || creative.variables || {};
+        const sponsoredEntity = variables.sponsoredEntity?.entity || '';
+        // Thought Leader ads are promoted by member URNs, Company ads by organization URNs
+        if (sponsoredEntity.includes('urn:li:member:')) return true;
+        if (sponsoredEntity.includes('urn:li:person:')) return true;
+        // Also check name pattern as fallback (LinkedIn often names them "Creative N")
+        const name = creative.name || '';
+        if (/^Creative\s*\d+$/i.test(name.trim())) return true;
+        return false;
+      };
+      
       const matchingCreatives: CreativeNode[] = creatives
         .filter((c: any) => {
           const creativeCampaignUrn = c.campaign;
@@ -986,6 +1010,7 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
         })
         .map((c: any) => {
           const detectedType = getCreativeType(c, campaignFallbackFormat);
+          const isThoughtLeader = isThoughtLeaderAd(c);
           return {
             id: extractIdFromUrn(c.id),
             name: c.name || `Creative ${extractIdFromUrn(c.id)}`,
@@ -994,6 +1019,7 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
             content: {
               ...(c.content || {}),
               mediaType: detectedType,
+              isThoughtLeader,
             },
           };
         });

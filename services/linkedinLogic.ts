@@ -283,6 +283,8 @@ export const buildAccountHierarchy = (accountId?: string): AccountStructure | nu
       .filter(c => c.campaign === raw.id)
       .map((c, idx) => {
         const mediaType = getCreativeType(c, c.format);
+        // Thought Leader ads are identified by name pattern "Creative N" or sponsoredEntity
+        const isThoughtLeader = /^Creative\s*\d+$/i.test((c.name || '').trim());
         return {
           id: c.id,
           name: c.name,
@@ -292,7 +294,8 @@ export const buildAccountHierarchy = (accountId?: string): AccountStructure | nu
             imageUrl: mediaType === 'Video' 
               ? undefined 
               : `https://picsum.photos/seed/${c.id}/200/200`,
-            mediaType: mediaType
+            mediaType: mediaType,
+            isThoughtLeader: isThoughtLeader
           }
         };
       });

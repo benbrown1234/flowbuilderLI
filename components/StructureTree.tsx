@@ -236,11 +236,17 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
                 {node.name}
               </div>
 
-              {/* Thought Leader Ad tag */}
-              {node.type === NodeType.CREATIVE && /^Creative\s*\d+$/i.test(node.name.trim()) && (
-                <span className="mt-0.5 text-[6px] font-bold uppercase tracking-wide px-1 py-0.5 rounded bg-purple-100 text-purple-700 border border-purple-200 self-start">
-                  Thought Leader
-                </span>
+              {/* Thought Leader or Company Ad tag */}
+              {node.type === NodeType.CREATIVE && (
+                (node.data as CreativeNode).content?.isThoughtLeader ? (
+                  <span className="mt-0.5 text-[6px] font-bold uppercase tracking-wide px-1 py-0.5 rounded bg-purple-100 text-purple-700 border border-purple-200 self-start">
+                    Thought Leader
+                  </span>
+                ) : (
+                  <span className="mt-0.5 text-[6px] font-bold uppercase tracking-wide px-1 py-0.5 rounded bg-blue-100 text-blue-700 border border-blue-200 self-start">
+                    Company Ad
+                  </span>
+                )
               )}
 
               {/* Optional Metadata - only for campaigns */}
