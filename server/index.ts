@@ -623,6 +623,8 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
       console.log(`Campaigns fetched: ${campaigns.length} items`);
       if (campaigns.length > 0) {
         console.log(`First campaign sample: ${JSON.stringify(campaigns[0], null, 2).substring(0, 500)}`);
+        // Log key format fields specifically
+        console.log(`Campaign format fields: type=${campaigns[0].type}, format=${campaigns[0].format}, creativeSelection=${campaigns[0].creativeSelection}`);
       }
     } catch (err: any) {
       const errorMsg = `Campaigns error: ${JSON.stringify(err.response?.data || err.message)}`;
@@ -655,6 +657,9 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
         console.log(`Creatives fetched: ${creatives.length} items`);
         if (creatives.length > 0) {
           console.log(`First creative sample: ${JSON.stringify(creatives[0], null, 2).substring(0, 500)}`);
+          // Log key creative fields
+          const c = creatives[0];
+          console.log(`Creative fields: type=${c.type}, intendedStatus=${c.intendedStatus}, content.reference=${c.content?.reference}, variables=${JSON.stringify(Object.keys(c.variables || {}))}`);
         }
       } catch (err: any) {
         const errorMsg = `Creatives error: ${JSON.stringify(err.response?.data || err.message)}`;
@@ -818,7 +823,7 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
       // Check for non-post creative types
       if (content) {
         if (content.textAd) {
-          mediaType = 'Text Ad';
+          mediaType = 'Text';
           if (content.textAd.imageUrl) {
             imageUrl = content.textAd.imageUrl;
           }
@@ -827,9 +832,14 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
           mediaType = 'Spotlight';
           imageUrl = content.spotlight.logo || content.spotlight.backgroundImage;
         }
-        else if (!mediaType && content.reference) {
-          mediaType = 'Sponsored';
+        else if (content.carousel) {
+          mediaType = 'Carousel';
         }
+        else if (content.eventAd) {
+          mediaType = 'Event';
+        }
+        // Note: Don't set a generic fallback here - let the frontend
+        // detect from campaign type/format instead
       }
       
       return {

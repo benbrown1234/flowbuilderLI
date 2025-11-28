@@ -916,51 +916,62 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
         return 'Image';
       };
       
-      // Detect creative type from content structure (more accurate than campaign-level)
+      // Detect creative type from LinkedIn API creative structure
       const getCreativeType = (creative: any, fallbackFormat: string): string => {
-        // First check creative.type field (highest priority for special types)
-        const creativeType = creative.type || '';
-        if (creativeType === 'SPONSORED_INMAILS' || creativeType.includes('INMAIL')) return 'Message';
-        if (creativeType === 'TEXT_AD') return 'Text';
-        if (creativeType === 'DYNAMIC') return 'Spotlight';
+        // LinkedIn API creative.type field (primary source for live data)
+        const creativeType = (creative.type || '').toUpperCase();
         
-        const content = creative.content;
-        if (!content) return fallbackFormat;
+        // Direct type matching for LinkedIn API types
+        if (creativeType.includes('VIDEO') || creativeType === 'VIDEO') return 'Video';
+        if (creativeType.includes('CAROUSEL')) return 'Carousel';
+        if (creativeType.includes('INMAIL') || creativeType === 'SPONSORED_INMAILS') return 'Message';
+        if (creativeType === 'TEXT_AD' || creativeType.includes('TEXT')) return 'Text';
+        if (creativeType.includes('SPOTLIGHT')) return 'Spotlight';
+        if (creativeType.includes('FOLLOWER') || creativeType === 'FOLLOW_COMPANY') return 'Follower';
+        if (creativeType.includes('DOCUMENT')) return 'Document';
+        if (creativeType.includes('EVENT')) return 'Event';
+        if (creativeType.includes('JOB')) return 'Jobs';
+        if (creativeType.includes('CONVERSATION')) return 'Conversation';
         
-        // Check for specific content structures
-        if (content.carousel || content.carousel?.cards) return 'Carousel';
-        if (content.spotlight) return 'Spotlight';
-        if (content.textAd) return 'Text';
-        if (content.eventAd) return 'Event';
-        if (content.followerAd || content.followCompany) return 'Follower';
-        if (content.jobAd) return 'Jobs';
-        if (content.message || content.inMail) return 'Message';
-        
-        // Check media URN for video vs image
-        const mediaId = content.media?.id || '';
-        if (mediaId.includes('video') || mediaId.includes('ugcVideo')) return 'Video';
-        if (mediaId.includes('image') || mediaId.includes('digitalmediaAsset')) return 'Image';
-        
-        // Check reference URN type
-        const reference = content.reference || '';
-        if (reference.includes('video')) return 'Video';
-        
-        // Check variables for type hints
-        const variables = creative.variables?.data;
-        if (variables) {
-          const varKey = Object.keys(variables)[0] || '';
-          if (varKey.includes('Carousel')) return 'Carousel';
-          if (varKey.includes('Video')) return 'Video';
-          if (varKey.includes('InMail') || varKey.includes('Message')) return 'Message';
-          if (varKey.includes('Text')) return 'Text';
-          if (varKey.includes('Spotlight')) return 'Spotlight';
-          if (varKey.includes('Follower')) return 'Follower';
-          if (varKey.includes('Document')) return 'Document';
-          if (varKey.includes('Event')) return 'Event';
+        // Check variables structure (LinkedIn API stores type info here)
+        const variables = creative.variables?.data || creative.variables || {};
+        const varKeys = Object.keys(variables);
+        for (const key of varKeys) {
+          const keyLower = key.toLowerCase();
+          if (keyLower.includes('video')) return 'Video';
+          if (keyLower.includes('carousel')) return 'Carousel';
+          if (keyLower.includes('inmail') || keyLower.includes('message')) return 'Message';
+          if (keyLower.includes('text')) return 'Text';
+          if (keyLower.includes('spotlight')) return 'Spotlight';
+          if (keyLower.includes('follower')) return 'Follower';
+          if (keyLower.includes('document')) return 'Document';
+          if (keyLower.includes('event')) return 'Event';
+          if (keyLower.includes('job')) return 'Jobs';
         }
         
-        // Check if mediaType was already set by server
-        if (content.mediaType) return content.mediaType;
+        // Check content structure (for mock data and some API responses)
+        const content = creative.content;
+        if (content) {
+          if (content.carousel || content.carousel?.cards) return 'Carousel';
+          if (content.spotlight) return 'Spotlight';
+          if (content.textAd) return 'Text';
+          if (content.eventAd) return 'Event';
+          if (content.followerAd || content.followCompany) return 'Follower';
+          if (content.jobAd) return 'Jobs';
+          if (content.message || content.inMail) return 'Message';
+          
+          // Check media URN for video vs image
+          const mediaId = content.media?.id || '';
+          if (mediaId.includes('video') || mediaId.includes('ugcVideo')) return 'Video';
+          if (mediaId.includes('image') || mediaId.includes('digitalmediaAsset')) return 'Image';
+          
+          // Check reference URN type
+          const reference = content.reference || '';
+          if (reference.includes('video')) return 'Video';
+          
+          // Check if mediaType was already set
+          if (content.mediaType) return content.mediaType;
+        }
         
         return fallbackFormat;
       };
