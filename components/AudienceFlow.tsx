@@ -153,7 +153,8 @@ export const AudienceFlow: React.FC<AudienceFlowProps> = ({ data, onSelect }) =>
           campaign.children, 
           undefined, 
           campaign.objective, 
-          campaign.biddingStrategy
+          campaign.biddingStrategy,
+          campaign.id
         );
         return;
       }

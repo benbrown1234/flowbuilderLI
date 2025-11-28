@@ -6,7 +6,7 @@ import { Folder, LayoutGrid, FileImage, FileVideo, Globe, Briefcase, Plus, Minus
 
 interface Props {
   data: AccountStructure;
-  onSelect: (type: NodeType, name: string, targeting?: TargetingSummary, creatives?: CreativeNode[], singleCreative?: CreativeNode, objective?: string, biddingStrategy?: string) => void;
+  onSelect: (type: NodeType, name: string, targeting?: TargetingSummary, creatives?: CreativeNode[], singleCreative?: CreativeNode, objective?: string, biddingStrategy?: string, campaignId?: string) => void;
 }
 
 export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
@@ -32,7 +32,7 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
       onSelect(NodeType.GROUP, g.name, undefined); 
     } else if (node.type === NodeType.CAMPAIGN) {
       const c = node.data as CampaignNode;
-      onSelect(NodeType.CAMPAIGN, c.name, c.targetingResolved, c.children, undefined, c.objective, c.biddingStrategy);
+      onSelect(NodeType.CAMPAIGN, c.name, c.targetingResolved, c.children, undefined, c.objective, c.biddingStrategy, c.id);
     } else if (node.type === NodeType.CREATIVE) {
       const c = node.data as CreativeNode;
       onSelect(NodeType.CREATIVE, c.name, undefined, undefined, c);

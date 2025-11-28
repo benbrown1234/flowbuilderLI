@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { TargetingSummary, NodeType, CreativeNode, CreativeContent } from '../types';
-import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin, Building2, ExternalLink, MousePointer, FileText, Link2, Loader2, Maximize2, X, GraduationCap, User, Heart, Zap, ChevronDown, ChevronUp } from 'lucide-react';
-import { getAdPreview, getCreativeDetails } from '../services/linkedinApi';
+import { TargetingSummary, NodeType, CreativeNode, CreativeContent, CampaignMetrics, MonthlyMetrics } from '../types';
+import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin, Building2, ExternalLink, MousePointer, FileText, Link2, Loader2, Maximize2, X, GraduationCap, User, Heart, Zap, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, BarChart3, Eye, MousePointerClick, Video } from 'lucide-react';
+import { getAdPreview, getCreativeDetails, getCampaignAnalytics } from '../services/linkedinApi';
 
 const isThoughtLeaderAd = (name: string): boolean => {
   return /^Creative\s*\d+$/i.test(name.trim());
@@ -17,11 +17,209 @@ interface InspectorProps {
     singleCreative?: CreativeNode;
     objective?: string;
     biddingStrategy?: string;
+    campaignId?: string;
   } | null;
   onClose: () => void;
   accountId?: string;
   isLiveData?: boolean;
 }
+
+interface MetricRowProps {
+  label: string;
+  icon: any;
+  current: number;
+  previous: number;
+  format: 'number' | 'currency' | 'percent';
+  currency?: string;
+}
+
+const MetricRow: React.FC<MetricRowProps> = ({ label, icon: Icon, current, previous, format, currency = '£' }) => {
+  const change = previous > 0 ? ((current - previous) / previous) * 100 : (current > 0 ? 100 : 0);
+  const isPositive = change > 0;
+  const isNeutral = change === 0;
+  
+  const formatValue = (value: number): string => {
+    if (format === 'currency') {
+      return `${currency}${value.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    if (format === 'percent') {
+      return `${value.toFixed(2)}%`;
+    }
+    return value.toLocaleString('en-GB');
+  };
+  
+  return (
+    <div className="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0">
+      <div className="flex items-center gap-2">
+        <Icon className="w-4 h-4 text-gray-400" />
+        <span className="text-sm text-gray-600">{label}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="text-sm font-semibold text-gray-900">{formatValue(current)}</span>
+        {!isNeutral && (
+          <div className={`flex items-center gap-0.5 text-xs font-medium ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
+            {isPositive ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+            <span>{Math.abs(change).toFixed(1)}%</span>
+          </div>
+        )}
+        {isNeutral && current === 0 && previous === 0 && (
+          <span className="text-xs text-gray-400">-</span>
+        )}
+      </div>
+    </div>
+  );
+};
+
+interface PerformanceSectionProps {
+  campaignId: string;
+  accountId: string;
+  isLiveData: boolean;
+}
+
+const PerformanceSection: React.FC<PerformanceSectionProps> = ({ campaignId, accountId, isLiveData }) => {
+  const [metrics, setMetrics] = useState<CampaignMetrics | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [labels, setLabels] = useState<{ current: string; previous: string }>({ current: '', previous: '' });
+  
+  useEffect(() => {
+    if (!isLiveData || !accountId || !campaignId) return;
+    
+    setLoading(true);
+    setError(null);
+    
+    getCampaignAnalytics(accountId)
+      .then(data => {
+        const campaignMetrics = data.campaigns.find(c => c.campaignId === campaignId);
+        if (campaignMetrics) {
+          setMetrics(campaignMetrics);
+        }
+        setLabels({
+          current: data.currentMonthLabel,
+          previous: data.previousMonthLabel,
+        });
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('Failed to fetch analytics:', err);
+        setError('Unable to load performance data');
+        setLoading(false);
+      });
+  }, [campaignId, accountId, isLiveData]);
+  
+  if (!isLiveData) {
+    return (
+      <div className="mb-6">
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center">
+          <BarChart3 className="w-3.5 h-3.5 mr-1.5" /> Performance
+        </h3>
+        <div className="bg-gray-50 rounded-lg p-4 border border-gray-100 text-center">
+          <p className="text-sm text-gray-500">Connect LinkedIn to see performance metrics</p>
+        </div>
+      </div>
+    );
+  }
+  
+  if (loading) {
+    return (
+      <div className="mb-6">
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center">
+          <BarChart3 className="w-3.5 h-3.5 mr-1.5" /> Performance
+        </h3>
+        <div className="bg-gray-50 rounded-lg p-4 border border-gray-100 flex items-center justify-center">
+          <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+          <span className="ml-2 text-sm text-gray-500">Loading metrics...</span>
+        </div>
+      </div>
+    );
+  }
+  
+  if (error || !metrics) {
+    return (
+      <div className="mb-6">
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center">
+          <BarChart3 className="w-3.5 h-3.5 mr-1.5" /> Performance
+        </h3>
+        <div className="bg-gray-50 rounded-lg p-4 border border-gray-100 text-center">
+          <p className="text-sm text-gray-500">{error || 'No performance data available'}</p>
+        </div>
+      </div>
+    );
+  }
+  
+  const ctr = metrics.currentMonth.impressions > 0 
+    ? (metrics.currentMonth.clicks / metrics.currentMonth.impressions) * 100 
+    : 0;
+  const prevCtr = metrics.previousMonth.impressions > 0 
+    ? (metrics.previousMonth.clicks / metrics.previousMonth.impressions) * 100 
+    : 0;
+  
+  return (
+    <div className="mb-6">
+      <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center">
+        <BarChart3 className="w-3.5 h-3.5 mr-1.5" /> Performance ({labels.current} vs {labels.previous})
+      </h3>
+      <div className="bg-gradient-to-br from-slate-50 to-gray-50 rounded-lg p-4 border border-gray-200">
+        <MetricRow 
+          label="Impressions" 
+          icon={Eye} 
+          current={metrics.currentMonth.impressions} 
+          previous={metrics.previousMonth.impressions}
+          format="number"
+        />
+        <MetricRow 
+          label="Clicks" 
+          icon={MousePointerClick} 
+          current={metrics.currentMonth.clicks} 
+          previous={metrics.previousMonth.clicks}
+          format="number"
+        />
+        <MetricRow 
+          label="CTR" 
+          icon={Target} 
+          current={ctr} 
+          previous={prevCtr}
+          format="percent"
+        />
+        <MetricRow 
+          label="Spend" 
+          icon={DollarSign} 
+          current={metrics.currentMonth.spend} 
+          previous={metrics.previousMonth.spend}
+          format="currency"
+          currency={metrics.currency === 'GBP' ? '£' : metrics.currency === 'USD' ? '$' : '€'}
+        />
+        {(metrics.currentMonth.leads > 0 || metrics.previousMonth.leads > 0) && (
+          <MetricRow 
+            label="Leads" 
+            icon={Users} 
+            current={metrics.currentMonth.leads} 
+            previous={metrics.previousMonth.leads}
+            format="number"
+          />
+        )}
+        {(metrics.currentMonth.conversions > 0 || metrics.previousMonth.conversions > 0) && (
+          <MetricRow 
+            label="Conversions" 
+            icon={Zap} 
+            current={metrics.currentMonth.conversions} 
+            previous={metrics.previousMonth.conversions}
+            format="number"
+          />
+        )}
+        {(metrics.currentMonth.videoViews > 0 || metrics.previousMonth.videoViews > 0) && (
+          <MetricRow 
+            label="Video Views" 
+            icon={Video} 
+            current={metrics.currentMonth.videoViews} 
+            previous={metrics.previousMonth.videoViews}
+            format="number"
+          />
+        )}
+      </div>
+    </div>
+  );
+};
 
 const TargetingSection = ({ title, items, icon: Icon, colorClass, borderColor }: { title: string, items: string[], icon: any, colorClass: string, borderColor: string }) => {
   if (!items || items.length === 0) return null;
@@ -423,6 +621,14 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
 
         {node.type === NodeType.CAMPAIGN && (
           <>
+            {accountId && node.campaignId && (
+              <PerformanceSection 
+                campaignId={node.campaignId} 
+                accountId={accountId} 
+                isLiveData={isLiveData || false}
+              />
+            )}
+
             <div className="mb-6">
               <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center">
                  <Settings className="w-3.5 h-3.5 mr-1.5" /> Campaign Settings

@@ -32,6 +32,7 @@ const App: React.FC = () => {
     singleCreative?: CreativeNode; // For Creative Nodes
     objective?: string;
     biddingStrategy?: string;
+    campaignId?: string;
   } | null>(null);
 
   // Check authentication status and URL params on mount
@@ -177,7 +178,8 @@ const App: React.FC = () => {
     creatives?: CreativeNode[],
     singleCreative?: CreativeNode,
     objective?: string,
-    biddingStrategy?: string
+    biddingStrategy?: string,
+    campaignId?: string
   ) => {
     setSelectedNode({ 
       type, 
@@ -186,7 +188,8 @@ const App: React.FC = () => {
       creatives,
       singleCreative,
       objective,
-      biddingStrategy
+      biddingStrategy,
+      campaignId
     });
   };
 

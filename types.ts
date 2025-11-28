@@ -157,7 +157,8 @@ export type OnSelectHandler = (
   creatives?: CreativeNode[],
   singleCreative?: CreativeNode,
   objective?: string,
-  biddingStrategy?: string
+  biddingStrategy?: string,
+  campaignId?: string
 ) => void;
 
 export interface MonthlyMetrics {

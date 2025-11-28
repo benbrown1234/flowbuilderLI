@@ -4,7 +4,7 @@ import { Megaphone, Users, Activity, MousePointerClick, Building2, UserCheck, Gl
 
 interface Props {
   data: AccountStructure;
-  onSelect: (type: NodeType, name: string, targeting?: TargetingSummary, creatives?: CreativeNode[]) => void;
+  onSelect: (type: NodeType, name: string, targeting?: TargetingSummary, creatives?: CreativeNode[], singleCreative?: CreativeNode, objective?: string, biddingStrategy?: string, campaignId?: string) => void;
 }
 
 interface CampaignInfo {
@@ -524,7 +524,7 @@ export const RemarketingFlow: React.FC<Props> = ({ data, onSelect }) => {
       setSelectedNode(null);
     } else {
       setSelectedNode(campaign.id);
-      onSelect(NodeType.CAMPAIGN, campaign.name, campaign.campaign.targetingResolved, campaign.campaign.children);
+      onSelect(NodeType.CAMPAIGN, campaign.name, campaign.campaign.targetingResolved, campaign.campaign.children, undefined, campaign.campaign.objective, campaign.campaign.biddingStrategy, campaign.campaign.id);
     }
   };
 
