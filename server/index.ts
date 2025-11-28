@@ -449,6 +449,107 @@ app.get('/api/linkedin/account/:accountId/engagement-rules', requireAuth, async 
   }
 });
 
+app.get('/api/linkedin/account/:accountId/analytics', requireAuth, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const sessionId = (req as any).sessionId;
+    
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    
+    const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevYear = prevDate.getFullYear();
+    const prevMonth = prevDate.getMonth() + 1;
+    
+    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+    
+    const currentMonthQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${currentYear},month:${currentMonth},day:1))&timeGranularity=MONTHLY&accounts=List(${accountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,leads,videoViews,landingPageClicks,pivotValues`;
+    
+    const prevMonthQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${prevYear},month:${prevMonth},day:1),end:(year:${currentYear},month:${currentMonth},day:1))&timeGranularity=MONTHLY&accounts=List(${accountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,leads,videoViews,landingPageClicks,pivotValues`;
+    
+    console.log(`Fetching analytics for account ${accountId}...`);
+    console.log(`Current month query: ${currentMonthQuery}`);
+    console.log(`Previous month query: ${prevMonthQuery}`);
+    
+    let currentData: any = { elements: [] };
+    let prevData: any = { elements: [] };
+    
+    try {
+      currentData = await linkedinApiRequest(sessionId, '/adAnalytics', {}, currentMonthQuery);
+      console.log(`Current month analytics: ${currentData.elements?.length || 0} campaigns`);
+    } catch (err: any) {
+      console.warn('Current month analytics error:', err.response?.data || err.message);
+    }
+    
+    try {
+      prevData = await linkedinApiRequest(sessionId, '/adAnalytics', {}, prevMonthQuery);
+      console.log(`Previous month analytics: ${prevData.elements?.length || 0} campaigns`);
+    } catch (err: any) {
+      console.warn('Previous month analytics error:', err.response?.data || err.message);
+    }
+    
+    const parseMetrics = (element: any) => ({
+      impressions: element.impressions || 0,
+      clicks: element.clicks || 0,
+      spend: (element.costInLocalCurrency || 0) / 100,
+      conversions: element.externalWebsiteConversions || 0,
+      leads: element.leads || 0,
+      videoViews: element.videoViews || 0,
+      landingPageClicks: element.landingPageClicks || 0,
+    });
+    
+    const getCampaignId = (element: any): string => {
+      if (element.pivotValues && element.pivotValues.length > 0) {
+        const campaignUrn = element.pivotValues[0];
+        return campaignUrn.split(':').pop() || campaignUrn;
+      }
+      return '';
+    };
+    
+    const currentByC: Record<string, any> = {};
+    const prevByC: Record<string, any> = {};
+    
+    (currentData.elements || []).forEach((el: any) => {
+      const cId = getCampaignId(el);
+      if (cId) currentByC[cId] = parseMetrics(el);
+    });
+    
+    (prevData.elements || []).forEach((el: any) => {
+      const cId = getCampaignId(el);
+      if (cId) prevByC[cId] = parseMetrics(el);
+    });
+    
+    const emptyMetrics = {
+      impressions: 0, clicks: 0, spend: 0, conversions: 0, leads: 0, videoViews: 0, landingPageClicks: 0
+    };
+    
+    const allCampaignIds = [...new Set([...Object.keys(currentByC), ...Object.keys(prevByC)])];
+    
+    const campaigns = allCampaignIds.map(cId => ({
+      campaignId: cId,
+      campaignName: `Campaign ${cId}`,
+      currentMonth: currentByC[cId] || emptyMetrics,
+      previousMonth: prevByC[cId] || emptyMetrics,
+      currency: 'GBP',
+    }));
+    
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    res.json({
+      accountId,
+      campaigns,
+      currentMonthLabel: `${monthNames[currentMonth - 1]} ${currentYear}`,
+      previousMonthLabel: `${monthNames[prevMonth - 1]} ${prevYear}`,
+    });
+  } catch (err: any) {
+    console.error('Analytics error:', err.response?.data || err.message);
+    res.status(err.response?.status || 500).json({ 
+      error: err.response?.data || err.message 
+    });
+  }
+});
+
 app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, res) => {
   try {
     const { accountId } = req.params;

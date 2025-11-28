@@ -159,3 +159,28 @@ export type OnSelectHandler = (
   objective?: string,
   biddingStrategy?: string
 ) => void;
+
+export interface MonthlyMetrics {
+  impressions: number;
+  clicks: number;
+  spend: number;
+  conversions: number;
+  leads: number;
+  videoViews: number;
+  landingPageClicks: number;
+}
+
+export interface CampaignMetrics {
+  campaignId: string;
+  campaignName: string;
+  currentMonth: MonthlyMetrics;
+  previousMonth: MonthlyMetrics;
+  currency: string;
+}
+
+export interface AccountMetrics {
+  accountId: string;
+  campaigns: CampaignMetrics[];
+  currentMonthLabel: string;
+  previousMonthLabel: string;
+}
