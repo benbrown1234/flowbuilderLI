@@ -6,7 +6,8 @@ import {
   CreativeNode, 
   NodeType, 
   TargetingSummary,
-  AccountSummary
+  AccountSummary,
+  AccountMetrics
 } from '../types';
 
 const api = axios.create({
@@ -67,6 +68,11 @@ export const getAdPreview = async (accountId: string, creativeId: string): Promi
 
 export const getCreativeDetails = async (accountId: string, creativeId: string): Promise<any> => {
   const response = await api.get(`/linkedin/account/${accountId}/creative/${creativeId}`);
+  return response.data;
+};
+
+export const getCampaignAnalytics = async (accountId: string): Promise<AccountMetrics> => {
+  const response = await api.get(`/linkedin/account/${accountId}/analytics`);
   return response.data;
 };
 
