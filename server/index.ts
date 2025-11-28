@@ -703,12 +703,79 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     
     console.log(`=== Summary: ${groups.length} groups, ${campaigns.length} campaigns, ${creatives.length} creatives, ${segments.length} segments, ${engagementRules.length} engagement rules ===\n`);
     
+    // Fetch thumbnails for post-based creatives
+    const postReferenceCreatives = creatives.filter((c: any) => c.content?.reference);
+    const imageUrlMap: Record<string, string> = {};
+    
+    if (postReferenceCreatives.length > 0) {
+      console.log(`Fetching thumbnails for ${postReferenceCreatives.length} post-based creatives...`);
+      
+      // Batch fetch posts (limit to first 20 to avoid too many API calls)
+      const creativesToFetch = postReferenceCreatives.slice(0, 20);
+      
+      await Promise.all(creativesToFetch.map(async (creative: any) => {
+        const reference = creative.content.reference;
+        try {
+          // Determine if it's a share or ugcPost
+          let postData: any = null;
+          if (reference.includes('urn:li:share:')) {
+            const shareId = reference.replace('urn:li:share:', '');
+            const response = await linkedinApiRequest(sessionId, `/posts/${shareId}`, {});
+            postData = response;
+          } else if (reference.includes('urn:li:ugcPost:')) {
+            const postId = reference.replace('urn:li:ugcPost:', '');
+            const response = await linkedinApiRequest(sessionId, `/ugcPosts/${postId}`, {});
+            postData = response;
+          }
+          
+          if (postData) {
+            // Extract thumbnail URL from various content structures
+            let thumbnailUrn: string | undefined;
+            
+            // Check article thumbnail
+            if (postData.content?.article?.thumbnail) {
+              thumbnailUrn = postData.content.article.thumbnail;
+            }
+            // Check media array
+            else if (postData.content?.media?.[0]?.id) {
+              thumbnailUrn = postData.content.media[0].id;
+            }
+            // Check specificContent for ugcPosts
+            else if (postData.specificContent?.['com.linkedin.ugc.ShareContent']?.media?.[0]?.thumbnails?.[0]?.url) {
+              imageUrlMap[creative.id] = postData.specificContent['com.linkedin.ugc.ShareContent'].media[0].thumbnails[0].url;
+            }
+            
+            // Resolve image URN to URL if we have one
+            if (thumbnailUrn && thumbnailUrn.startsWith('urn:li:image:')) {
+              try {
+                const imageId = thumbnailUrn.replace('urn:li:image:', '');
+                const imageResponse = await linkedinApiRequest(sessionId, `/images/${imageId}`, {});
+                if (imageResponse.downloadUrl) {
+                  imageUrlMap[creative.id] = imageResponse.downloadUrl;
+                }
+              } catch (imgErr: any) {
+                // Image resolution failed, skip
+              }
+            }
+          }
+        } catch (postErr: any) {
+          // Post fetch failed, skip this creative
+        }
+      }));
+      
+      console.log(`Resolved ${Object.keys(imageUrlMap).length} thumbnail URLs`);
+    }
+    
     // Process creatives to extract image URLs from nested content structure
     const processedCreatives = creatives.map((creative: any) => {
       let imageUrl: string | undefined;
       const content = creative.content;
       
-      if (content) {
+      // First check if we resolved the image URL from post content
+      if (imageUrlMap[creative.id]) {
+        imageUrl = imageUrlMap[creative.id];
+      }
+      else if (content) {
         // Check for textAd image
         if (content.textAd?.imageUrl) {
           imageUrl = content.textAd.imageUrl;
@@ -716,11 +783,6 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
         // Check for spotlight images
         else if (content.spotlight?.logo || content.spotlight?.backgroundImage) {
           imageUrl = content.spotlight.logo || content.spotlight.backgroundImage;
-        }
-        // Check for reference (post-based ads) - will need to be fetched separately
-        else if (content.reference) {
-          // Mark as needing post fetch - we can add imageUrl later
-          creative._hasPostReference = true;
         }
       }
       
