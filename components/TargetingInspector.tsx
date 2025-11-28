@@ -87,12 +87,22 @@ const PerformanceSection: React.FC<PerformanceSectionProps> = ({ campaignId, acc
     
     setLoading(true);
     setError(null);
+    setMetrics(null);
+    
+    console.log(`Fetching analytics for campaign ${campaignId} in account ${accountId}`);
     
     getCampaignAnalytics(accountId)
       .then(data => {
+        console.log(`Analytics response: ${data.campaigns.length} campaigns available`);
+        console.log(`Available campaign IDs:`, data.campaigns.map(c => c.campaignId));
+        console.log(`Looking for campaign ID: "${campaignId}"`);
+        
         const campaignMetrics = data.campaigns.find(c => c.campaignId === campaignId);
         if (campaignMetrics) {
+          console.log(`Found metrics for campaign ${campaignId}:`, campaignMetrics);
           setMetrics(campaignMetrics);
+        } else {
+          console.log(`No metrics found for campaign ${campaignId}`);
         }
         setLabels({
           current: data.currentMonthLabel,
@@ -138,10 +148,15 @@ const PerformanceSection: React.FC<PerformanceSectionProps> = ({ campaignId, acc
     return (
       <div className="mb-6">
         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center">
-          <BarChart3 className="w-3.5 h-3.5 mr-1.5" /> Performance
+          <BarChart3 className="w-3.5 h-3.5 mr-1.5" /> Performance {labels.current && `(${labels.current} vs ${labels.previous})`}
         </h3>
         <div className="bg-gray-50 rounded-lg p-4 border border-gray-100 text-center">
-          <p className="text-sm text-gray-500">{error || 'No performance data available'}</p>
+          <p className="text-sm text-gray-500">
+            {error || 'No recent activity data for this campaign'}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            Performance metrics appear when campaign has impressions or spend
+          </p>
         </div>
       </div>
     );

@@ -462,39 +462,53 @@ app.get('/api/linkedin/account/:accountId/analytics', requireAuth, async (req, r
     const prevYear = prevDate.getFullYear();
     const prevMonth = prevDate.getMonth() + 1;
     
-    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+    const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    const startYear = threeMonthsAgo.getFullYear();
+    const startMonth = threeMonthsAgo.getMonth() + 1;
     
-    const currentMonthQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${currentYear},month:${currentMonth},day:1))&timeGranularity=MONTHLY&accounts=List(${accountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,leads,videoViews,landingPageClicks,pivotValues`;
+    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const endYear = nextMonth.getFullYear();
+    const endMonth = nextMonth.getMonth() + 1;
     
-    const prevMonthQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${prevYear},month:${prevMonth},day:1),end:(year:${currentYear},month:${currentMonth},day:1))&timeGranularity=MONTHLY&accounts=List(${accountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,leads,videoViews,landingPageClicks,pivotValues`;
+    const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
+    const encodedAccountUrn = encodeURIComponent(accountUrn);
     
-    console.log(`Fetching analytics for account ${accountId}...`);
-    console.log(`Current month query: ${currentMonthQuery}`);
-    console.log(`Previous month query: ${prevMonthQuery}`);
+    const dateRangeQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${startYear},month:${startMonth},day:1),end:(year:${endYear},month:${endMonth},day:1))&timeGranularity=MONTHLY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,pivotValues,dateRange`;
     
-    let currentData: any = { elements: [] };
-    let prevData: any = { elements: [] };
+    console.log(`\n=== Fetching analytics for account ${accountId} ===`);
+    console.log(`Date range: ${startMonth}/${startYear} to ${endMonth}/${endYear}`);
+    console.log(`Account URN: ${accountUrn}`);
+    console.log(`Query string length: ${dateRangeQuery.length} chars`);
+    
+    let analyticsData: any = { elements: [] };
     
     try {
-      currentData = await linkedinApiRequest(sessionId, '/adAnalytics', {}, currentMonthQuery);
-      console.log(`Current month analytics: ${currentData.elements?.length || 0} campaigns`);
+      analyticsData = await linkedinApiRequest(sessionId, '/adAnalytics', {}, dateRangeQuery);
+      console.log(`Analytics response: ${analyticsData.elements?.length || 0} rows`);
+      if (analyticsData.elements?.length > 0) {
+        console.log('Sample element:', JSON.stringify(analyticsData.elements[0], null, 2));
+      } else {
+        console.log('No analytics data returned - empty elements array');
+      }
     } catch (err: any) {
-      console.warn('Current month analytics error:', err.response?.data || err.message);
-    }
-    
-    try {
-      prevData = await linkedinApiRequest(sessionId, '/adAnalytics', {}, prevMonthQuery);
-      console.log(`Previous month analytics: ${prevData.elements?.length || 0} campaigns`);
-    } catch (err: any) {
-      console.warn('Previous month analytics error:', err.response?.data || err.message);
+      const errorDetails = err.response?.data || err.message;
+      console.warn('Analytics API error:', JSON.stringify(errorDetails, null, 2));
+      res.json({
+        accountId,
+        campaigns: [],
+        currentMonthLabel: '',
+        previousMonthLabel: '',
+        error: typeof errorDetails === 'string' ? errorDetails : JSON.stringify(errorDetails)
+      });
+      return;
     }
     
     const parseMetrics = (element: any) => ({
       impressions: element.impressions || 0,
       clicks: element.clicks || 0,
-      spend: (element.costInLocalCurrency || 0) / 100,
+      spend: element.costInLocalCurrency || 0,
       conversions: element.externalWebsiteConversions || 0,
-      leads: element.leads || 0,
+      leads: element.oneClickLeads || element.leads || 0,
       videoViews: element.videoViews || 0,
       landingPageClicks: element.landingPageClicks || 0,
     });
@@ -502,29 +516,45 @@ app.get('/api/linkedin/account/:accountId/analytics', requireAuth, async (req, r
     const getCampaignId = (element: any): string => {
       if (element.pivotValues && element.pivotValues.length > 0) {
         const campaignUrn = element.pivotValues[0];
-        return campaignUrn.split(':').pop() || campaignUrn;
+        const id = campaignUrn.split(':').pop() || campaignUrn;
+        return id;
       }
       return '';
+    };
+    
+    const getElementMonth = (element: any): number => {
+      if (element.dateRange?.start?.month) {
+        return element.dateRange.start.month;
+      }
+      return 0;
     };
     
     const currentByC: Record<string, any> = {};
     const prevByC: Record<string, any> = {};
     
-    (currentData.elements || []).forEach((el: any) => {
+    (analyticsData.elements || []).forEach((el: any) => {
       const cId = getCampaignId(el);
-      if (cId) currentByC[cId] = parseMetrics(el);
+      const elMonth = getElementMonth(el);
+      
+      if (cId) {
+        console.log(`Campaign ${cId} - month ${elMonth}: impressions=${el.impressions || 0}, clicks=${el.clicks || 0}`);
+        if (elMonth === currentMonth) {
+          currentByC[cId] = parseMetrics(el);
+        } else if (elMonth === prevMonth) {
+          prevByC[cId] = parseMetrics(el);
+        }
+      }
     });
     
-    (prevData.elements || []).forEach((el: any) => {
-      const cId = getCampaignId(el);
-      if (cId) prevByC[cId] = parseMetrics(el);
-    });
+    console.log(`Current month (${currentMonth}) campaigns: ${Object.keys(currentByC).length}`);
+    console.log(`Previous month (${prevMonth}) campaigns: ${Object.keys(prevByC).length}`);
     
     const emptyMetrics = {
       impressions: 0, clicks: 0, spend: 0, conversions: 0, leads: 0, videoViews: 0, landingPageClicks: 0
     };
     
     const allCampaignIds = [...new Set([...Object.keys(currentByC), ...Object.keys(prevByC)])];
+    console.log(`All campaign IDs with data: ${allCampaignIds.join(', ')}`);
     
     const campaigns = allCampaignIds.map(cId => ({
       campaignId: cId,
