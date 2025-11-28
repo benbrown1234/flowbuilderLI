@@ -703,20 +703,20 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     
     console.log(`=== Summary: ${groups.length} groups, ${campaigns.length} campaigns, ${creatives.length} creatives, ${segments.length} segments, ${engagementRules.length} engagement rules ===\n`);
     
-    // Fetch thumbnails for post-based creatives
+    // Fetch thumbnails and media types for post-based creatives
     const postReferenceCreatives = creatives.filter((c: any) => c.content?.reference);
     const imageUrlMap: Record<string, string> = {};
+    const mediaTypeMap: Record<string, string> = {};
     
     if (postReferenceCreatives.length > 0) {
-      console.log(`Fetching thumbnails for ${postReferenceCreatives.length} post-based creatives...`);
+      console.log(`Fetching thumbnails and media types for ${postReferenceCreatives.length} post-based creatives...`);
       
-      // Batch fetch posts (limit to first 20 to avoid too many API calls)
-      const creativesToFetch = postReferenceCreatives.slice(0, 20);
+      // Batch fetch posts (limit to first 30 to avoid too many API calls)
+      const creativesToFetch = postReferenceCreatives.slice(0, 30);
       
       await Promise.all(creativesToFetch.map(async (creative: any) => {
         const reference = creative.content.reference;
         try {
-          // Determine if it's a share or ugcPost
           let postData: any = null;
           if (reference.includes('urn:li:share:')) {
             const shareId = reference.replace('urn:li:share:', '');
@@ -729,21 +729,56 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
           }
           
           if (postData) {
-            // Extract thumbnail URL from various content structures
             let thumbnailUrn: string | undefined;
+            let detectedMediaType: string = 'Image';
             
-            // Check article thumbnail
-            if (postData.content?.article?.thumbnail) {
+            // Detect media type and extract thumbnail
+            if (postData.content?.article) {
+              detectedMediaType = 'Article';
               thumbnailUrn = postData.content.article.thumbnail;
             }
-            // Check media array
-            else if (postData.content?.media?.[0]?.id) {
-              thumbnailUrn = postData.content.media[0].id;
+            else if (postData.content?.media) {
+              const mediaArray = postData.content.media;
+              if (Array.isArray(mediaArray) && mediaArray.length > 1) {
+                detectedMediaType = 'Carousel';
+                thumbnailUrn = mediaArray[0]?.id;
+              } else if (mediaArray.length === 1) {
+                const firstMedia = mediaArray[0];
+                if (firstMedia.mediaType === 'VIDEO' || firstMedia.id?.includes('video')) {
+                  detectedMediaType = 'Video';
+                } else {
+                  detectedMediaType = 'Image';
+                }
+                thumbnailUrn = firstMedia.id;
+              }
             }
-            // Check specificContent for ugcPosts
-            else if (postData.specificContent?.['com.linkedin.ugc.ShareContent']?.media?.[0]?.thumbnails?.[0]?.url) {
-              imageUrlMap[creative.id] = postData.specificContent['com.linkedin.ugc.ShareContent'].media[0].thumbnails[0].url;
+            else if (postData.content?.multiImage) {
+              detectedMediaType = 'Carousel';
+              const images = postData.content.multiImage.images;
+              if (images?.[0]?.id) {
+                thumbnailUrn = images[0].id;
+              }
             }
+            // Check ugcPost specificContent structure
+            else if (postData.specificContent?.['com.linkedin.ugc.ShareContent']) {
+              const shareContent = postData.specificContent['com.linkedin.ugc.ShareContent'];
+              const media = shareContent.media;
+              if (Array.isArray(media) && media.length > 1) {
+                detectedMediaType = 'Carousel';
+              } else if (media?.[0]) {
+                const mediaType = media[0].mediaType || media[0]['com.linkedin.digitalmedia.mediaartifact.MediaArtifact']?.mediaType;
+                if (mediaType === 'VIDEO') {
+                  detectedMediaType = 'Video';
+                } else {
+                  detectedMediaType = 'Image';
+                }
+              }
+              if (media?.[0]?.thumbnails?.[0]?.url) {
+                imageUrlMap[creative.id] = media[0].thumbnails[0].url;
+              }
+            }
+            
+            mediaTypeMap[creative.id] = detectedMediaType;
             
             // Resolve image URN to URL if we have one
             if (thumbnailUrn && thumbnailUrn.startsWith('urn:li:image:')) {
@@ -763,26 +798,37 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
         }
       }));
       
-      console.log(`Resolved ${Object.keys(imageUrlMap).length} thumbnail URLs`);
+      console.log(`Resolved ${Object.keys(imageUrlMap).length} thumbnail URLs and ${Object.keys(mediaTypeMap).length} media types`);
     }
     
-    // Process creatives to extract image URLs from nested content structure
+    // Process creatives to extract image URLs and media types
     const processedCreatives = creatives.map((creative: any) => {
       let imageUrl: string | undefined;
+      let mediaType: string | undefined;
       const content = creative.content;
       
-      // First check if we resolved the image URL from post content
+      // First check if we resolved from post content
       if (imageUrlMap[creative.id]) {
         imageUrl = imageUrlMap[creative.id];
       }
-      else if (content) {
-        // Check for textAd image
-        if (content.textAd?.imageUrl) {
-          imageUrl = content.textAd.imageUrl;
+      if (mediaTypeMap[creative.id]) {
+        mediaType = mediaTypeMap[creative.id];
+      }
+      
+      // Check for non-post creative types
+      if (content) {
+        if (content.textAd) {
+          mediaType = 'Text Ad';
+          if (content.textAd.imageUrl) {
+            imageUrl = content.textAd.imageUrl;
+          }
         }
-        // Check for spotlight images
-        else if (content.spotlight?.logo || content.spotlight?.backgroundImage) {
+        else if (content.spotlight) {
+          mediaType = 'Spotlight';
           imageUrl = content.spotlight.logo || content.spotlight.backgroundImage;
+        }
+        else if (!mediaType && content.reference) {
+          mediaType = 'Sponsored';
         }
       }
       
@@ -790,7 +836,8 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
         ...creative,
         content: {
           ...(creative.content || {}),
-          imageUrl
+          imageUrl,
+          mediaType
         }
       };
     });
