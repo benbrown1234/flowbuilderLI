@@ -194,7 +194,7 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
                 {node.type === NodeType.GROUP && <Briefcase className="w-4 h-4 text-gray-400" />}
                 {node.type === NodeType.CAMPAIGN && <LayoutGrid className="w-4 h-4 text-orange-500" />}
                 {node.type === NodeType.CREATIVE && (
-                  (node.data as CreativeNode).format?.toUpperCase().includes('VIDEO')
+                  (node.data as CreativeNode).content?.mediaType === 'Video'
                     ? <FileVideo className="w-3 h-3 text-green-500" /> 
                     : <FileImage className="w-3 h-3 text-green-500" />
                 )}
@@ -206,17 +206,8 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
                   {node.type === NodeType.GROUP ? 'Campaign Group' : 
                    node.type === NodeType.CAMPAIGN ? 'Campaign' : 
                    node.type === NodeType.CREATIVE ? (() => {
-                     const format = (node.data as CreativeNode).format?.toUpperCase() || '';
-                     if (format.includes('VIDEO')) return 'Video Ad';
-                     if (format.includes('CAROUSEL')) return 'Carousel Ad';
-                     if (format.includes('MESSAGE') || format.includes('INMAIL')) return 'Message Ad';
-                     if (format.includes('TEXT')) return 'Text Ad';
-                     if (format.includes('SPOTLIGHT')) return 'Spotlight Ad';
-                     if (format.includes('FOLLOWER')) return 'Follower Ad';
-                     if (format.includes('CONVERSATION')) return 'Conversation Ad';
-                     if (format.includes('DOCUMENT')) return 'Document Ad';
-                     if (format.includes('EVENT')) return 'Event Ad';
-                     return 'Image Ad';
+                     const mediaType = (node.data as CreativeNode).content?.mediaType || 'Image';
+                     return `${mediaType} Ad`;
                    })() : 'Account'}
                 </span>
               </div>

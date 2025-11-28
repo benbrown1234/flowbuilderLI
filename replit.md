@@ -51,6 +51,7 @@ Click the sparkle button in the bottom right corner to open the AI Auditor chatb
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-28: Added ad format labels to Structure Tree view - ad cards now display format type (Image Ad, Video Ad, Carousel Ad, Text Ad, Spotlight, Follower, Document, Event, Message). Format is derived from campaign `type` and `format` fields from LinkedIn API (no expensive post content fetching needed). Demo mode uses placeholder images from picsum.photos.
 - 2025-11-28: Added AI Auditor chatbot - floating chat widget in bottom right corner for natural language campaign insights. Features entity tagging with '/' autocomplete, streaming responses, and context-aware answers about targeting, performance, and audiences. Uses OpenAI via Replit AI Integrations.
 - 2025-11-28: Added `r_ads_reporting` OAuth scope to enable LinkedIn adAnalytics API access for performance metrics
 - 2025-11-27: Restructured TargetingSummary to support 8 organized categories: geos, audiences, companyLists, company (names/industries/sizes/followers/growthRate/category), demographics (ages/genders), education (fieldsOfStudy/degrees/schools), jobExperience (titles/functions/seniorities/yearsOfExperience/skills), interestsTraits (memberInterests/memberTraits/memberGroups). Updated TargetingInspector with collapsible CategoryBox components for organized display of targeting criteria.

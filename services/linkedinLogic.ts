@@ -240,6 +240,19 @@ export const buildAccountHierarchy = (accountId?: string): AccountStructure | nu
   // 1. Process Campaigns first to get their resolved targeting
   const processedCampaigns: CampaignNode[] = rawData.campaigns.map(raw => {
     // Find children
+    // Map format to human-readable media type
+    // Returns format WITHOUT "Ad" suffix - the UI adds it
+    const getMediaType = (format: string): string => {
+      switch (format) {
+        case 'VIDEO': return 'Video';
+        case 'CAROUSEL': return 'Carousel';
+        case 'IMAGE': return 'Image';
+        case 'TEXT': return 'Text';
+        case 'DOCUMENT': return 'Document';
+        default: return 'Image';
+      }
+    };
+    
     const creatives: CreativeNode[] = rawData.creatives
       .filter(c => c.campaign === raw.id)
       .map((c, idx) => ({
@@ -250,7 +263,8 @@ export const buildAccountHierarchy = (accountId?: string): AccountStructure | nu
         content: {
           imageUrl: c.format === 'VIDEO' 
             ? undefined 
-            : `https://picsum.photos/seed/${c.id}/200/200`
+            : `https://picsum.photos/seed/${c.id}/200/200`,
+          mediaType: getMediaType(c.format)
         }
       }));
     

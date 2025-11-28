@@ -891,6 +891,33 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
         ? `urn:li:sponsoredCampaign:${raw.id}` 
         : raw.id;
       
+      // Get ad format from campaign type/format fields
+      // Returns format WITHOUT "Ad" suffix - the UI adds it
+      const getAdFormat = (campaignType: string, campaignFormat: string): string => {
+        // Campaign type determines the main category
+        if (campaignType === 'TEXT_AD') return 'Text';
+        if (campaignType === 'SPONSORED_INMAILS') return 'Message';
+        if (campaignType === 'DYNAMIC') {
+          // Dynamic ads can be Spotlight or Follower
+          return campaignFormat === 'FOLLOW_COMPANY_V2' ? 'Follower' : 'Spotlight';
+        }
+        
+        // For SPONSORED_UPDATES, check the format field
+        if (campaignFormat === 'VIDEO') return 'Video';
+        if (campaignFormat === 'CAROUSEL_IMAGE') return 'Carousel';
+        if (campaignFormat === 'SINGLE_VIDEO') return 'Video';
+        if (campaignFormat === 'SINGLE_IMAGE') return 'Image';
+        if (campaignFormat === 'DOCUMENT') return 'Document';
+        if (campaignFormat === 'EVENT') return 'Event';
+        if (campaignFormat === 'JOBS') return 'Jobs';
+        if (campaignFormat === 'ARTICLE') return 'Article';
+        
+        // Default to Image for sponsored content
+        return 'Image';
+      };
+      
+      const campaignAdFormat = getAdFormat(raw.type || '', raw.format || '');
+      
       const matchingCreatives: CreativeNode[] = creatives
         .filter((c: any) => {
           const creativeCampaignUrn = c.campaign;
@@ -902,7 +929,10 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
           name: c.name || `Creative ${extractIdFromUrn(c.id)}`,
           type: NodeType.CREATIVE,
           format: c.type || 'SPONSORED_UPDATE',
-          content: c.content || undefined,
+          content: {
+            ...(c.content || {}),
+            mediaType: c.content?.mediaType || campaignAdFormat,
+          },
         }));
 
       const dailyBudget = parseBudget(raw.dailyBudget);

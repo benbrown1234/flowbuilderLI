@@ -75,6 +75,7 @@ export interface CreativeContent {
   leadFormName?: string;
   imageUrl?: string;
   videoUrl?: string;
+  mediaType?: string;
 }
 
 export interface CreativeNode extends BaseNode {
