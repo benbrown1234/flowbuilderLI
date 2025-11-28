@@ -221,6 +221,20 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
                 </span>
               </div>
               
+              {/* Thumbnail for Creative nodes */}
+              {node.type === NodeType.CREATIVE && (node.data as CreativeNode).content?.imageUrl && (
+                <div className="w-full h-16 mb-1 rounded overflow-hidden bg-gray-100">
+                  <img 
+                    src={(node.data as CreativeNode).content?.imageUrl} 
+                    alt="Ad preview"
+                    className="w-full h-full object-cover"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = 'none';
+                    }}
+                  />
+                </div>
+              )}
+              
               <div 
                 className={`font-semibold leading-tight
                   ${node.type === NodeType.CREATIVE ? 'text-xs truncate' : 'text-sm'}

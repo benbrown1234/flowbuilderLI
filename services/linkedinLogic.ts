@@ -242,11 +242,16 @@ export const buildAccountHierarchy = (accountId?: string): AccountStructure | nu
     // Find children
     const creatives: CreativeNode[] = rawData.creatives
       .filter(c => c.campaign === raw.id)
-      .map(c => ({
+      .map((c, idx) => ({
         id: c.id,
         name: c.name,
         type: NodeType.CREATIVE,
-        format: c.format
+        format: c.format,
+        content: {
+          imageUrl: c.format === 'VIDEO' 
+            ? undefined 
+            : `https://picsum.photos/seed/${c.id}/200/200`
+        }
       }));
     
     // Resolve output audiences names
@@ -560,14 +565,27 @@ export const getTreeGraph = (account: AccountStructure) => {
   
   const X_SPACING = 320;
   const AD_WIDTH = 130; // Half width for 2-column layout
-  const AD_HEIGHT = 50; // Compact ad height
+  const AD_HEIGHT_NO_THUMB = 50; // Compact ad height without thumbnail
+  const AD_HEIGHT_WITH_THUMB = 110; // Taller ad height with thumbnail
   const AD_GAP = 8; // Gap between ads
   const CAMPAIGN_GAP = 25; // Gap between campaigns
   const GROUP_GAP = 50; // Gap between campaign groups
   
+  // Check if creative has a thumbnail
+  const hasThumb = (creative: any): boolean => {
+    return !!(creative.content?.imageUrl || creative.content?.videoUrl);
+  };
+  
+  // Get ad height based on whether it has thumbnail
+  const getAdHeight = (creative: any): number => {
+    return hasThumb(creative) ? AD_HEIGHT_WITH_THUMB : AD_HEIGHT_NO_THUMB;
+  };
+  
   // Estimate node height based on name length and type
-  const estimateHeight = (name: string, type: NodeType): number => {
-    if (type === NodeType.CREATIVE) return AD_HEIGHT;
+  const estimateHeight = (name: string, type: NodeType, data?: any): number => {
+    if (type === NodeType.CREATIVE) {
+      return data ? getAdHeight(data) : AD_HEIGHT_NO_THUMB;
+    }
     // Estimate lines based on character count (280px width, ~28 chars per line)
     const charsPerLine = 28;
     const lines = Math.ceil(name.length / charsPerLine);
@@ -613,25 +631,45 @@ export const getTreeGraph = (account: AccountStructure) => {
 
     const childYs: number[] = [];
     
-    // Special handling for creatives - 2 column layout
+    // Special handling for creatives - 2 column layout with variable heights
     if (childType === NodeType.CREATIVE && children.length > 0) {
       // First, calculate how tall the campaign box will be
       const campaignHeight = estimateHeight(node.name, type);
-      const startY = currentY + (campaignHeight / 2); // Start ads from campaign center
+      
+      // Calculate row heights based on max height of ads in each row
       const numRows = Math.ceil(children.length / 2);
-      const adsHeight = (numRows * AD_HEIGHT) + ((numRows - 1) * AD_GAP);
+      const rowHeights: number[] = [];
+      for (let r = 0; r < numRows; r++) {
+        const leftAd = children[r * 2];
+        const rightAd = children[r * 2 + 1];
+        const leftHeight = leftAd ? getAdHeight(leftAd) : 0;
+        const rightHeight = rightAd ? getAdHeight(rightAd) : 0;
+        rowHeights.push(Math.max(leftHeight, rightHeight));
+      }
+      
+      // Calculate total ads height
+      const adsHeight = rowHeights.reduce((sum, h) => sum + h, 0) + ((numRows - 1) * AD_GAP);
       
       // Calculate vertical offset to center ads with campaign
       const adsStartY = currentY + Math.max(campaignHeight, adsHeight) / 2 - adsHeight / 2;
       
+      // Calculate cumulative row Y positions
+      let rowY = adsStartY;
       children.forEach((child: any, index: number) => {
         const row = Math.floor(index / 2);
         const col = index % 2;
+        const adHeight = getAdHeight(child);
+        const rowHeight = rowHeights[row];
+        
+        // At start of new row, update rowY
+        if (col === 0 && row > 0) {
+          rowY += rowHeights[row - 1] + AD_GAP;
+        }
         
         // Creatives are at level+1 (one level to the right of their parent campaign)
         const x = (level + 1) * X_SPACING;
         const columnOffset = col * (AD_WIDTH + AD_GAP);
-        const y = adsStartY + (row * (AD_HEIGHT + AD_GAP)) + (AD_HEIGHT / 2);
+        const y = rowY + (rowHeight / 2);
         
         nodes.push({
           id: child.id,
@@ -639,7 +677,7 @@ export const getTreeGraph = (account: AccountStructure) => {
           name: child.name,
           x,
           y,
-          height: AD_HEIGHT,
+          height: adHeight,
           columnOffset,
           data: child
         });
