@@ -703,10 +703,40 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     
     console.log(`=== Summary: ${groups.length} groups, ${campaigns.length} campaigns, ${creatives.length} creatives, ${segments.length} segments, ${engagementRules.length} engagement rules ===\n`);
     
+    // Process creatives to extract image URLs from nested content structure
+    const processedCreatives = creatives.map((creative: any) => {
+      let imageUrl: string | undefined;
+      const content = creative.content;
+      
+      if (content) {
+        // Check for textAd image
+        if (content.textAd?.imageUrl) {
+          imageUrl = content.textAd.imageUrl;
+        }
+        // Check for spotlight images
+        else if (content.spotlight?.logo || content.spotlight?.backgroundImage) {
+          imageUrl = content.spotlight.logo || content.spotlight.backgroundImage;
+        }
+        // Check for reference (post-based ads) - will need to be fetched separately
+        else if (content.reference) {
+          // Mark as needing post fetch - we can add imageUrl later
+          creative._hasPostReference = true;
+        }
+      }
+      
+      return {
+        ...creative,
+        content: {
+          ...(creative.content || {}),
+          imageUrl
+        }
+      };
+    });
+    
     res.json({
       groups,
       campaigns,
-      creatives,
+      creatives: processedCreatives,
       segments,
       engagementRules,
       _debug: errors.length > 0 ? { errors } : undefined,

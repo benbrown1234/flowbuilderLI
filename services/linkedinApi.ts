@@ -902,6 +902,7 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
           name: c.name || `Creative ${extractIdFromUrn(c.id)}`,
           type: NodeType.CREATIVE,
           format: c.type || 'SPONSORED_UPDATE',
+          content: c.content || undefined,
         }));
 
       const dailyBudget = parseBudget(raw.dailyBudget);
