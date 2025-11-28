@@ -8,11 +8,12 @@ import { AudienceFlow } from './components/AudienceFlow';
 import { RemarketingFlow } from './components/RemarketingFlow';
 import { TargetingInspector } from './components/TargetingInspector';
 import { AIAuditor } from './components/AIAuditor';
-import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, Database } from 'lucide-react';
+import AuditPage from './components/AuditPage';
+import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, Database, ClipboardCheck } from 'lucide-react';
 
 const App: React.FC = () => {
   const [data, setData] = useState<AccountStructure | null>(null);
-  const [viewMode, setViewMode] = useState<'TREE' | 'FLOW' | 'REMARKETING'>('TREE');
+  const [viewMode, setViewMode] = useState<'TREE' | 'FLOW' | 'REMARKETING' | 'AUDIT'>('TREE');
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(() => {
     // Load saved account from localStorage
@@ -336,6 +337,13 @@ const App: React.FC = () => {
                   <RefreshCw size={16} />
                   Remarketing
                 </button>
+                <button 
+                  onClick={() => setViewMode('AUDIT')}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'AUDIT' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  <ClipboardCheck size={16} />
+                  Audit
+                </button>
              </div>
 
              <div className="text-right hidden sm:block border-l pl-4 ml-2">
@@ -348,23 +356,34 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 overflow-hidden flex flex-col">
-        <div className="mb-6 flex-shrink-0">
-          <h2 className="text-lg font-semibold text-gray-800 mb-1">
-            {viewMode === 'TREE' ? 'Account Hierarchy' : 
-             viewMode === 'FLOW' ? 'Targeting Composition' : 'Remarketing Strategy Loop'}
-          </h2>
-          <p className="text-sm text-gray-500">
-             {viewMode === 'TREE' 
-               ? 'Navigate the structural parent-child relationships from Groups down to Creatives.' 
-               : viewMode === 'FLOW'
-               ? 'Visualize how specific audiences, locations, and segments are shared across multiple campaigns.'
-               : 'Visualize the journey from Cold Traffic sources -> Campaign -> Retargeting Pool -> Remarketing Campaign.'
-             }
-          </p>
-        </div>
+        {viewMode !== 'AUDIT' && (
+          <div className="mb-6 flex-shrink-0">
+            <h2 className="text-lg font-semibold text-gray-800 mb-1">
+              {viewMode === 'TREE' ? 'Account Hierarchy' : 
+               viewMode === 'FLOW' ? 'Targeting Composition' : 'Remarketing Strategy Loop'}
+            </h2>
+            <p className="text-sm text-gray-500">
+               {viewMode === 'TREE' 
+                 ? 'Navigate the structural parent-child relationships from Groups down to Creatives.' 
+                 : viewMode === 'FLOW'
+                 ? 'Visualize how specific audiences, locations, and segments are shared across multiple campaigns.'
+                 : 'Visualize the journey from Cold Traffic sources -> Campaign -> Retargeting Pool -> Remarketing Campaign.'
+               }
+            </p>
+          </div>
+        )}
 
         <div className="flex-1 min-h-0 relative">
-          {!data ? (
+          {viewMode === 'AUDIT' ? (
+            <AuditPage 
+              accountId={selectedAccountId}
+              accountName={accounts.find(a => a.id === selectedAccountId)?.name || `Account ${selectedAccountId}`}
+              isLiveData={useRealData && isAuthenticated}
+              onNavigateToCampaign={(campaignId) => {
+                setViewMode('TREE');
+              }}
+            />
+          ) : !data ? (
             <div className="flex items-center justify-center h-full text-gray-500">
               <div className="text-center">
                 <p className="mb-4">No data available</p>

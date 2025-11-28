@@ -1,22 +1,25 @@
 # LinkedIn Audience Visualizer
 
 ## Overview
-A React-based visualization tool for LinkedIn advertising account structures. Shows account hierarchies, targeting flows, and remarketing strategies through interactive visualizations. Supports both demo data and real LinkedIn Marketing API data via OAuth 2.0 authentication. Features an AI-powered auditor chatbot for campaign insights.
+A React-based visualization tool for LinkedIn advertising account structures. Shows account hierarchies, targeting flows, and remarketing strategies through interactive visualizations. Supports both demo data and real LinkedIn Marketing API data via OAuth 2.0 authentication. Features an AI-powered auditor chatbot for campaign insights and a comprehensive account audit feature.
 
 ## Tech Stack
 - **Frontend**: React 19 + TypeScript + Vite (port 5000)
 - **Backend**: Express.js + TypeScript (port 3001)
+- **Database**: PostgreSQL (Neon) for audit data storage
 - **UI**: Tailwind CSS (CDN), Lucide React icons
 - **API**: LinkedIn Marketing API (OAuth 2.0), OpenAI (via Replit AI Integrations)
 
 ## Project Structure
-- `/components/` - React components (AudienceFlow, HierarchyNode, RemarketingFlow, StructureTree, TargetingInspector, AIAuditor)
+- `/components/` - React components (AudienceFlow, HierarchyNode, RemarketingFlow, StructureTree, TargetingInspector, AIAuditor, AuditPage)
 - `/services/` - Business logic
   - `linkedinLogic.ts` - Mock data logic
   - `mockData.ts` - Demo data
   - `linkedinApi.ts` - Frontend API client for LinkedIn
 - `/server/` - Backend Express server
   - `index.ts` - OAuth endpoints and LinkedIn API proxy
+  - `database.ts` - PostgreSQL database functions for audit data
+  - `auditRules.ts` - Audit rules engine for generating recommendations
 - `App.tsx` - Main application component
 - `index.tsx` - React entry point
 - `index.html` - HTML entry with Tailwind CDN
@@ -36,6 +39,25 @@ Required secrets for LinkedIn API:
 1. Structure Tree - Hierarchical view of campaigns
 2. Targeting Flow - Audience composition visualization
 3. Remarketing - Campaign flow visualization
+4. Audit - On-demand account audit with recommendations
+
+## Account Audit
+The Audit tab provides comprehensive account analysis with actionable recommendations. Features:
+- **On-demand sync**: Data is only stored when you explicitly run an audit (not automatic)
+- **Multi-tenant isolation**: Each account's data is stored separately with account_id scoping
+- **Health score**: Overall account score (0-100) with letter grade (A-F)
+- **Category breakdown**: Scores for Structure, Performance, Targeting, Creative, and Budget
+- **Recommendations**: Prioritized issues with severity levels (High/Medium/Low)
+- **Auto-expiry**: Audit data expires after 30 days, or can be deleted manually
+
+Categories analyzed:
+- **Structure**: Empty groups, campaigns with too few/many ads, organization
+- **Performance**: CTR trends, CPC analysis, conversion tracking, delivery issues
+- **Targeting**: Duplicate targeting across campaigns, missing criteria
+- **Creative**: Format diversity (video, carousel, etc.)
+- **Budget**: Daily budget levels, pacing, concentration risk
+
+LinkedIn API compliance: Only aggregate campaign metrics are stored (not member-level data), compliant with LinkedIn's data storage requirements.
 
 ## AI Auditor
 Click the sparkle button in the bottom right corner to open the AI Auditor chatbot. Features:
@@ -51,6 +73,7 @@ Click the sparkle button in the bottom right corner to open the AI Auditor chatb
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-11-28: Added Account Audit feature - new "Audit" tab with on-demand account analysis. Features: PostgreSQL database for storing audit snapshots, multi-tenant isolation with account_id scoping, health score (0-100) with A-F grade, category breakdown (Structure, Performance, Targeting, Creative, Budget), prioritized recommendations with severity levels. Compliant with LinkedIn's data storage requirements (aggregate metrics only, 30-day auto-expiry).
 - 2025-11-28: Enhanced ad format detection with creative-level content inspection. Detection priority: 1) creative.type field (SPONSORED_INMAILS→Message, TEXT_AD→Text, DYNAMIC→Spotlight), 2) content structure (content.carousel→Carousel, content.spotlight→Spotlight, content.eventAd→Event), 3) media URN patterns (urn:li:video:→Video, urn:li:image:→Image), 4) variables.data keys, 5) campaign-level fallback. Ad cards display format labels: Image Ad, Video Ad, Carousel Ad, Text Ad, Spotlight, Follower, Document, Event, Message, Jobs. Demo mode uses placeholder images from picsum.photos with content structures simulating LinkedIn API format.
 - 2025-11-28: Added AI Auditor chatbot - floating chat widget in bottom right corner for natural language campaign insights. Features entity tagging with '/' autocomplete, streaming responses, and context-aware answers about targeting, performance, and audiences. Uses OpenAI via Replit AI Integrations.
 - 2025-11-28: Added `r_ads_reporting` OAuth scope to enable LinkedIn adAnalytics API access for performance metrics

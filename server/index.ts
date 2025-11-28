@@ -7,6 +7,20 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import OpenAI from 'openai';
+import { 
+  initDatabase, 
+  getSnapshot, 
+  createSnapshot, 
+  updateSnapshotStatus,
+  saveCampaignGroups,
+  saveCampaigns,
+  saveCreatives,
+  saveMetrics,
+  saveRecommendations,
+  getAuditData,
+  deleteAuditData 
+} from './database.js';
+import { runAuditRules, calculateAccountScore } from './auditRules.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -1379,6 +1393,230 @@ Guidelines:
       res.end();
     }
   }
+});
+
+app.get('/api/linkedin/audit/status/:accountId', requireAuth, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const snapshot = await getSnapshot(accountId);
+    
+    if (!snapshot) {
+      return res.json({ hasAudit: false });
+    }
+    
+    res.json({
+      hasAudit: true,
+      status: snapshot.status,
+      snapshotDate: snapshot.snapshot_date,
+      expiresAt: snapshot.expires_at
+    });
+  } catch (err: any) {
+    console.error('Audit status error:', err.message);
+    res.status(500).json({ error: 'Failed to get audit status' });
+  }
+});
+
+app.post('/api/linkedin/audit/run/:accountId', requireAuth, async (req, res) => {
+  const sessionId = (req as any).sessionId;
+  const { accountId } = req.params;
+  const { accountName } = req.body;
+  
+  try {
+    console.log(`Starting audit for account ${accountId} (${accountName})`);
+    
+    const snapshot = await createSnapshot(accountId, accountName || `Account ${accountId}`);
+    
+    res.json({ status: 'started', snapshotId: snapshot.id });
+    
+    (async () => {
+      try {
+        const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
+        
+        const [groupsResponse, campaignsResponse, creativesResponse] = await Promise.all([
+          linkedinApiRequest(sessionId, `/adAccounts/${accountId}/adCampaignGroups`, {}, 'q=search&search=(status:(values:List(ACTIVE,PAUSED,ARCHIVED,CANCELED,DRAFT,PENDING_DELETION,REMOVED)))'),
+          linkedinApiRequest(sessionId, `/adAccounts/${accountId}/adCampaigns`, {}, 'q=search&search=(status:(values:List(ACTIVE,PAUSED,ARCHIVED,CANCELED,DRAFT,PENDING_DELETION,REMOVED)))'),
+          linkedinApiRequest(sessionId, `/adAccounts/${accountId}/creatives`, {}, 'q=search')
+        ]);
+        
+        const groups = groupsResponse.elements || [];
+        const campaigns = campaignsResponse.elements || [];
+        const creatives = creativesResponse.elements || [];
+        
+        console.log(`Audit data: ${groups.length} groups, ${campaigns.length} campaigns, ${creatives.length} creatives`);
+        
+        const extractId = (urn: string) => {
+          const match = urn?.match(/:(\d+)$/);
+          return match ? match[1] : urn;
+        };
+        
+        const processedGroups = groups.map((g: any) => ({
+          id: extractId(g.id),
+          name: g.name || 'Unnamed Group',
+          status: g.status || 'UNKNOWN'
+        }));
+        
+        const processedCampaigns = campaigns.map((c: any) => ({
+          id: extractId(c.id),
+          groupId: extractId(c.campaignGroup),
+          name: c.name || 'Unnamed Campaign',
+          status: c.status || 'UNKNOWN',
+          objectiveType: c.objectiveType,
+          costType: c.costType,
+          dailyBudget: c.dailyBudget?.amount ? parseFloat(c.dailyBudget.amount) / 100 : undefined,
+          targetingCriteria: c.targetingCriteria
+        }));
+        
+        const processedCreatives = creatives.map((c: any) => ({
+          id: extractId(c.id),
+          campaignId: extractId(c.campaign),
+          name: c.name || `Creative ${extractId(c.id)}`,
+          status: c.status || 'UNKNOWN',
+          format: c.type || 'SPONSORED_UPDATE'
+        }));
+        
+        await saveCampaignGroups(snapshot.id, accountId, processedGroups);
+        await saveCampaigns(snapshot.id, accountId, processedCampaigns);
+        await saveCreatives(snapshot.id, accountId, processedCreatives);
+        
+        const now = new Date();
+        const currentStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const currentEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        const previousStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const previousEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+        
+        const formatDate = (d: Date) => d.toISOString().split('T')[0];
+        
+        const activeCampaignIds = campaigns
+          .filter((c: any) => c.status === 'ACTIVE')
+          .map((c: any) => c.id)
+          .slice(0, 20);
+        
+        if (activeCampaignIds.length > 0) {
+          try {
+            const campaignUrns = activeCampaignIds.map((id: string) => `urn:li:sponsoredCampaign:${extractId(id)}`);
+            const campaignParam = encodeURIComponent(`List(${campaignUrns.join(',')})`);
+            
+            const [currentAnalytics, previousAnalytics] = await Promise.all([
+              linkedinApiRequest(
+                sessionId, 
+                '/adAnalytics', 
+                {}, 
+                `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${currentStart.getFullYear()},month:${currentStart.getMonth() + 1},day:1),end:(year:${currentEnd.getFullYear()},month:${currentEnd.getMonth() + 1},day:${currentEnd.getDate()}))&timeGranularity=ALL&campaigns=${campaignParam}`
+              ).catch(() => ({ elements: [] })),
+              linkedinApiRequest(
+                sessionId, 
+                '/adAnalytics', 
+                {}, 
+                `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${previousStart.getFullYear()},month:${previousStart.getMonth() + 1},day:1),end:(year:${previousEnd.getFullYear()},month:${previousEnd.getMonth() + 1},day:${previousEnd.getDate()}))&timeGranularity=ALL&campaigns=${campaignParam}`
+              ).catch(() => ({ elements: [] }))
+            ]);
+            
+            const metricsToSave: any[] = [];
+            
+            for (const elem of (currentAnalytics.elements || [])) {
+              const campaignUrn = elem.pivotValue || elem.campaign;
+              const campaignId = extractId(campaignUrn);
+              metricsToSave.push({
+                campaignId,
+                dateRange: 'current',
+                impressions: elem.impressions || 0,
+                clicks: elem.clicks || 0,
+                spend: parseFloat(elem.costInLocalCurrency || elem.spend || '0'),
+                conversions: elem.externalWebsiteConversions || 0,
+                videoViews: elem.videoViews || 0,
+                leads: elem.oneClickLeads || 0
+              });
+            }
+            
+            for (const elem of (previousAnalytics.elements || [])) {
+              const campaignUrn = elem.pivotValue || elem.campaign;
+              const campaignId = extractId(campaignUrn);
+              metricsToSave.push({
+                campaignId,
+                dateRange: 'previous',
+                impressions: elem.impressions || 0,
+                clicks: elem.clicks || 0,
+                spend: parseFloat(elem.costInLocalCurrency || elem.spend || '0'),
+                conversions: elem.externalWebsiteConversions || 0,
+                videoViews: elem.videoViews || 0,
+                leads: elem.oneClickLeads || 0
+              });
+            }
+            
+            await saveMetrics(snapshot.id, accountId, metricsToSave);
+            console.log(`Saved ${metricsToSave.length} metric records`);
+          } catch (analyticsErr: any) {
+            console.error('Analytics fetch error:', analyticsErr.message);
+          }
+        }
+        
+        const auditData = await getAuditData(accountId);
+        if (auditData) {
+          const recommendations = runAuditRules(
+            auditData.groups,
+            auditData.campaigns,
+            auditData.creatives,
+            auditData.metrics
+          );
+          
+          await saveRecommendations(snapshot.id, accountId, recommendations);
+          console.log(`Generated ${recommendations.length} recommendations`);
+        }
+        
+        await updateSnapshotStatus(snapshot.id, 'complete');
+        console.log(`Audit complete for account ${accountId}`);
+        
+      } catch (auditErr: any) {
+        console.error('Audit processing error:', auditErr.message);
+        await updateSnapshotStatus(snapshot.id, 'error');
+      }
+    })();
+    
+  } catch (err: any) {
+    console.error('Audit start error:', err.message);
+    res.status(500).json({ error: 'Failed to start audit' });
+  }
+});
+
+app.get('/api/linkedin/audit/results/:accountId', requireAuth, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const auditData = await getAuditData(accountId);
+    
+    if (!auditData) {
+      return res.status(404).json({ error: 'No audit data found' });
+    }
+    
+    const score = calculateAccountScore(auditData.recommendations);
+    
+    res.json({
+      snapshot: auditData.snapshot,
+      groups: auditData.groups,
+      campaigns: auditData.campaigns,
+      creatives: auditData.creatives,
+      metrics: auditData.metrics,
+      recommendations: auditData.recommendations,
+      score
+    });
+  } catch (err: any) {
+    console.error('Audit results error:', err.message);
+    res.status(500).json({ error: 'Failed to get audit results' });
+  }
+});
+
+app.delete('/api/linkedin/audit/:accountId', requireAuth, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    await deleteAuditData(accountId);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Audit delete error:', err.message);
+    res.status(500).json({ error: 'Failed to delete audit data' });
+  }
+});
+
+initDatabase().catch(err => {
+  console.error('Failed to initialize database:', err.message);
 });
 
 if (isProduction) {
