@@ -735,6 +735,21 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
           }
           
           if (postData) {
+            console.log(`\n=== Post data for creative ${creative.id} ===`);
+            console.log(`Reference: ${reference}`);
+            console.log(`Author: ${postData.author || 'NO AUTHOR'}`);
+            console.log(`Content keys: ${Object.keys(postData.content || {}).join(', ') || 'NO CONTENT'}`);
+            if (postData.content?.carousel) {
+              console.log(`CAROUSEL DETECTED! Cards: ${postData.content.carousel.cards?.length || 0}`);
+            }
+            if (postData.content?.media) {
+              console.log(`Media array length: ${postData.content.media.length}`);
+            }
+            if (postData.content?.multiImage) {
+              console.log(`MultiImage detected: ${postData.content.multiImage.images?.length || 0} images`);
+            }
+            console.log(`Full content structure: ${JSON.stringify(postData.content, null, 2).substring(0, 1000)}`);
+            
             let thumbnailUrn: string | undefined;
             let detectedMediaType: string = 'Image';
             
@@ -742,6 +757,7 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
             const author = postData.author || '';
             const isThoughtLeader = author.includes('urn:li:person:') || author.includes('urn:li:member:');
             authorMap[creative.id] = isThoughtLeader;
+            console.log(`Is Thought Leader: ${isThoughtLeader} (author: ${author})`);
             
             // Detect media type and extract thumbnail
             // Check for carousel structure first (LinkedIn API returns content.carousel for carousels)
