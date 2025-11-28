@@ -712,6 +712,7 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     const postReferenceCreatives = creatives.filter((c: any) => c.content?.reference);
     const imageUrlMap: Record<string, string> = {};
     const mediaTypeMap: Record<string, string> = {};
+    const authorMap: Record<string, boolean> = {}; // true = Thought Leader, false = Company
     
     if (postReferenceCreatives.length > 0) {
       console.log(`Fetching thumbnails and media types for ${postReferenceCreatives.length} post-based creatives...`);
@@ -737,8 +738,21 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
             let thumbnailUrn: string | undefined;
             let detectedMediaType: string = 'Image';
             
+            // Detect author type for Thought Leader vs Company Ad
+            const author = postData.author || '';
+            const isThoughtLeader = author.includes('urn:li:person:') || author.includes('urn:li:member:');
+            authorMap[creative.id] = isThoughtLeader;
+            
             // Detect media type and extract thumbnail
-            if (postData.content?.article) {
+            // Check for carousel structure first (LinkedIn API returns content.carousel for carousels)
+            if (postData.content?.carousel) {
+              detectedMediaType = 'Carousel';
+              const cards = postData.content.carousel.cards;
+              if (cards?.[0]?.media?.id) {
+                thumbnailUrn = cards[0].media.id;
+              }
+            }
+            else if (postData.content?.article) {
               detectedMediaType = 'Article';
               thumbnailUrn = postData.content.article.thumbnail;
             }
@@ -842,12 +856,16 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
         // detect from campaign type/format instead
       }
       
+      // Get isThoughtLeader from authorMap (detected from post author)
+      const isThoughtLeader = authorMap[creative.id] ?? false;
+      
       return {
         ...creative,
         content: {
           ...(creative.content || {}),
           imageUrl,
-          mediaType
+          mediaType,
+          isThoughtLeader
         }
       };
     });

@@ -989,19 +989,6 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
       
       const campaignFallbackFormat = getCampaignFormat(raw.type || '', raw.format || '');
       
-      // Detect if creative is a Thought Leader Ad (promoted by individual member) vs Company Ad
-      const isThoughtLeaderAd = (creative: any): boolean => {
-        const variables = creative.variables?.data || creative.variables || {};
-        const sponsoredEntity = variables.sponsoredEntity?.entity || '';
-        // Thought Leader ads are promoted by member URNs, Company ads by organization URNs
-        if (sponsoredEntity.includes('urn:li:member:')) return true;
-        if (sponsoredEntity.includes('urn:li:person:')) return true;
-        // Also check name pattern as fallback (LinkedIn often names them "Creative N")
-        const name = creative.name || '';
-        if (/^Creative\s*\d+$/i.test(name.trim())) return true;
-        return false;
-      };
-      
       const matchingCreatives: CreativeNode[] = creatives
         .filter((c: any) => {
           const creativeCampaignUrn = c.campaign;
@@ -1010,7 +997,9 @@ export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly
         })
         .map((c: any) => {
           const detectedType = getCreativeType(c, campaignFallbackFormat);
-          const isThoughtLeader = isThoughtLeaderAd(c);
+          // isThoughtLeader is now provided by the server based on post author
+          // Falls back to name pattern check if server didn't provide it
+          const isThoughtLeader = c.content?.isThoughtLeader ?? /^Creative\s*\d+$/i.test((c.name || '').trim());
           return {
             id: extractIdFromUrn(c.id),
             name: c.name || `Creative ${extractIdFromUrn(c.id)}`,
