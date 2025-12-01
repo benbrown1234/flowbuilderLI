@@ -2309,8 +2309,8 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
           className="relative transition-transform duration-75 origin-top-left will-change-transform"
           style={{
             transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
-            width: 2000,
-            height: 1500,
+            width: 6000,
+            height: 4000,
           }}
         >
           {/* Dot Grid Background */}
