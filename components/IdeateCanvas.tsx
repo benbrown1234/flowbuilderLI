@@ -23,6 +23,11 @@ export interface IdeateNode {
   enhancedAudience?: boolean;
   linkedinAudienceNetwork?: boolean;
   tofAudienceId?: string;
+  // Ad settings
+  isThoughtLeaderAd?: boolean;
+  // Saved Audience targeting
+  companySizes?: string[];
+  seniorities?: string[];
 }
 
 interface Props {
@@ -80,10 +85,35 @@ const BIDDING_TYPES = [
 ];
 
 const OBJECTIVE_RECOMMENDATIONS: Record<string, string[]> = {
-  awareness: ['brand_awareness', 'engagement', 'video_views'],
-  consideration: ['website_visits', 'engagement', 'video_views'],
-  activation: ['lead_generation', 'website_visits', 'website_conversions'],
+  awareness: ['Brand Awareness'],
+  consideration: ['Website Visits', 'Engagement', 'Video Views'],
+  activation: ['Lead Generation', 'Website Conversions', 'Talent Leads', 'Job Applicants'],
 };
+
+const COMPANY_SIZE_OPTIONS = [
+  { value: 'self_employed', label: 'Self-employed' },
+  { value: '1_10', label: '1-10 employees' },
+  { value: '11_50', label: '11-50 employees' },
+  { value: '51_200', label: '51-200 employees' },
+  { value: '201_500', label: '201-500 employees' },
+  { value: '501_1000', label: '501-1,000 employees' },
+  { value: '1001_5000', label: '1,001-5,000 employees' },
+  { value: '5001_10000', label: '5,001-10,000 employees' },
+  { value: '10001_plus', label: '10,001+ employees' },
+];
+
+const SENIORITY_OPTIONS = [
+  { value: 'unpaid', label: 'Unpaid' },
+  { value: 'training', label: 'Training' },
+  { value: 'entry', label: 'Entry' },
+  { value: 'senior', label: 'Senior' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'director', label: 'Director' },
+  { value: 'vp', label: 'VP' },
+  { value: 'cxo', label: 'CXO' },
+  { value: 'partner', label: 'Partner' },
+  { value: 'owner', label: 'Owner' },
+];
 
 const INDUSTRY_CATEGORIES: Record<string, string[]> = {
   'Technology & IT': [
@@ -153,21 +183,16 @@ const INDUSTRY_CATEGORIES: Record<string, string[]> = {
   ],
 };
 
-const OBJECTIVE_OPTIONS = {
-  awareness: [
-    { value: 'Brand Awareness', label: 'Brand Awareness', description: 'Maximize impressions to increase brand visibility' },
-    { value: 'Engagement', label: 'Engagement', description: 'Drive likes, comments, shares on your content' },
-  ],
-  consideration: [
-    { value: 'Website Visits', label: 'Website Visits', description: 'Drive traffic to your website or landing page' },
-    { value: 'Video Views', label: 'Video Views', description: 'Get more people to watch your video content' },
-  ],
-  activation: [
-    { value: 'Lead Generation', label: 'Lead Generation', description: 'Collect leads with LinkedIn Lead Gen Forms' },
-    { value: 'Website Conversions', label: 'Website Conversions', description: 'Drive specific actions on your website' },
-    { value: 'Job Applicants', label: 'Job Applicants', description: 'Attract qualified candidates for open roles' },
-  ],
-};
+const ALL_OBJECTIVES = [
+  { value: 'Brand Awareness', label: 'Brand Awareness', description: 'Maximize impressions to increase brand visibility', category: 'awareness', icon: '📢' },
+  { value: 'Website Visits', label: 'Website Visits', description: 'Drive traffic to your website or landing page', category: 'consideration', icon: '🌐' },
+  { value: 'Engagement', label: 'Engagement', description: 'Drive likes, comments, shares on your content', category: 'consideration', icon: '🏆' },
+  { value: 'Video Views', label: 'Video Views', description: 'Get more people to watch your video content', category: 'consideration', icon: '▶️' },
+  { value: 'Lead Generation', label: 'Lead Generation', description: 'Collect leads with LinkedIn Lead Gen Forms', category: 'conversions', icon: '🎯' },
+  { value: 'Talent Leads', label: 'Talent Leads', description: 'Find qualified candidates for your company', category: 'conversions', icon: '👤' },
+  { value: 'Website Conversions', label: 'Website Conversions', description: 'Drive specific actions on your website', category: 'conversions', icon: '✅' },
+  { value: 'Job Applicants', label: 'Job Applicants', description: 'Attract qualified candidates for open roles', category: 'conversions', icon: '📋' },
+];
 
 const AD_FORMAT_OPTIONS = [
   { value: 'Single Image Ad', label: 'Single Image Ad', icon: '🖼️' },
@@ -683,7 +708,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
     
     const parentGroup = getParentGroup(selectedNodeData);
     const funnelStage = selectedNodeData.funnelStage || parentGroup?.funnelStage || 'awareness';
-    const objectiveOptions = OBJECTIVE_OPTIONS[funnelStage] || OBJECTIVE_OPTIONS.awareness;
+    const recommendedObjectives = OBJECTIVE_RECOMMENDATIONS[funnelStage] || [];
     
     return (
       <div className="w-80 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0">
@@ -718,87 +743,29 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
         )}
 
         {selectedNodeData.type === 'group' && (
-          <>
-            <div className="p-4 border-b border-gray-100">
-              <div className="flex items-center gap-2 mb-3">
-                <Settings size={16} className="text-gray-500" />
-                <h4 className="font-semibold text-gray-700 text-sm">Funnel Stage</h4>
-              </div>
-              <div className="flex gap-2">
-                {(['awareness', 'consideration', 'activation'] as const).map(stage => (
-                  <button
-                    key={stage}
-                    onClick={() => updateNode(selectedNodeData.id, { funnelStage: stage })}
-                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
-                      funnelStage === stage
-                        ? stage === 'awareness' ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
-                        : stage === 'consideration' ? 'bg-purple-100 text-purple-700 border-2 border-purple-300'
-                        : 'bg-green-100 text-green-700 border-2 border-green-300'
-                        : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:bg-gray-200'
-                    }`}
-                  >
-                    {stage.charAt(0).toUpperCase() + stage.slice(1)}
-                  </button>
-                ))}
-              </div>
+          <div className="p-4 border-b border-gray-100">
+            <div className="flex items-center gap-2 mb-3">
+              <Settings size={16} className="text-gray-500" />
+              <h4 className="font-semibold text-gray-700 text-sm">Funnel Stage</h4>
             </div>
-
-            <div className="p-4 border-b border-gray-100">
-              <div className="flex items-center gap-2 mb-3">
-                <Target size={16} className="text-gray-500" />
-                <h4 className="font-semibold text-gray-700 text-sm">Industry Targeting</h4>
-              </div>
-              <p className="text-xs text-gray-500 mb-3">Select industries to target with this campaign group</p>
-              
-              {(selectedNodeData.industries?.length || 0) > 0 && (
-                <div className="mb-3 flex flex-wrap gap-1">
-                  {selectedNodeData.industries?.map(ind => (
-                    <span 
-                      key={ind}
-                      className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs"
-                    >
-                      {ind}
-                      <button 
-                        onClick={() => toggleIndustry(selectedNodeData.id, ind)}
-                        className="hover:bg-blue-200 rounded-full p-0.5"
-                      >
-                        <X size={10} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <div className="space-y-1 max-h-64 overflow-y-auto">
-                {Object.entries(INDUSTRY_CATEGORIES).map(([category, industries]) => (
-                  <div key={category} className="border border-gray-200 rounded-lg overflow-hidden">
-                    <button
-                      onClick={() => toggleCategory(category)}
-                      className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left"
-                    >
-                      <span className="text-sm font-medium text-gray-700">{category}</span>
-                      {expandedCategories[category] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                    </button>
-                    {expandedCategories[category] && (
-                      <div className="p-2 space-y-1 bg-white">
-                        {industries.map(industry => (
-                          <label key={industry} className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={selectedNodeData.industries?.includes(industry) || false}
-                              onChange={() => toggleIndustry(selectedNodeData.id, industry)}
-                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                            />
-                            <span className="text-xs text-gray-700">{industry}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+            <div className="flex gap-2">
+              {(['awareness', 'consideration', 'activation'] as const).map(stage => (
+                <button
+                  key={stage}
+                  onClick={() => updateNode(selectedNodeData.id, { funnelStage: stage })}
+                  className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                    funnelStage === stage
+                      ? stage === 'awareness' ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
+                      : stage === 'consideration' ? 'bg-purple-100 text-purple-700 border-2 border-purple-300'
+                      : 'bg-green-100 text-green-700 border-2 border-green-300'
+                      : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:bg-gray-200'
+                  }`}
+                >
+                  {stage.charAt(0).toUpperCase() + stage.slice(1)}
+                </button>
+              ))}
             </div>
-          </>
+          </div>
         )}
 
         {selectedNodeData.type === 'campaign' && (
@@ -833,30 +800,42 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
                 {funnelStage === 'consideration' && 'Mid-funnel objectives for engagement'}
                 {funnelStage === 'activation' && 'Bottom-funnel objectives for conversions'}
               </p>
-              <div className="space-y-2">
-                {objectiveOptions.map(opt => {
-                  const isRecommended = OBJECTIVE_RECOMMENDATIONS[funnelStage]?.includes(opt.value);
-                  return (
-                    <button
-                      key={opt.value}
-                      onClick={() => updateNode(selectedNodeData.id, { objective: opt.value })}
-                      className={`w-full text-left px-3 py-2 rounded-lg border-2 transition-colors ${
-                        selectedNodeData.objective === opt.value
-                          ? 'border-orange-400 bg-orange-50'
-                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-sm text-gray-800">{opt.label}</span>
-                        {isRecommended && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-green-100 text-green-700">RECOMMENDED</span>
-                        )}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-0.5">{opt.description}</div>
-                    </button>
-                  );
-                })}
-              </div>
+              
+              {/* Grouped by category */}
+              {(['awareness', 'consideration', 'conversions'] as const).map(category => {
+                const categoryObjectives = ALL_OBJECTIVES.filter(o => o.category === category);
+                const categoryLabel = category === 'awareness' ? 'Awareness' : category === 'consideration' ? 'Consideration' : 'Conversions';
+                return (
+                  <div key={category} className="mb-3">
+                    <h5 className="text-[10px] font-bold text-gray-400 uppercase mb-2">{categoryLabel}</h5>
+                    <div className="space-y-1.5">
+                      {categoryObjectives.map(opt => {
+                        const isRecommended = recommendedObjectives.includes(opt.value);
+                        return (
+                          <button
+                            key={opt.value}
+                            onClick={() => updateNode(selectedNodeData.id, { objective: opt.value })}
+                            className={`w-full text-left px-3 py-2 rounded-lg border-2 transition-colors ${
+                              selectedNodeData.objective === opt.value
+                                ? 'border-orange-400 bg-orange-50'
+                                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">{opt.icon}</span>
+                              <span className="font-medium text-sm text-gray-800">{opt.label}</span>
+                              {isRecommended && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-green-100 text-green-700">RECOMMENDED</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5 ml-6">{opt.description}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             {/* Bidding Type */}
@@ -946,36 +925,61 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
           };
           
           return (
-            <div className="p-4 border-b border-gray-100">
-              <div className="flex items-center gap-2 mb-2">
-                <Image size={16} className="text-gray-500" />
-                <h4 className="font-semibold text-gray-700 text-sm">Ad Format</h4>
-              </div>
-              {isFormatLocked && (
-                <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-lg">
-                  <p className="text-[10px] text-amber-700 flex items-center gap-1">
-                    <span>⚠️</span>
-                    <span>All ads in a campaign must use the same format. Current: <strong>{lockedFormat}</strong></span>
-                  </p>
+            <>
+              <div className="p-4 border-b border-gray-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <Image size={16} className="text-gray-500" />
+                  <h4 className="font-semibold text-gray-700 text-sm">Ad Format</h4>
                 </div>
-              )}
-              <div className="grid grid-cols-2 gap-2">
-                {AD_FORMAT_OPTIONS.map(format => (
-                  <button
-                    key={format.value}
-                    onClick={() => handleFormatChange(format.value)}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 transition-colors ${
-                      selectedNodeData.adFormat === format.value
-                        ? 'border-green-400 bg-green-50'
-                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    <span className="text-lg">{format.icon}</span>
-                    <span className="text-xs font-medium text-gray-700">{format.label}</span>
-                  </button>
-                ))}
+                {isFormatLocked && (
+                  <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                    <p className="text-[10px] text-amber-700 flex items-center gap-1">
+                      <span>⚠️</span>
+                      <span>All ads in a campaign must use the same format. Current: <strong>{lockedFormat}</strong></span>
+                    </p>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  {AD_FORMAT_OPTIONS.map(format => (
+                    <button
+                      key={format.value}
+                      onClick={() => handleFormatChange(format.value)}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 transition-colors ${
+                        selectedNodeData.adFormat === format.value
+                          ? 'border-green-400 bg-green-50'
+                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span className="text-lg">{format.icon}</span>
+                      <span className="text-xs font-medium text-gray-700">{format.label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+              
+              {/* Thought Leader Ad Toggle */}
+              <div className="p-4 border-b border-gray-100">
+                <div className="flex items-center gap-2 mb-3">
+                  <Users size={16} className="text-indigo-500" />
+                  <h4 className="font-semibold text-gray-700 text-sm">Ad Type</h4>
+                </div>
+                <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border-2 transition-colors hover:bg-gray-50 ${selectedNodeData.isThoughtLeaderAd ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200'}">
+                  <input
+                    type="checkbox"
+                    checked={selectedNodeData.isThoughtLeaderAd || false}
+                    onChange={(e) => updateNode(selectedNodeData.id, { isThoughtLeaderAd: e.target.checked })}
+                    className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <div>
+                    <div className="text-sm font-medium text-gray-800 flex items-center gap-2">
+                      Thought Leader Ad
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">TLA</span>
+                    </div>
+                    <div className="text-xs text-gray-500">Sponsored content from an employee's personal profile</div>
+                  </div>
+                </label>
+              </div>
+            </>
           );
         })()}
 
@@ -1112,6 +1116,121 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
                 </div>
               </div>
             </div>
+
+            {/* Targeting Options - only for TOF Saved Audience */}
+            {currentCategory === 'tof' && selectedNodeData.audienceType === 'saved_audience' && (
+              <>
+                {/* Company Size */}
+                <div className="p-4 border-b border-gray-100">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Target size={16} className="text-blue-500" />
+                    <h4 className="font-semibold text-gray-700 text-sm">Company Size</h4>
+                  </div>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {COMPANY_SIZE_OPTIONS.map(size => (
+                      <label key={size.value} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedNodeData.companySizes?.includes(size.value) || false}
+                          onChange={() => {
+                            const current = selectedNodeData.companySizes || [];
+                            const updated = current.includes(size.value)
+                              ? current.filter(s => s !== size.value)
+                              : [...current, size.value];
+                            updateNode(selectedNodeData.id, { companySizes: updated });
+                          }}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-xs text-gray-700">{size.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Seniority */}
+                <div className="p-4 border-b border-gray-100">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Users size={16} className="text-blue-500" />
+                    <h4 className="font-semibold text-gray-700 text-sm">Seniority</h4>
+                  </div>
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {SENIORITY_OPTIONS.map(sen => (
+                      <label key={sen.value} className="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedNodeData.seniorities?.includes(sen.value) || false}
+                          onChange={() => {
+                            const current = selectedNodeData.seniorities || [];
+                            const updated = current.includes(sen.value)
+                              ? current.filter(s => s !== sen.value)
+                              : [...current, sen.value];
+                            updateNode(selectedNodeData.id, { seniorities: updated });
+                          }}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-xs text-gray-700">{sen.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Industry Targeting */}
+                <div className="p-4 border-b border-gray-100">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Target size={16} className="text-blue-500" />
+                    <h4 className="font-semibold text-gray-700 text-sm">Industry Targeting</h4>
+                  </div>
+                  
+                  {(selectedNodeData.industries?.length || 0) > 0 && (
+                    <div className="mb-3 flex flex-wrap gap-1">
+                      {selectedNodeData.industries?.map(ind => (
+                        <span 
+                          key={ind}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs"
+                        >
+                          {ind}
+                          <button 
+                            onClick={() => toggleIndustry(selectedNodeData.id, ind)}
+                            className="hover:bg-blue-200 rounded-full p-0.5"
+                          >
+                            <X size={10} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="space-y-1 max-h-64 overflow-y-auto">
+                    {Object.entries(INDUSTRY_CATEGORIES).map(([category, industries]) => (
+                      <div key={category} className="border border-gray-200 rounded-lg overflow-hidden">
+                        <button
+                          onClick={() => toggleCategory(category)}
+                          className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left"
+                        >
+                          <span className="text-sm font-medium text-gray-700">{category}</span>
+                          {expandedCategories[category] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        </button>
+                        {expandedCategories[category] && (
+                          <div className="p-2 space-y-1 bg-white">
+                            {industries.map(industry => (
+                              <label key={industry} className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedNodeData.industries?.includes(industry) || false}
+                                  onChange={() => toggleIndustry(selectedNodeData.id, industry)}
+                                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <span className="text-xs text-gray-700">{industry}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </>
         );
         })()}
@@ -1538,9 +1657,16 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
                 </span>
               )}
               {node.type === 'ad' && node.adFormat && (
-                <span className="mt-1 text-[8px] font-medium px-1.5 py-0.5 rounded bg-green-100 text-green-700 self-start">
-                  {node.adFormat}
-                </span>
+                <div className="flex items-center gap-1 mt-1">
+                  <span className="text-[8px] font-medium px-1.5 py-0.5 rounded bg-green-100 text-green-700">
+                    {node.adFormat}
+                  </span>
+                  {node.isThoughtLeaderAd && (
+                    <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">
+                      TLA
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           ))}
