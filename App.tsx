@@ -1,8 +1,10 @@
 
 import React, { useEffect, useState } from 'react';
+import axios from 'axios';
 import { AccountStructure, NodeType, TargetingSummary, CreativeNode, AccountSummary } from './types';
 import { buildAccountHierarchy, getAvailableAccounts } from './services/linkedinLogic';
 import { getAuthStatus, getAuthUrl, logout, getAvailableAccountsFromApi, buildAccountHierarchyFromApi } from './services/linkedinApi';
+import { transformAccountToIdeateNodes, createTofAudiencesFromTargeting } from './services/ideateTransformer';
 import { StructureTree } from './components/StructureTree';
 import { AudienceFlow } from './components/AudienceFlow';
 import { RemarketingFlow } from './components/RemarketingFlow';
@@ -26,6 +28,7 @@ const App: React.FC = () => {
   const [activeOnly, setActiveOnly] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [sharedCanvasToken, setSharedCanvasToken] = useState<string | null>(null);
+  const [importedCanvasId, setImportedCanvasId] = useState<string | null>(null);
   
   // State to hold the details of the currently selected node for the inspector
   const [selectedNode, setSelectedNode] = useState<{
@@ -209,6 +212,31 @@ const App: React.FC = () => {
     setSelectedNode(null);
   };
 
+  const handleImportToIdeate = async (accountData: AccountStructure) => {
+    try {
+      const baseNodes = transformAccountToIdeateNodes(accountData);
+      const audienceNodes = createTofAudiencesFromTargeting(baseNodes);
+      const allNodes = [...baseNodes, ...audienceNodes];
+      
+      const canvasResponse = await axios.post('/api/canvas', { 
+        title: `Import: ${accountData.name}` 
+      });
+      const newCanvasId = canvasResponse.data.id;
+      
+      await axios.post(`/api/canvas/${newCanvasId}/save`, {
+        nodes: allNodes,
+        connections: [],
+        settings: { transform: { x: 50, y: 30, scale: 0.85 } }
+      });
+      
+      setImportedCanvasId(newCanvasId);
+      setViewMode('IDEATE');
+    } catch (err) {
+      console.error('Failed to import to Ideate:', err);
+      alert('Failed to import campaign structure. Please try again.');
+    }
+  };
+
   const handleAccountChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newAccountId = e.target.value;
     setSelectedAccountId(newAccountId);
@@ -328,7 +356,7 @@ const App: React.FC = () => {
              {/* View Toggle */}
              <div className="bg-gray-100 p-1 rounded-lg flex items-center">
                 <button 
-                  onClick={() => setViewMode('TREE')}
+                  onClick={() => { setViewMode('TREE'); setImportedCanvasId(null); }}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'TREE' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
                 >
                   <ListTree size={16} />
@@ -403,7 +431,11 @@ const App: React.FC = () => {
 
         <div className="flex-1 min-h-0 relative">
           {viewMode === 'IDEATE' ? (
-            <IdeateCanvas shareToken={sharedCanvasToken || undefined} />
+            <IdeateCanvas 
+              shareToken={sharedCanvasToken || undefined} 
+              canvasId={importedCanvasId || undefined}
+              key={importedCanvasId || 'default'}
+            />
           ) : viewMode === 'AUDIT' ? (
             <AuditPage 
               accountId={selectedAccountId}
@@ -433,6 +465,7 @@ const App: React.FC = () => {
                 <StructureTree 
                   data={data}
                   onSelect={handleNodeSelect}
+                  onImportToIdeate={handleImportToIdeate}
                 />
               )}
 

@@ -2,19 +2,31 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AccountStructure, NodeType, TargetingSummary, CreativeNode, CampaignNode, GroupNode } from '../types';
 import { getTreeGraph, TreeNode } from '../services/linkedinLogic';
-import { Folder, LayoutGrid, FileImage, FileVideo, Globe, Briefcase, Plus, Minus, Maximize, Move } from 'lucide-react';
+import { Folder, LayoutGrid, FileImage, FileVideo, Globe, Briefcase, Plus, Minus, Maximize, Move, Lightbulb, Loader2 } from 'lucide-react';
 
 interface Props {
   data: AccountStructure;
   onSelect: (type: NodeType, name: string, targeting?: TargetingSummary, creatives?: CreativeNode[], singleCreative?: CreativeNode, objective?: string, biddingStrategy?: string, campaignId?: string) => void;
+  onImportToIdeate?: (data: AccountStructure) => Promise<void>;
 }
 
-export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
+export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeate }) => {
   const [graph, setGraph] = useState<ReturnType<typeof getTreeGraph> | null>(null);
   const [transform, setTransform] = useState({ x: 50, y: 50, scale: 1 });
   const [isDragging, setIsDragging] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
+  const [isImporting, setIsImporting] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  
+  const handleImportToIdeate = async () => {
+    if (!onImportToIdeate || isImporting) return;
+    setIsImporting(true);
+    try {
+      await onImportToIdeate(data);
+    } finally {
+      setIsImporting(false);
+    }
+  };
   
   // Calculate graph on data change
   useEffect(() => {
@@ -90,14 +102,33 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
       </div>
 
       {/* Legend */}
-      <div className="absolute top-6 left-6 z-40 flex flex-col gap-2 text-[10px] font-semibold text-gray-500 bg-white/90 p-3 rounded-lg backdrop-blur-sm border shadow-sm pointer-events-none">
-          <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-500"></span> Account</div>
-          <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-gray-500"></span> Campaign Group</div>
-          <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-orange-500"></span> Campaign</div>
-          <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-500"></span> Ad</div>
-          <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-1 text-gray-400">
+      <div className="absolute top-6 left-6 z-40 flex flex-col gap-2 text-[10px] font-semibold text-gray-500 bg-white/90 p-3 rounded-lg backdrop-blur-sm border shadow-sm">
+          <div className="flex items-center gap-2 pointer-events-none"><span className="w-2 h-2 rounded-full bg-blue-500"></span> Account</div>
+          <div className="flex items-center gap-2 pointer-events-none"><span className="w-2 h-2 rounded-full bg-gray-500"></span> Campaign Group</div>
+          <div className="flex items-center gap-2 pointer-events-none"><span className="w-2 h-2 rounded-full bg-orange-500"></span> Campaign</div>
+          <div className="flex items-center gap-2 pointer-events-none"><span className="w-2 h-2 rounded-full bg-green-500"></span> Ad</div>
+          <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-1 text-gray-400 pointer-events-none">
             <Move size={10} /> Drag to Pan
           </div>
+          {onImportToIdeate && (
+            <button
+              onClick={handleImportToIdeate}
+              disabled={isImporting}
+              className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-lg text-xs font-semibold hover:from-purple-600 hover:to-indigo-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+            >
+              {isImporting ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  Importing...
+                </>
+              ) : (
+                <>
+                  <Lightbulb size={14} />
+                  Import to Ideate
+                </>
+              )}
+            </button>
+          )}
       </div>
 
       {/* Canvas Area */}

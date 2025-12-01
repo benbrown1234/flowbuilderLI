@@ -20,6 +20,7 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   Analyzes various aspects like empty groups, ad diversity, CTR trends, duplicate targeting, and budget pacing.
 *   **Ideate Canvas**:
     *   A visual planning tool for campaigns, featuring a drag-and-drop interface.
+    *   **Import from Structure**: One-click import of live LinkedIn campaign data into Ideate canvas. Transforms campaign groups, campaigns, and ads into editable nodes with full targeting data preserved. Auto-generates TOF audience nodes from targeting criteria (industries, company sizes, seniorities).
     *   Includes a default funnel template (Awareness → Consideration → Activation) with hierarchy enforcement (Campaign Groups → Campaigns → Ads).
     *   Offers AI-powered generation of campaign structures based on natural language prompts.
     *   Allows inline editing, export as text brief, and detailed configuration of campaign groups, campaigns, ads, and retargeting audiences via a sidebar.
