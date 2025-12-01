@@ -23,6 +23,8 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   Includes a default funnel template (Awareness → Consideration → Activation) with hierarchy enforcement (Campaign Groups → Campaigns → Ads).
     *   Offers AI-powered generation of campaign structures based on natural language prompts.
     *   Allows inline editing, export as text brief, and detailed configuration of campaign groups, campaigns, ads, and retargeting audiences via a sidebar.
+    *   **Audience Flows**: Two categories - Remarketing Audiences (Video Views, Lead Form Opens, Ad Engagers, Event Attendees) and BOF Audiences (Page Views, Form Submissions, Add to Cart, Purchases).
+    *   **Naming Conventions**: Sidebar displays naming format hints - Groups: `[Objective] – [Audience] – [Industry] – [Location]`, Campaigns: `[Group Acronym] – [Objective] – [Creative Format] – [Subsegment]`, Ads: `[Creative Type] – [Angle/Message] – [Version]`.
 *   **AI Auditor**:
     *   A chatbot for natural language queries about campaigns, targeting, and performance.
     *   Supports entity tagging (Campaign Groups, Campaigns, Ads, Audiences) with autocomplete for context-aware responses.

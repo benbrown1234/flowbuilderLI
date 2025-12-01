@@ -23,15 +23,34 @@ interface Props {
   onExport?: (nodes: IdeateNode[]) => void;
 }
 
-const AUDIENCE_TYPES = [
-  { value: 'video_viewers', label: 'Video Viewers', icon: '🎬', description: 'People who watched your video ads' },
-  { value: 'website_visitors', label: 'Website Visitors', icon: '🌐', description: 'People who visited your website' },
-  { value: 'lead_form_opens', label: 'Lead Form Opens', icon: '📋', description: 'People who opened but didn\'t submit' },
-  { value: 'ad_engagers', label: 'Ad Engagers', icon: '👆', description: 'People who clicked or engaged with ads' },
-  { value: 'page_visitors', label: 'Company Page Visitors', icon: '🏢', description: 'People who visited your LinkedIn page' },
-  { value: 'event_attendees', label: 'Event Attendees', icon: '📅', description: 'People who RSVPd to your events' },
-  { value: 'lookalike', label: 'Lookalike Audience', icon: '👥', description: 'Similar to your best customers' },
-];
+const AUDIENCE_CATEGORIES = {
+  remarketing: {
+    label: 'Remarketing Audiences',
+    description: 'Re-engage users who interacted with your content',
+    types: [
+      { value: 'video_viewers', label: 'Video Views', icon: '🎬', description: 'People who watched your video ads' },
+      { value: 'lead_form_opens', label: 'Lead Form Opens', icon: '📋', description: 'People who opened but didn\'t submit' },
+      { value: 'ad_engagers', label: 'Ad Engagers', icon: '👆', description: 'People who clicked or engaged with ads' },
+      { value: 'event_attendees', label: 'Event Attendees', icon: '📅', description: 'People who RSVPd to your events' },
+    ]
+  },
+  bof: {
+    label: 'BOF Audiences',
+    description: 'Bottom of funnel website visitors',
+    types: [
+      { value: 'page_views', label: 'Page Views', icon: '👁️', description: 'Visitors who viewed specific pages' },
+      { value: 'form_submissions', label: 'Form Submissions', icon: '📝', description: 'Visitors who submitted a form' },
+      { value: 'add_to_cart', label: 'Add to Cart', icon: '🛒', description: 'Visitors who added items to cart' },
+      { value: 'purchases', label: 'Purchases', icon: '💳', description: 'Visitors who completed a purchase' },
+    ]
+  }
+};
+
+const NAMING_CONVENTIONS = {
+  group: '[Objective] – [Audience] – [Industry] – [Location]',
+  campaign: '[Group Acronym] – [Objective] – [Creative Format] – [Subsegment]',
+  ad: '[Creative Type] – [Angle/Message] – [Version]',
+};
 
 const INDUSTRY_CATEGORIES: Record<string, string[]> = {
   'Technology & IT': [
@@ -609,6 +628,23 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
           <h3 className="font-semibold text-gray-900 text-lg leading-tight">{selectedNodeData.name}</h3>
         </div>
 
+        {/* Naming Convention Hint */}
+        {(selectedNodeData.type === 'group' || selectedNodeData.type === 'campaign' || selectedNodeData.type === 'ad') && (
+          <div className="px-4 py-3 border-b border-gray-100 bg-blue-50">
+            <div className="flex items-start gap-2">
+              <Lightbulb size={14} className="text-blue-500 mt-0.5 flex-shrink-0" />
+              <div>
+                <span className="text-[10px] font-semibold text-blue-700 uppercase">Naming Convention</span>
+                <p className="text-xs text-blue-600 font-mono mt-0.5 leading-relaxed">
+                  {selectedNodeData.type === 'group' && NAMING_CONVENTIONS.group}
+                  {selectedNodeData.type === 'campaign' && NAMING_CONVENTIONS.campaign}
+                  {selectedNodeData.type === 'ad' && NAMING_CONVENTIONS.ad}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {selectedNodeData.type === 'group' && (
           <>
             <div className="p-4 border-b border-gray-100">
@@ -755,23 +791,35 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
                 <Users size={16} className="text-purple-500" />
                 <h4 className="font-semibold text-gray-700 text-sm">Audience Type</h4>
               </div>
-              <div className="space-y-2">
-                {AUDIENCE_TYPES.map(type => (
-                  <button
-                    key={type.value}
-                    onClick={() => updateNode(selectedNodeData.id, { audienceType: type.value, name: type.label })}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg border-2 transition-colors text-left ${
-                      selectedNodeData.audienceType === type.value
-                        ? 'border-purple-400 bg-purple-50'
-                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    <span className="text-xl">{type.icon}</span>
-                    <div>
-                      <div className="font-medium text-sm text-gray-800">{type.label}</div>
-                      <div className="text-xs text-gray-500">{type.description}</div>
+              <div className="space-y-4">
+                {Object.entries(AUDIENCE_CATEGORIES).map(([key, category]) => (
+                  <div key={key}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className={`text-xs font-bold uppercase tracking-wide ${key === 'remarketing' ? 'text-purple-600' : 'text-orange-600'}`}>
+                        {category.label}
+                      </span>
                     </div>
-                  </button>
+                    <p className="text-[10px] text-gray-500 mb-2">{category.description}</p>
+                    <div className="space-y-1">
+                      {category.types.map(type => (
+                        <button
+                          key={type.value}
+                          onClick={() => updateNode(selectedNodeData.id, { audienceType: type.value, name: type.label })}
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg border-2 transition-colors text-left ${
+                            selectedNodeData.audienceType === type.value
+                              ? 'border-purple-400 bg-purple-50'
+                              : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          <span className="text-lg">{type.icon}</span>
+                          <div>
+                            <div className="font-medium text-xs text-gray-800">{type.label}</div>
+                            <div className="text-[10px] text-gray-500">{type.description}</div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1227,7 +1275,8 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
 
           {/* Audience Nodes */}
           {nodes.filter(n => n.type === 'audience').map(node => {
-            const audienceTypeInfo = AUDIENCE_TYPES.find(t => t.value === node.audienceType);
+            const allAudienceTypes = [...AUDIENCE_CATEGORIES.remarketing.types, ...AUDIENCE_CATEGORIES.bof.types];
+            const audienceTypeInfo = allAudienceTypes.find(t => t.value === node.audienceType);
             return (
               <div
                 key={node.id}
