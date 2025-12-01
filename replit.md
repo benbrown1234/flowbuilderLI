@@ -68,11 +68,21 @@ The Ideate tab provides a visual campaign planning canvas. Features:
 - **AI generation**: Describe your campaign goals and AI generates a complete structure
 - **Inline editing**: Double-click node names to edit
 - **Export**: Copy structure as text brief to clipboard
+- **Clear All**: Remove all nodes from canvas with one click
 
 Hierarchy enforcement:
 - Campaign Groups are always top-level
 - Campaigns must belong to a Campaign Group
 - Ads must belong to a Campaign
+
+Right sidebar (click any node to open):
+- **Campaign Groups**: Set funnel stage (Awareness/Consideration/Activation), select target industries from categorized LinkedIn industry list
+- **Campaigns**: Choose campaign objective based on funnel stage:
+  - Awareness: Brand Awareness, Engagement
+  - Consideration: Website Visits, Video Views
+  - Activation: Lead Generation, Website Conversions, Job Applicants
+- **Ads**: Select ad format (Image, Video, Carousel, Document, Event, Message, Text, Spotlight, Follower)
+- **Notes**: Add notes to any node for planning context
 
 ## AI Auditor
 Click the sparkle button in the bottom right corner to open the AI Auditor chatbot. Features:

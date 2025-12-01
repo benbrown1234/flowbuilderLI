@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Plus, Minus, Maximize, Move, Trash2, Sparkles, Download, Copy, Folder, LayoutGrid, FileImage, Lightbulb, Send, X, GripVertical, Edit2, Check } from 'lucide-react';
+import { Plus, Minus, Maximize, Move, Trash2, Sparkles, Download, Copy, Folder, LayoutGrid, FileImage, Lightbulb, Send, X, GripVertical, Edit2, Check, ChevronDown, ChevronRight, Target, Settings, Image } from 'lucide-react';
 
 export interface IdeateNode {
   id: string;
@@ -11,16 +11,114 @@ export interface IdeateNode {
   objective?: string;
   adFormat?: string;
   notes?: string;
+  industries?: string[];
+  funnelStage?: 'awareness' | 'consideration' | 'activation';
 }
 
 interface Props {
   onExport?: (nodes: IdeateNode[]) => void;
 }
 
+const INDUSTRY_CATEGORIES: Record<string, string[]> = {
+  'Technology & IT': [
+    'IT Services and IT Consulting',
+    'Software Development',
+    'Computer and Network Security',
+    'Data Infrastructure and Analytics',
+    'Technology, Information and Internet',
+    'Computer Hardware Manufacturing',
+    'Semiconductor Manufacturing',
+  ],
+  'Professional Services': [
+    'Business Consulting and Services',
+    'Accounting',
+    'Legal Services',
+    'Human Resources Services',
+    'Marketing Services',
+    'Advertising Services',
+    'Market Research',
+    'Staffing and Recruiting',
+  ],
+  'Finance': [
+    'Banking',
+    'Financial Services',
+    'Investment Banking',
+    'Investment Management',
+    'Insurance',
+    'Venture Capital and Private Equity',
+    'Capital Markets',
+  ],
+  'Healthcare': [
+    'Hospitals and Health Care',
+    'Medical Equipment Manufacturing',
+    'Pharmaceutical Manufacturing',
+    'Biotechnology Research',
+    'Mental Health Care',
+    'Wellness and Fitness Services',
+  ],
+  'Manufacturing': [
+    'Manufacturing (General)',
+    'Industrial Machinery Manufacturing',
+    'Automation Machinery Manufacturing',
+    'Motor Vehicle Manufacturing',
+    'Electrical Equipment Manufacturing',
+    'Chemical Manufacturing',
+  ],
+  'Education': [
+    'Higher Education',
+    'E-Learning Providers',
+    'Education',
+    'Professional Training and Coaching',
+    'Primary and Secondary Education',
+  ],
+  'Retail & E-commerce': [
+    'Retail',
+    'Online and Mail Order Retail',
+    'Consumer Goods',
+    'Retail Apparel and Fashion',
+    'Retail Luxury Goods and Jewelry',
+  ],
+  'Real Estate': [
+    'Real Estate',
+    'Commercial Real Estate',
+    'Leasing Residential Real Estate',
+    'Construction',
+    'Architecture and Planning',
+  ],
+};
+
+const OBJECTIVE_OPTIONS = {
+  awareness: [
+    { value: 'Brand Awareness', label: 'Brand Awareness', description: 'Maximize impressions to increase brand visibility' },
+    { value: 'Engagement', label: 'Engagement', description: 'Drive likes, comments, shares on your content' },
+  ],
+  consideration: [
+    { value: 'Website Visits', label: 'Website Visits', description: 'Drive traffic to your website or landing page' },
+    { value: 'Video Views', label: 'Video Views', description: 'Get more people to watch your video content' },
+  ],
+  activation: [
+    { value: 'Lead Generation', label: 'Lead Generation', description: 'Collect leads with LinkedIn Lead Gen Forms' },
+    { value: 'Website Conversions', label: 'Website Conversions', description: 'Drive specific actions on your website' },
+    { value: 'Job Applicants', label: 'Job Applicants', description: 'Attract qualified candidates for open roles' },
+  ],
+};
+
+const AD_FORMAT_OPTIONS = [
+  { value: 'Single Image Ad', label: 'Single Image Ad', icon: '🖼️' },
+  { value: 'Video Ad', label: 'Video Ad', icon: '🎬' },
+  { value: 'Carousel Ad', label: 'Carousel Ad', icon: '🎠' },
+  { value: 'Document Ad', label: 'Document Ad', icon: '📄' },
+  { value: 'Event Ad', label: 'Event Ad', icon: '📅' },
+  { value: 'Message Ad', label: 'Message Ad', icon: '💬' },
+  { value: 'Text Ad', label: 'Text Ad', icon: '📝' },
+  { value: 'Spotlight Ad', label: 'Spotlight Ad', icon: '✨' },
+  { value: 'Follower Ad', label: 'Follower Ad', icon: '👥' },
+];
+
 const FUNNEL_STAGES = [
-  { name: 'Awareness', objective: 'Brand Awareness', color: 'blue', adFormats: ['Video Ad', 'Image Ad', 'Carousel Ad'] },
-  { name: 'Consideration', objective: 'Website Visits', color: 'purple', adFormats: ['Carousel Ad', 'Document Ad', 'Video Ad'] },
-  { name: 'Activation', objective: 'Lead Generation', color: 'green', adFormats: ['Lead Gen Form', 'Message Ad', 'Image Ad'] },
+  { name: 'Awareness', objective: 'Brand Awareness', color: 'blue', adFormats: ['Video Ad', 'Single Image Ad', 'Carousel Ad'], funnelStage: 'awareness' as const },
+  { name: 'Consideration', objective: 'Website Visits', color: 'purple', adFormats: ['Carousel Ad', 'Document Ad', 'Video Ad'], funnelStage: 'consideration' as const },
+  { name: 'Activation', objective: 'Lead Generation', color: 'green', adFormats: ['Single Image Ad', 'Message Ad', 'Document Ad'], funnelStage: 'activation' as const },
 ];
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -40,6 +138,8 @@ const createDefaultFunnel = (): IdeateNode[] => {
       x: groupX,
       y: yOffset,
       objective: stage.objective,
+      funnelStage: stage.funnelStage,
+      industries: [],
     });
     
     const campaignId = generateId();
@@ -51,6 +151,7 @@ const createDefaultFunnel = (): IdeateNode[] => {
       y: yOffset,
       parentId: groupId,
       objective: stage.objective,
+      funnelStage: stage.funnelStage,
     });
     
     stage.adFormats.forEach((format, adIndex) => {
@@ -84,7 +185,38 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
   const [editingNode, setEditingNode] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [justClickedNode, setJustClickedNode] = useState(false);
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const selectedNodeData = selectedNode ? nodes.find(n => n.id === selectedNode) : null;
+  
+  const getParentGroup = (node: IdeateNode): IdeateNode | null => {
+    if (node.type === 'group') return node;
+    if (node.type === 'campaign') return nodes.find(n => n.id === node.parentId) || null;
+    if (node.type === 'ad') {
+      const campaign = nodes.find(n => n.id === node.parentId);
+      if (campaign) return nodes.find(n => n.id === campaign.parentId) || null;
+    }
+    return null;
+  };
+
+  const updateNode = (nodeId: string, updates: Partial<IdeateNode>) => {
+    setNodes(prev => prev.map(n => n.id === nodeId ? { ...n, ...updates } : n));
+  };
+
+  const toggleIndustry = (nodeId: string, industry: string) => {
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+    const current = node.industries || [];
+    const updated = current.includes(industry)
+      ? current.filter(i => i !== industry)
+      : [...current, industry];
+    updateNode(nodeId, { industries: updated });
+  };
+
+  const toggleCategory = (category: string) => {
+    setExpandedCategories(prev => ({ ...prev, [category]: !prev[category] }));
+  };
 
   const handleWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -388,8 +520,185 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
   const getNodeWidth = (type: string) => type === 'ad' ? 140 : 260;
   const getNodeHeight = (type: string) => type === 'ad' ? 80 : 90;
 
+  const renderSidebar = () => {
+    if (!selectedNodeData) return null;
+    
+    const parentGroup = getParentGroup(selectedNodeData);
+    const funnelStage = selectedNodeData.funnelStage || parentGroup?.funnelStage || 'awareness';
+    const objectiveOptions = OBJECTIVE_OPTIONS[funnelStage] || OBJECTIVE_OPTIONS.awareness;
+    
+    return (
+      <div className="w-80 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0">
+        <div className="p-4 border-b border-gray-100 bg-gray-50">
+          <div className="flex items-center gap-2 mb-1">
+            {selectedNodeData.type === 'group' && <Folder size={18} className="text-gray-500" />}
+            {selectedNodeData.type === 'campaign' && <LayoutGrid size={18} className="text-orange-500" />}
+            {selectedNodeData.type === 'ad' && <FileImage size={18} className="text-green-500" />}
+            <span className="text-xs font-semibold uppercase text-gray-400">
+              {selectedNodeData.type === 'group' ? 'Campaign Group' : selectedNodeData.type}
+            </span>
+          </div>
+          <h3 className="font-semibold text-gray-900 text-lg leading-tight">{selectedNodeData.name}</h3>
+        </div>
+
+        {selectedNodeData.type === 'group' && (
+          <>
+            <div className="p-4 border-b border-gray-100">
+              <div className="flex items-center gap-2 mb-3">
+                <Settings size={16} className="text-gray-500" />
+                <h4 className="font-semibold text-gray-700 text-sm">Funnel Stage</h4>
+              </div>
+              <div className="flex gap-2">
+                {(['awareness', 'consideration', 'activation'] as const).map(stage => (
+                  <button
+                    key={stage}
+                    onClick={() => updateNode(selectedNodeData.id, { funnelStage: stage })}
+                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-colors ${
+                      funnelStage === stage
+                        ? stage === 'awareness' ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
+                        : stage === 'consideration' ? 'bg-purple-100 text-purple-700 border-2 border-purple-300'
+                        : 'bg-green-100 text-green-700 border-2 border-green-300'
+                        : 'bg-gray-100 text-gray-600 border-2 border-transparent hover:bg-gray-200'
+                    }`}
+                  >
+                    {stage.charAt(0).toUpperCase() + stage.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="p-4 border-b border-gray-100">
+              <div className="flex items-center gap-2 mb-3">
+                <Target size={16} className="text-gray-500" />
+                <h4 className="font-semibold text-gray-700 text-sm">Industry Targeting</h4>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">Select industries to target with this campaign group</p>
+              
+              {(selectedNodeData.industries?.length || 0) > 0 && (
+                <div className="mb-3 flex flex-wrap gap-1">
+                  {selectedNodeData.industries?.map(ind => (
+                    <span 
+                      key={ind}
+                      className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs"
+                    >
+                      {ind}
+                      <button 
+                        onClick={() => toggleIndustry(selectedNodeData.id, ind)}
+                        className="hover:bg-blue-200 rounded-full p-0.5"
+                      >
+                        <X size={10} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="space-y-1 max-h-64 overflow-y-auto">
+                {Object.entries(INDUSTRY_CATEGORIES).map(([category, industries]) => (
+                  <div key={category} className="border border-gray-200 rounded-lg overflow-hidden">
+                    <button
+                      onClick={() => toggleCategory(category)}
+                      className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left"
+                    >
+                      <span className="text-sm font-medium text-gray-700">{category}</span>
+                      {expandedCategories[category] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </button>
+                    {expandedCategories[category] && (
+                      <div className="p-2 space-y-1 bg-white">
+                        {industries.map(industry => (
+                          <label key={industry} className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={selectedNodeData.industries?.includes(industry) || false}
+                              onChange={() => toggleIndustry(selectedNodeData.id, industry)}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span className="text-xs text-gray-700">{industry}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
+        {selectedNodeData.type === 'campaign' && (
+          <div className="p-4 border-b border-gray-100">
+            <div className="flex items-center gap-2 mb-3">
+              <Target size={16} className="text-gray-500" />
+              <h4 className="font-semibold text-gray-700 text-sm">Campaign Objective</h4>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">
+              {funnelStage === 'awareness' && 'Top-of-funnel objectives for brand visibility'}
+              {funnelStage === 'consideration' && 'Mid-funnel objectives for engagement'}
+              {funnelStage === 'activation' && 'Bottom-funnel objectives for conversions'}
+            </p>
+            <div className="space-y-2">
+              {objectiveOptions.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => updateNode(selectedNodeData.id, { objective: opt.value })}
+                  className={`w-full text-left px-3 py-2 rounded-lg border-2 transition-colors ${
+                    selectedNodeData.objective === opt.value
+                      ? 'border-orange-400 bg-orange-50'
+                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="font-medium text-sm text-gray-800">{opt.label}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">{opt.description}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {selectedNodeData.type === 'ad' && (
+          <div className="p-4 border-b border-gray-100">
+            <div className="flex items-center gap-2 mb-3">
+              <Image size={16} className="text-gray-500" />
+              <h4 className="font-semibold text-gray-700 text-sm">Ad Format</h4>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {AD_FORMAT_OPTIONS.map(format => (
+                <button
+                  key={format.value}
+                  onClick={() => updateNode(selectedNodeData.id, { adFormat: format.value })}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 transition-colors ${
+                    selectedNodeData.adFormat === format.value
+                      ? 'border-green-400 bg-green-50'
+                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  <span className="text-lg">{format.icon}</span>
+                  <span className="text-xs font-medium text-gray-700">{format.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Edit2 size={16} className="text-gray-500" />
+            <h4 className="font-semibold text-gray-700 text-sm">Notes</h4>
+          </div>
+          <textarea
+            value={selectedNodeData.notes || ''}
+            onChange={(e) => updateNode(selectedNodeData.id, { notes: e.target.value })}
+            placeholder="Add notes about this item..."
+            className="w-full h-24 px-3 py-2 text-sm border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className="w-full h-full relative bg-[#f0f2f5] overflow-hidden rounded-xl shadow-inner border border-gray-200">
+    <div className="w-full h-full flex">
+      <div className={`flex-1 relative bg-[#f0f2f5] overflow-hidden ${selectedNodeData ? '' : 'rounded-xl'} shadow-inner border border-gray-200`}>
       
       {/* Toolbar */}
       <div className="absolute top-4 left-4 z-50 flex items-center gap-2">
@@ -701,6 +1010,8 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
           ))}
         </div>
       </div>
+      </div>
+      {renderSidebar()}
     </div>
   );
 };
