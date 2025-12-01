@@ -328,6 +328,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
   const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
+  const [justFinishedSelecting, setJustFinishedSelecting] = useState(false);
 
   // Load canvas or create new one
   useEffect(() => {
@@ -680,6 +681,9 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
       setSelectedNodes(selected);
       setSelectionBox(null);
       setIsSelecting(false);
+      // Prevent the canvas click from clearing the selection
+      setJustFinishedSelecting(true);
+      setTimeout(() => setJustFinishedSelecting(false), 100);
       if (selected.length === 1) {
         setSelectedNode(selected[0]);
       } else {
@@ -741,7 +745,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const handleCanvasClick = () => {
-    if (!justClickedNode && !draggedNode && !isSelecting) {
+    if (!justClickedNode && !draggedNode && !isSelecting && !justFinishedSelecting) {
       setSelectedNode(null);
       setSelectedNodes([]);
     }
