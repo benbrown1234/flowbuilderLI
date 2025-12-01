@@ -1615,6 +1615,79 @@ app.delete('/api/linkedin/audit/:accountId', requireAuth, async (req, res) => {
   }
 });
 
+app.post('/api/linkedin/ideate', async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    const systemPrompt = `You are a LinkedIn Ads campaign structure expert. Generate a campaign structure based on the user's request.
+
+IMPORTANT: You must respond with ONLY valid JSON, no markdown formatting, no code blocks, just the raw JSON object.
+
+The structure should follow LinkedIn's hierarchy:
+- Campaign Groups (containers for campaigns)
+- Campaigns (with objectives like Brand Awareness, Website Visits, Lead Generation, etc.)
+- Ads (with formats like Image Ad, Video Ad, Carousel Ad, Document Ad, Lead Gen Form, Message Ad, etc.)
+
+Default funnel structure (use unless user specifies otherwise):
+1. Awareness stage - Brand Awareness or Engagement objective, Video/Image ads
+2. Consideration stage - Website Visits objective, Carousel/Document ads
+3. Activation stage - Lead Generation objective, Lead Gen Form/Message ads
+
+Each campaign should have at least 3 ads.
+
+Respond with a JSON object containing a "nodes" array. Each node should have:
+- id: unique string
+- type: "group" | "campaign" | "ad"
+- name: descriptive name
+- x: x position (groups at x=100, campaigns at x=450, ads at x=800)
+- y: y position (spread vertically, ~280px between groups, ~70px between ads)
+- parentId: parent node id (campaigns point to groups, ads point to campaigns)
+- objective: (for campaigns) e.g., "Brand Awareness", "Website Visits", "Lead Generation"
+- adFormat: (for ads) e.g., "Video Ad", "Image Ad", "Carousel Ad", "Lead Gen Form"
+
+Example structure:
+{
+  "nodes": [
+    {"id": "g1", "type": "group", "name": "Awareness Campaign Group", "x": 100, "y": 80, "objective": "Brand Awareness"},
+    {"id": "c1", "type": "campaign", "name": "Awareness - Video", "x": 450, "y": 80, "parentId": "g1", "objective": "Brand Awareness"},
+    {"id": "a1", "type": "ad", "name": "Ad 1", "x": 800, "y": 20, "parentId": "c1", "adFormat": "Video Ad"},
+    {"id": "a2", "type": "ad", "name": "Ad 2", "x": 800, "y": 90, "parentId": "c1", "adFormat": "Image Ad"},
+    {"id": "a3", "type": "ad", "name": "Ad 3", "x": 800, "y": 160, "parentId": "c1", "adFormat": "Carousel Ad"}
+  ]
+}`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.7,
+      max_tokens: 2000,
+    });
+
+    const content = response.choices[0]?.message?.content || '';
+    
+    let parsed;
+    try {
+      const cleanedContent = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      parsed = JSON.parse(cleanedContent);
+    } catch (parseErr) {
+      console.error('Failed to parse AI response:', content);
+      return res.status(500).json({ error: 'Failed to parse AI response', raw: content });
+    }
+
+    res.json(parsed);
+  } catch (err: any) {
+    console.error('Ideate error:', err.message);
+    res.status(500).json({ error: 'Failed to generate campaign structure' });
+  }
+});
+
 initDatabase().catch(err => {
   console.error('Failed to initialize database:', err.message);
 });

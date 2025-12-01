@@ -11,7 +11,7 @@ A React-based visualization tool for LinkedIn advertising account structures. Sh
 - **API**: LinkedIn Marketing API (OAuth 2.0), OpenAI (via Replit AI Integrations)
 
 ## Project Structure
-- `/components/` - React components (AudienceFlow, HierarchyNode, RemarketingFlow, StructureTree, TargetingInspector, AIAuditor, AuditPage)
+- `/components/` - React components (AudienceFlow, HierarchyNode, RemarketingFlow, StructureTree, TargetingInspector, AIAuditor, AuditPage, IdeateCanvas)
 - `/services/` - Business logic
   - `linkedinLogic.ts` - Mock data logic
   - `mockData.ts` - Demo data
@@ -40,6 +40,7 @@ Required secrets for LinkedIn API:
 2. Targeting Flow - Audience composition visualization
 3. Remarketing - Campaign flow visualization
 4. Audit - On-demand account audit with recommendations
+5. Ideate - Campaign planning canvas with AI generation
 
 ## Account Audit
 The Audit tab provides comprehensive account analysis with actionable recommendations. Features:
@@ -59,6 +60,20 @@ Categories analyzed:
 
 LinkedIn API compliance: Only aggregate campaign metrics are stored (not member-level data), compliant with LinkedIn's data storage requirements.
 
+## Ideate Canvas
+The Ideate tab provides a visual campaign planning canvas. Features:
+- **Default funnel template**: Pre-built Awareness → Consideration → Activation structure with 3 ads each
+- **Drag-and-drop**: Reposition nodes freely on the canvas
+- **Manual creation**: Add campaign groups, campaigns, and ads via toolbar (enforces proper hierarchy)
+- **AI generation**: Describe your campaign goals and AI generates a complete structure
+- **Inline editing**: Double-click node names to edit
+- **Export**: Copy structure as text brief to clipboard
+
+Hierarchy enforcement:
+- Campaign Groups are always top-level
+- Campaigns must belong to a Campaign Group
+- Ads must belong to a Campaign
+
 ## AI Auditor
 Click the sparkle button in the bottom right corner to open the AI Auditor chatbot. Features:
 - Ask natural language questions about campaigns, targeting, and performance
@@ -73,6 +88,7 @@ Click the sparkle button in the bottom right corner to open the AI Auditor chatb
 - `npm run server` - Backend only
 
 ## Recent Changes
+- 2025-12-01: Added Ideate Canvas feature - new "Ideate" tab for visual campaign planning. Features: drag-and-drop canvas for creating campaign structures, default funnel template (Awareness → Consideration → Activation with 3 ads each), AI-powered structure generation from natural language prompts, inline editing of node names, hierarchy enforcement (groups → campaigns → ads), copy to clipboard export. Uses OpenAI via Replit AI Integrations.
 - 2025-11-28: Added Account Audit feature - new "Audit" tab with on-demand account analysis. Features: PostgreSQL database for storing audit snapshots, multi-tenant isolation with account_id scoping, health score (0-100) with A-F grade, category breakdown (Structure, Performance, Targeting, Creative, Budget), prioritized recommendations with severity levels. Compliant with LinkedIn's data storage requirements (aggregate metrics only, 30-day auto-expiry).
 - 2025-11-28: Enhanced ad format detection with creative-level content inspection. Detection priority: 1) creative.type field (SPONSORED_INMAILS→Message, TEXT_AD→Text, DYNAMIC→Spotlight), 2) content structure (content.carousel→Carousel, content.spotlight→Spotlight, content.eventAd→Event), 3) media URN patterns (urn:li:video:→Video, urn:li:image:→Image), 4) variables.data keys, 5) campaign-level fallback. Ad cards display format labels: Image Ad, Video Ad, Carousel Ad, Text Ad, Spotlight, Follower, Document, Event, Message, Jobs. Demo mode uses placeholder images from picsum.photos with content structures simulating LinkedIn API format.
 - 2025-11-28: Added AI Auditor chatbot - floating chat widget in bottom right corner for natural language campaign insights. Features entity tagging with '/' autocomplete, streaming responses, and context-aware answers about targeting, performance, and audiences. Uses OpenAI via Replit AI Integrations.

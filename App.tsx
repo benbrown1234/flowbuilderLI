@@ -9,11 +9,12 @@ import { RemarketingFlow } from './components/RemarketingFlow';
 import { TargetingInspector } from './components/TargetingInspector';
 import { AIAuditor } from './components/AIAuditor';
 import AuditPage from './components/AuditPage';
-import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, Database, ClipboardCheck } from 'lucide-react';
+import { IdeateCanvas } from './components/IdeateCanvas';
+import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, Database, ClipboardCheck, Lightbulb } from 'lucide-react';
 
 const App: React.FC = () => {
   const [data, setData] = useState<AccountStructure | null>(null);
-  const [viewMode, setViewMode] = useState<'TREE' | 'FLOW' | 'REMARKETING' | 'AUDIT'>('TREE');
+  const [viewMode, setViewMode] = useState<'TREE' | 'FLOW' | 'REMARKETING' | 'AUDIT' | 'IDEATE'>('TREE');
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(() => {
     // Load saved account from localStorage
@@ -344,6 +345,13 @@ const App: React.FC = () => {
                   <ClipboardCheck size={16} />
                   Audit
                 </button>
+                <button 
+                  onClick={() => setViewMode('IDEATE')}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'IDEATE' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  <Lightbulb size={16} />
+                  Ideate
+                </button>
              </div>
 
              <div className="text-right hidden sm:block border-l pl-4 ml-2">
@@ -356,7 +364,7 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 overflow-hidden flex flex-col">
-        {viewMode !== 'AUDIT' && (
+        {viewMode !== 'AUDIT' && viewMode !== 'IDEATE' && (
           <div className="mb-6 flex-shrink-0">
             <h2 className="text-lg font-semibold text-gray-800 mb-1">
               {viewMode === 'TREE' ? 'Account Hierarchy' : 
@@ -372,9 +380,20 @@ const App: React.FC = () => {
             </p>
           </div>
         )}
+        
+        {viewMode === 'IDEATE' && (
+          <div className="mb-6 flex-shrink-0">
+            <h2 className="text-lg font-semibold text-gray-800 mb-1">Campaign Ideation Canvas</h2>
+            <p className="text-sm text-gray-500">
+              Plan and visualize your campaign structure. Use AI to generate ideas or manually create your funnel.
+            </p>
+          </div>
+        )}
 
         <div className="flex-1 min-h-0 relative">
-          {viewMode === 'AUDIT' ? (
+          {viewMode === 'IDEATE' ? (
+            <IdeateCanvas />
+          ) : viewMode === 'AUDIT' ? (
             <AuditPage 
               accountId={selectedAccountId}
               accountName={accounts.find(a => a.id === selectedAccountId)?.name || `Account ${selectedAccountId}`}
