@@ -23,7 +23,12 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   Includes a default funnel template (Awareness → Consideration → Activation) with hierarchy enforcement (Campaign Groups → Campaigns → Ads).
     *   Offers AI-powered generation of campaign structures based on natural language prompts.
     *   Allows inline editing, export as text brief, and detailed configuration of campaign groups, campaigns, ads, and retargeting audiences via a sidebar.
-    *   **Audience Flows**: Two categories - Remarketing Audiences (Video Views, Lead Form Opens, Ad Engagers, Event Attendees) and BOF Audiences (Page Views, Form Submissions, Add to Cart, Purchases).
+    *   **Audience Flows**: Three categories with different connection rules:
+        - **Remarketing** (purple): Video Views, Lead Form Opens, Ad Engagers, Event Attendees - has Source AND Target campaign
+        - **BOF (Website)** (orange): Website Visitors, Company Page Visitors, High Company Engagers - Target campaign only
+        - **TOF** (blue): Saved Audience, ABM Lists - Target campaign only
+    *   **Campaign Settings**: TOF audience association, bidding type (Manual/Maximize Delivery), Enhanced Audience checkbox, LinkedIn Audience Network checkbox
+    *   **Objective Recommendations**: Shows recommended objectives based on funnel stage (Awareness/Consideration/Activation)
     *   **Naming Conventions**: Sidebar displays naming format hints - Groups: `[Objective] – [Audience] – [Industry] – [Location]`, Campaigns: `[Group Acronym] – [Objective] – [Creative Format] – [Subsegment]`, Ads: `[Creative Type] – [Angle/Message] – [Version]`.
 *   **AI Auditor**:
     *   A chatbot for natural language queries about campaigns, targeting, and performance.

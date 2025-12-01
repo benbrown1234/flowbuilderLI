@@ -14,9 +14,15 @@ export interface IdeateNode {
   industries?: string[];
   funnelStage?: 'awareness' | 'consideration' | 'activation';
   audienceType?: string;
+  audienceCategory?: 'remarketing' | 'bof' | 'tof';
   audiencePercentage?: number;
   sourceCampaignId?: string;
   targetCampaignId?: string;
+  // Campaign settings
+  biddingType?: 'maximize_delivery' | 'manual_bidding';
+  enhancedAudience?: boolean;
+  linkedinAudienceNetwork?: boolean;
+  tofAudienceId?: string;
 }
 
 interface Props {
@@ -25,23 +31,39 @@ interface Props {
 
 const AUDIENCE_CATEGORIES = {
   remarketing: {
-    label: 'Remarketing Audiences',
+    label: 'Remarketing Audience',
     description: 'Re-engage users who interacted with your content',
+    hasSourceCampaign: true,
+    hasTargetCampaign: true,
+    color: 'purple',
     types: [
-      { value: 'video_viewers', label: 'Video Views', icon: '🎬', description: 'People who watched your video ads' },
+      { value: 'video_views', label: 'Video Views', icon: '🎬', description: 'People who watched your video ads' },
       { value: 'lead_form_opens', label: 'Lead Form Opens', icon: '📋', description: 'People who opened but didn\'t submit' },
       { value: 'ad_engagers', label: 'Ad Engagers', icon: '👆', description: 'People who clicked or engaged with ads' },
       { value: 'event_attendees', label: 'Event Attendees', icon: '📅', description: 'People who RSVPd to your events' },
     ]
   },
   bof: {
-    label: 'BOF Audiences',
+    label: 'BOF Audience (Website)',
     description: 'Bottom of funnel website visitors',
+    hasSourceCampaign: false,
+    hasTargetCampaign: true,
+    color: 'orange',
     types: [
-      { value: 'page_views', label: 'Page Views', icon: '👁️', description: 'Visitors who viewed specific pages' },
-      { value: 'form_submissions', label: 'Form Submissions', icon: '📝', description: 'Visitors who submitted a form' },
-      { value: 'add_to_cart', label: 'Add to Cart', icon: '🛒', description: 'Visitors who added items to cart' },
-      { value: 'purchases', label: 'Purchases', icon: '💳', description: 'Visitors who completed a purchase' },
+      { value: 'website_visitors', label: 'Website Visitors', icon: '🌐', description: 'All website visitors' },
+      { value: 'company_page_visitors', label: 'Company Page Visitors', icon: '🏢', description: 'Visitors from company page' },
+      { value: 'high_company_engagers', label: 'High Company Engagers', icon: '📊', description: 'Based on company report engagement' },
+    ]
+  },
+  tof: {
+    label: 'TOF Audience',
+    description: 'Top of funnel targeting audiences',
+    hasSourceCampaign: false,
+    hasTargetCampaign: true,
+    color: 'blue',
+    types: [
+      { value: 'saved_audience', label: 'Saved Audience', icon: '💾', description: 'Email, firmographics, demographics' },
+      { value: 'abm_list', label: 'ABM Lists', icon: '📋', description: 'Uploaded company lists' },
     ]
   }
 };
@@ -50,6 +72,17 @@ const NAMING_CONVENTIONS = {
   group: '[Objective] – [Audience] – [Industry] – [Location]',
   campaign: '[Group Acronym] – [Objective] – [Creative Format] – [Subsegment]',
   ad: '[Creative Type] – [Angle/Message] – [Version]',
+};
+
+const BIDDING_TYPES = [
+  { value: 'manual_bidding', label: 'Manual Bidding', description: 'Set your own bid amount', default: true },
+  { value: 'maximize_delivery', label: 'Maximize Delivery', description: 'Automatically optimize for delivery' },
+];
+
+const OBJECTIVE_RECOMMENDATIONS: Record<string, string[]> = {
+  awareness: ['brand_awareness', 'engagement', 'video_views'],
+  consideration: ['website_visits', 'engagement', 'video_views'],
+  activation: ['lead_generation', 'website_visits', 'website_conversions'],
 };
 
 const INDUSTRY_CATEGORIES: Record<string, string[]> = {
@@ -396,38 +429,63 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
     setSelectedNode(newNode.id);
   };
 
-  const addAudienceNode = () => {
+  const addAudienceNode = (category: 'remarketing' | 'bof' | 'tof' = 'remarketing') => {
     const campaigns = nodes.filter(n => n.type === 'campaign');
-    if (campaigns.length < 2) {
-      alert('Create at least 2 campaigns to connect with an audience flow');
+    const categoryConfig = AUDIENCE_CATEGORIES[category];
+    
+    if (category === 'remarketing' && campaigns.length < 2) {
+      alert('Create at least 2 campaigns to connect with a remarketing audience flow');
+      return;
+    }
+    
+    if (campaigns.length < 1) {
+      alert('Create at least 1 campaign first');
       return;
     }
     
     const selectedNodeData = nodes.find(n => n.id === selectedNode);
     let sourceCampaign: IdeateNode | undefined;
+    let targetCampaign: IdeateNode | undefined;
     
     if (selectedNodeData?.type === 'campaign') {
-      sourceCampaign = selectedNodeData;
+      if (category === 'remarketing') {
+        sourceCampaign = selectedNodeData;
+        const otherCampaigns = campaigns.filter(c => c.id !== sourceCampaign?.id);
+        targetCampaign = otherCampaigns[0];
+      } else {
+        targetCampaign = selectedNodeData;
+      }
     } else {
-      sourceCampaign = campaigns[0];
+      if (category === 'remarketing') {
+        sourceCampaign = campaigns[0];
+        targetCampaign = campaigns[1];
+      } else {
+        targetCampaign = campaigns[0];
+      }
     }
     
-    const otherCampaigns = campaigns.filter(c => c.id !== sourceCampaign?.id);
-    const targetCampaign = otherCampaigns[0];
+    const existingAudiences = nodes.filter(n => n.type === 'audience');
+    let x = 100;
+    let y = 100;
     
-    const midX = (sourceCampaign.x + targetCampaign.x) / 2;
-    const midY = (sourceCampaign.y + targetCampaign.y) / 2 + 50;
+    if (targetCampaign) {
+      x = targetCampaign.x - 200;
+      y = targetCampaign.y + (existingAudiences.length * 100);
+    }
+    
+    const defaultType = categoryConfig.types[0];
     
     const newNode: IdeateNode = {
       id: generateId(),
       type: 'audience',
-      name: 'Video Viewers',
-      x: midX,
-      y: midY,
-      audienceType: 'video_viewers',
-      audiencePercentage: 25,
-      sourceCampaignId: sourceCampaign.id,
-      targetCampaignId: targetCampaign.id,
+      name: defaultType.label,
+      x,
+      y,
+      audienceCategory: category,
+      audienceType: defaultType.value,
+      audiencePercentage: category === 'remarketing' ? 25 : undefined,
+      sourceCampaignId: categoryConfig.hasSourceCampaign ? sourceCampaign?.id : undefined,
+      targetCampaignId: targetCampaign?.id,
     };
     setNodes(prev => [...prev, newNode]);
     setSelectedNode(newNode.id);
@@ -730,33 +788,124 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
         )}
 
         {selectedNodeData.type === 'campaign' && (
-          <div className="p-4 border-b border-gray-100">
-            <div className="flex items-center gap-2 mb-3">
-              <Target size={16} className="text-gray-500" />
-              <h4 className="font-semibold text-gray-700 text-sm">Campaign Objective</h4>
+          <>
+            {/* TOF Audience Association */}
+            <div className="p-4 border-b border-gray-100">
+              <div className="flex items-center gap-2 mb-3">
+                <Users size={16} className="text-blue-500" />
+                <h4 className="font-semibold text-gray-700 text-sm">TOF Audience</h4>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">Select the top-of-funnel audience feeding this campaign</p>
+              <select
+                value={selectedNodeData.tofAudienceId || ''}
+                onChange={(e) => updateNode(selectedNodeData.id, { tofAudienceId: e.target.value || undefined })}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">No TOF Audience</option>
+                {nodes.filter(n => n.type === 'audience' && n.audienceCategory === 'tof').map(aud => (
+                  <option key={aud.id} value={aud.id}>{aud.name}</option>
+                ))}
+              </select>
             </div>
-            <p className="text-xs text-gray-500 mb-3">
-              {funnelStage === 'awareness' && 'Top-of-funnel objectives for brand visibility'}
-              {funnelStage === 'consideration' && 'Mid-funnel objectives for engagement'}
-              {funnelStage === 'activation' && 'Bottom-funnel objectives for conversions'}
-            </p>
-            <div className="space-y-2">
-              {objectiveOptions.map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => updateNode(selectedNodeData.id, { objective: opt.value })}
-                  className={`w-full text-left px-3 py-2 rounded-lg border-2 transition-colors ${
-                    selectedNodeData.objective === opt.value
-                      ? 'border-orange-400 bg-orange-50'
-                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                  }`}
-                >
-                  <div className="font-medium text-sm text-gray-800">{opt.label}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">{opt.description}</div>
-                </button>
-              ))}
+
+            {/* Campaign Objective */}
+            <div className="p-4 border-b border-gray-100">
+              <div className="flex items-center gap-2 mb-3">
+                <Target size={16} className="text-gray-500" />
+                <h4 className="font-semibold text-gray-700 text-sm">Campaign Objective</h4>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">
+                {funnelStage === 'awareness' && 'Top-of-funnel objectives for brand visibility'}
+                {funnelStage === 'consideration' && 'Mid-funnel objectives for engagement'}
+                {funnelStage === 'activation' && 'Bottom-funnel objectives for conversions'}
+              </p>
+              <div className="space-y-2">
+                {objectiveOptions.map(opt => {
+                  const isRecommended = OBJECTIVE_RECOMMENDATIONS[funnelStage]?.includes(opt.value);
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => updateNode(selectedNodeData.id, { objective: opt.value })}
+                      className={`w-full text-left px-3 py-2 rounded-lg border-2 transition-colors ${
+                        selectedNodeData.objective === opt.value
+                          ? 'border-orange-400 bg-orange-50'
+                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm text-gray-800">{opt.label}</span>
+                        {isRecommended && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-green-100 text-green-700">RECOMMENDED</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5">{opt.description}</div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+
+            {/* Bidding Type */}
+            <div className="p-4 border-b border-gray-100">
+              <div className="flex items-center gap-2 mb-3">
+                <Settings size={16} className="text-gray-500" />
+                <h4 className="font-semibold text-gray-700 text-sm">Bidding Type</h4>
+              </div>
+              <div className="space-y-2">
+                {BIDDING_TYPES.map(bid => (
+                  <button
+                    key={bid.value}
+                    onClick={() => updateNode(selectedNodeData.id, { biddingType: bid.value as 'manual_bidding' | 'maximize_delivery' })}
+                    className={`w-full text-left px-3 py-2 rounded-lg border-2 transition-colors ${
+                      (selectedNodeData.biddingType || 'manual_bidding') === bid.value
+                        ? 'border-blue-400 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm text-gray-800">{bid.label}</span>
+                      {bid.default && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">DEFAULT</span>}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">{bid.description}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Audience Settings */}
+            <div className="p-4 border-b border-gray-100">
+              <div className="flex items-center gap-2 mb-3">
+                <Users size={16} className="text-gray-500" />
+                <h4 className="font-semibold text-gray-700 text-sm">Audience Settings</h4>
+              </div>
+              <div className="space-y-3">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedNodeData.enhancedAudience !== false}
+                    onChange={(e) => updateNode(selectedNodeData.id, { enhancedAudience: e.target.checked })}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">Enhanced Audience</div>
+                    <div className="text-xs text-gray-500">Automatically expand reach to similar audiences</div>
+                  </div>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedNodeData.linkedinAudienceNetwork !== false}
+                    onChange={(e) => updateNode(selectedNodeData.id, { linkedinAudienceNetwork: e.target.checked })}
+                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">LinkedIn Audience Network</div>
+                    <div className="text-xs text-gray-500">Extend reach beyond LinkedIn</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </>
         )}
 
         {selectedNodeData.type === 'ad' && (
@@ -784,101 +933,142 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
           </div>
         )}
 
-        {selectedNodeData.type === 'audience' && (
+        {selectedNodeData.type === 'audience' && (() => {
+          const currentCategory = selectedNodeData.audienceCategory || 'remarketing';
+          const categoryConfig = AUDIENCE_CATEGORIES[currentCategory as keyof typeof AUDIENCE_CATEGORIES];
+          const colorClass = currentCategory === 'remarketing' ? 'purple' : currentCategory === 'bof' ? 'orange' : 'blue';
+          
+          return (
           <>
+            {/* Audience Category Selection */}
             <div className="p-4 border-b border-gray-100">
               <div className="flex items-center gap-2 mb-3">
-                <Users size={16} className="text-purple-500" />
+                <Users size={16} className="text-gray-500" />
+                <h4 className="font-semibold text-gray-700 text-sm">Audience Category</h4>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {Object.entries(AUDIENCE_CATEGORIES).map(([key, cat]) => (
+                  <button
+                    key={key}
+                    onClick={() => updateNode(selectedNodeData.id, { 
+                      audienceCategory: key as 'remarketing' | 'bof' | 'tof',
+                      audienceType: undefined,
+                      sourceCampaignId: cat.hasSourceCampaign ? selectedNodeData.sourceCampaignId : undefined
+                    })}
+                    className={`px-2 py-2 rounded-lg border-2 text-center transition-colors ${
+                      currentCategory === key
+                        ? key === 'remarketing' ? 'border-purple-400 bg-purple-50'
+                        : key === 'bof' ? 'border-orange-400 bg-orange-50'
+                        : 'border-blue-400 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className={`text-[10px] font-bold ${
+                      key === 'remarketing' ? 'text-purple-700' : key === 'bof' ? 'text-orange-700' : 'text-blue-700'
+                    }`}>
+                      {key === 'remarketing' ? 'Remarketing' : key === 'bof' ? 'BOF' : 'TOF'}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-gray-500 mt-2">{categoryConfig.description}</p>
+            </div>
+
+            {/* Audience Type Selection */}
+            <div className="p-4 border-b border-gray-100">
+              <div className="flex items-center gap-2 mb-3">
+                <Target size={16} className={`text-${colorClass}-500`} />
                 <h4 className="font-semibold text-gray-700 text-sm">Audience Type</h4>
               </div>
-              <div className="space-y-4">
-                {Object.entries(AUDIENCE_CATEGORIES).map(([key, category]) => (
-                  <div key={key}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className={`text-xs font-bold uppercase tracking-wide ${key === 'remarketing' ? 'text-purple-600' : 'text-orange-600'}`}>
-                        {category.label}
-                      </span>
+              <div className="space-y-1">
+                {categoryConfig.types.map(type => (
+                  <button
+                    key={type.value}
+                    onClick={() => updateNode(selectedNodeData.id, { audienceType: type.value, name: type.label })}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg border-2 transition-colors text-left ${
+                      selectedNodeData.audienceType === type.value
+                        ? currentCategory === 'remarketing' ? 'border-purple-400 bg-purple-50'
+                        : currentCategory === 'bof' ? 'border-orange-400 bg-orange-50'
+                        : 'border-blue-400 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <span className="text-lg">{type.icon}</span>
+                    <div>
+                      <div className="font-medium text-xs text-gray-800">{type.label}</div>
+                      <div className="text-[10px] text-gray-500">{type.description}</div>
                     </div>
-                    <p className="text-[10px] text-gray-500 mb-2">{category.description}</p>
-                    <div className="space-y-1">
-                      {category.types.map(type => (
-                        <button
-                          key={type.value}
-                          onClick={() => updateNode(selectedNodeData.id, { audienceType: type.value, name: type.label })}
-                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg border-2 transition-colors text-left ${
-                            selectedNodeData.audienceType === type.value
-                              ? 'border-purple-400 bg-purple-50'
-                              : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                          }`}
-                        >
-                          <span className="text-lg">{type.icon}</span>
-                          <div>
-                            <div className="font-medium text-xs text-gray-800">{type.label}</div>
-                            <div className="text-[10px] text-gray-500">{type.description}</div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
 
-            <div className="p-4 border-b border-gray-100">
-              <div className="flex items-center gap-2 mb-3">
-                <Percent size={16} className="text-purple-500" />
-                <h4 className="font-semibold text-gray-700 text-sm">Conversion Rate</h4>
+            {/* Conversion Rate - only for remarketing */}
+            {currentCategory === 'remarketing' && (
+              <div className="p-4 border-b border-gray-100">
+                <div className="flex items-center gap-2 mb-3">
+                  <Percent size={16} className="text-purple-500" />
+                  <h4 className="font-semibold text-gray-700 text-sm">Conversion Rate</h4>
+                </div>
+                <p className="text-xs text-gray-500 mb-3">Estimated % of source audience that flows to target</p>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="1"
+                    max="100"
+                    value={selectedNodeData.audiencePercentage || 25}
+                    onChange={(e) => updateNode(selectedNodeData.id, { audiencePercentage: parseInt(e.target.value) })}
+                    className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                  />
+                  <span className="w-12 text-right font-bold text-purple-600">{selectedNodeData.audiencePercentage || 25}%</span>
+                </div>
               </div>
-              <p className="text-xs text-gray-500 mb-3">Estimated % of source audience that flows to target</p>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min="1"
-                  max="100"
-                  value={selectedNodeData.audiencePercentage || 25}
-                  onChange={(e) => updateNode(selectedNodeData.id, { audiencePercentage: parseInt(e.target.value) })}
-                  className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                />
-                <span className="w-12 text-right font-bold text-purple-600">{selectedNodeData.audiencePercentage || 25}%</span>
-              </div>
-            </div>
+            )}
 
+            {/* Campaign Connections */}
             <div className="p-4 border-b border-gray-100">
               <div className="flex items-center gap-2 mb-3">
-                <ArrowRight size={16} className="text-purple-500" />
-                <h4 className="font-semibold text-gray-700 text-sm">Flow Connection</h4>
+                <ArrowRight size={16} className={`text-${colorClass}-500`} />
+                <h4 className="font-semibold text-gray-700 text-sm">Campaign Connection</h4>
               </div>
               <div className="space-y-3">
-                <div>
-                  <label className="text-xs font-medium text-gray-500 mb-1 block">Source Campaign</label>
-                  <select
-                    value={selectedNodeData.sourceCampaignId || ''}
-                    onChange={(e) => updateNode(selectedNodeData.id, { sourceCampaignId: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  >
-                    <option value="">Select source...</option>
-                    {nodes.filter(n => n.type === 'campaign').map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
+                {/* Source Campaign - only for remarketing */}
+                {categoryConfig.hasSourceCampaign && (
+                  <div>
+                    <label className="text-xs font-medium text-gray-500 mb-1 block">Source Campaign</label>
+                    <select
+                      value={selectedNodeData.sourceCampaignId || ''}
+                      onChange={(e) => updateNode(selectedNodeData.id, { sourceCampaignId: e.target.value })}
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    >
+                      <option value="">Select source...</option>
+                      {nodes.filter(n => n.type === 'campaign').map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-gray-400 mt-1">Campaign that feeds this audience</p>
+                  </div>
+                )}
+                {/* Target Campaign - always shown */}
                 <div>
                   <label className="text-xs font-medium text-gray-500 mb-1 block">Target Campaign</label>
                   <select
                     value={selectedNodeData.targetCampaignId || ''}
                     onChange={(e) => updateNode(selectedNodeData.id, { targetCampaignId: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className={`w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-${colorClass}-500`}
                   >
                     <option value="">Select target...</option>
                     {nodes.filter(n => n.type === 'campaign' && n.id !== selectedNodeData.sourceCampaignId).map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
+                  <p className="text-[10px] text-gray-400 mt-1">Campaign that uses this audience</p>
                 </div>
               </div>
             </div>
           </>
-        )}
+        );
+        })()}
 
         <div className="p-4">
           <div className="flex items-center gap-2 mb-3">
@@ -930,14 +1120,48 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
             <span>Ad</span>
           </button>
           <div className="w-px h-6 bg-gray-200" />
-          <button
-            onClick={addAudienceNode}
-            className="flex items-center gap-1.5 px-3 py-2 hover:bg-gray-100 rounded text-gray-700 text-sm font-medium"
-            title="Add Audience Flow"
-          >
-            <Users size={16} className="text-purple-500" />
-            <span>Audience</span>
-          </button>
+          <div className="relative group">
+            <button
+              className="flex items-center gap-1.5 px-3 py-2 hover:bg-gray-100 rounded text-gray-700 text-sm font-medium"
+              title="Add Audience"
+            >
+              <Users size={16} className="text-purple-500" />
+              <span>Audience</span>
+              <ChevronDown size={14} className="text-gray-400" />
+            </button>
+            <div className="absolute top-full left-0 mt-1 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[180px] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+              <button
+                onClick={() => addAudienceNode('remarketing')}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-purple-50 text-left"
+              >
+                <span className="w-2 h-2 rounded-full bg-purple-500" />
+                <div>
+                  <div className="text-sm font-medium text-gray-800">Remarketing</div>
+                  <div className="text-[10px] text-gray-500">Source → Target campaign</div>
+                </div>
+              </button>
+              <button
+                onClick={() => addAudienceNode('bof')}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-orange-50 text-left"
+              >
+                <span className="w-2 h-2 rounded-full bg-orange-500" />
+                <div>
+                  <div className="text-sm font-medium text-gray-800">BOF (Website)</div>
+                  <div className="text-[10px] text-gray-500">Target campaign only</div>
+                </div>
+              </button>
+              <button
+                onClick={() => addAudienceNode('tof')}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 text-left"
+              >
+                <span className="w-2 h-2 rounded-full bg-blue-500" />
+                <div>
+                  <div className="text-sm font-medium text-gray-800">TOF</div>
+                  <div className="text-[10px] text-gray-500">Target campaign only</div>
+                </div>
+              </button>
+            </div>
+          </div>
         </div>
         
         {selectedNode && (
@@ -1147,11 +1371,12 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
             {nodes.filter(n => n.type === 'audience').map(audience => {
               const sourceCampaign = nodes.find(n => n.id === audience.sourceCampaignId);
               const targetCampaign = nodes.find(n => n.id === audience.targetCampaignId);
+              const category = audience.audienceCategory || 'remarketing';
+              const strokeColor = category === 'remarketing' ? '#a855f7' : category === 'bof' ? '#f97316' : '#3b82f6';
+              const markerId = `arrowhead-${category}`;
               
-              if (!sourceCampaign || !targetCampaign) return null;
+              if (!targetCampaign) return null;
               
-              const sourceX = sourceCampaign.x + 260;
-              const sourceY = sourceCampaign.y + 45;
               const audienceX = audience.x;
               const audienceY = audience.y + 35;
               const audienceEndX = audience.x + 180;
@@ -1160,40 +1385,41 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
               
               return (
                 <g key={`audience-flow-${audience.id}`}>
-                  {/* Source to Audience */}
-                  <path
-                    d={`M ${sourceX} ${sourceY} Q ${(sourceX + audienceX) / 2} ${sourceY}, ${audienceX} ${audienceY}`}
-                    fill="none"
-                    stroke="#a855f7"
-                    strokeWidth="2"
-                    strokeDasharray="6,4"
-                    strokeOpacity="0.7"
-                  />
+                  {/* Source to Audience (only for remarketing) */}
+                  {sourceCampaign && category === 'remarketing' && (
+                    <path
+                      d={`M ${sourceCampaign.x + 260} ${sourceCampaign.y + 45} Q ${(sourceCampaign.x + 260 + audienceX) / 2} ${sourceCampaign.y + 45}, ${audienceX} ${audienceY}`}
+                      fill="none"
+                      stroke={strokeColor}
+                      strokeWidth="2"
+                      strokeDasharray="6,4"
+                      strokeOpacity="0.7"
+                    />
+                  )}
                   {/* Audience to Target */}
                   <path
                     d={`M ${audienceEndX} ${audienceY} Q ${(audienceEndX + targetX) / 2} ${targetY}, ${targetX} ${targetY}`}
                     fill="none"
-                    stroke="#a855f7"
+                    stroke={strokeColor}
                     strokeWidth="2"
                     strokeDasharray="6,4"
                     strokeOpacity="0.7"
-                    markerEnd="url(#arrowhead)"
+                    markerEnd={`url(#${markerId})`}
                   />
                 </g>
               );
             })}
             
-            {/* Arrow marker definition */}
+            {/* Arrow marker definitions for each category */}
             <defs>
-              <marker
-                id="arrowhead"
-                markerWidth="10"
-                markerHeight="7"
-                refX="9"
-                refY="3.5"
-                orient="auto"
-              >
+              <marker id="arrowhead-remarketing" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
                 <polygon points="0 0, 10 3.5, 0 7" fill="#a855f7" fillOpacity="0.7" />
+              </marker>
+              <marker id="arrowhead-bof" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#f97316" fillOpacity="0.7" />
+              </marker>
+              <marker id="arrowhead-tof" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="#3b82f6" fillOpacity="0.7" />
               </marker>
             </defs>
           </svg>
@@ -1275,8 +1501,16 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
 
           {/* Audience Nodes */}
           {nodes.filter(n => n.type === 'audience').map(node => {
-            const allAudienceTypes = [...AUDIENCE_CATEGORIES.remarketing.types, ...AUDIENCE_CATEGORIES.bof.types];
+            const allAudienceTypes = [...AUDIENCE_CATEGORIES.remarketing.types, ...AUDIENCE_CATEGORIES.bof.types, ...AUDIENCE_CATEGORIES.tof.types];
             const audienceTypeInfo = allAudienceTypes.find(t => t.value === node.audienceType);
+            const category = node.audienceCategory || 'remarketing';
+            const colorClasses = {
+              remarketing: { bg: 'from-purple-50 to-purple-100', border: 'border-purple-300', ring: 'ring-purple-400', text: 'text-purple-900', accent: 'text-purple-600' },
+              bof: { bg: 'from-orange-50 to-orange-100', border: 'border-orange-300', ring: 'ring-orange-400', text: 'text-orange-900', accent: 'text-orange-600' },
+              tof: { bg: 'from-blue-50 to-blue-100', border: 'border-blue-300', ring: 'ring-blue-400', text: 'text-blue-900', accent: 'text-blue-600' },
+            };
+            const colors = colorClasses[category];
+            
             return (
               <div
                 key={node.id}
@@ -1286,8 +1520,8 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
                   absolute transition-shadow duration-200 rounded-full border-2 flex items-center justify-center z-20 select-none
                   w-[180px] h-[70px] px-4
                   ${draggedNode === node.id ? 'cursor-grabbing shadow-2xl scale-105' : 'cursor-grab hover:shadow-xl'}
-                  ${selectedNode === node.id ? 'ring-2 ring-offset-2 ring-purple-400' : ''}
-                  bg-gradient-to-r from-purple-50 to-purple-100 border-purple-300
+                  ${selectedNode === node.id ? `ring-2 ring-offset-2 ${colors.ring}` : ''}
+                  bg-gradient-to-r ${colors.bg} ${colors.border}
                 `}
                 style={{
                   left: node.x,
@@ -1305,12 +1539,19 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
                         onKeyDown={(e) => e.key === 'Enter' && finishEditing()}
                         onBlur={finishEditing}
                         autoFocus
-                        className="text-sm font-semibold bg-white border border-purple-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-purple-500 w-24"
+                        className={`text-sm font-semibold bg-white border ${colors.border} rounded px-1 py-0.5 focus:outline-none focus:ring-1 w-24`}
                       />
                     ) : (
-                      <span className="text-sm font-semibold text-purple-900 leading-tight">{node.name}</span>
+                      <>
+                        <span className={`text-[10px] font-bold uppercase ${colors.accent}`}>
+                          {category === 'remarketing' ? 'Remarketing' : category === 'bof' ? 'BOF' : 'TOF'}
+                        </span>
+                        <span className={`text-sm font-semibold ${colors.text} leading-tight`}>{node.name}</span>
+                      </>
                     )}
-                    <span className="text-lg font-bold text-purple-600">{node.audiencePercentage || 25}%</span>
+                    {category === 'remarketing' && (
+                      <span className={`text-lg font-bold ${colors.accent}`}>{node.audiencePercentage || 25}%</span>
+                    )}
                   </div>
                 </div>
               </div>
