@@ -15,11 +15,15 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   **Targeting Flow**: Visualizes audience composition.
     *   **Remarketing Flow**: Illustrates campaign and audience flow through a 3-column marketing funnel (Cold Campaigns → Remarketing Audiences → Remarketing Campaigns), showing connections and audience movement.
 *   **Account Audit**:
-    *   **Performance Dashboard**: Shows CTR stats month-on-month for all campaigns and ads.
+    *   **Opt-In System**: Audit is opt-in per account. Click "Start Audit" to enable tracking for an account. Only opted-in accounts have data stored.
+    *   **Data Persistence**: Campaign and ad metrics are synced to PostgreSQL with daily granularity. Stores last 90 days of performance data.
+    *   **Staggered API Calls**: Sync process uses 200-300ms delays between LinkedIn API calls to avoid rate limits.
+    *   **Performance Dashboard**: Shows CTR stats month-on-month for all campaigns and ads from stored data.
     *   **Live Ad Previews**: Displays ad creatives with embedded LinkedIn preview iframes.
     *   **Underperforming Ads Detection**: Highlights ads with CTR below 0.4% or >20% decline from previous month with red visual indicators.
     *   **Summary Metrics**: Total impressions, clicks, account-level CTR, and count of ads needing review.
     *   **Filter Toggle**: Option to show only underperforming campaigns and ads.
+    *   **Manual Refresh**: "Refresh" button to pull latest data on-demand.
 *   **Ideate Canvas**:
     *   A visual planning tool for campaigns, featuring a drag-and-drop interface.
     *   **Import from Structure**: One-click import of live LinkedIn campaign data into Ideate canvas. Transforms campaign groups, campaigns, and ads into editable nodes with full targeting data preserved. Auto-generates TOF audience nodes from targeting criteria (industries, company sizes, seniorities).

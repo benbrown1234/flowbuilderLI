@@ -94,6 +94,71 @@ export async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_metrics_snapshot ON audit_metrics(snapshot_id);
       CREATE INDEX IF NOT EXISTS idx_recommendations_snapshot ON audit_recommendations(snapshot_id);
 
+      -- Audit opt-in tracking
+      CREATE TABLE IF NOT EXISTS audit_accounts (
+        id SERIAL PRIMARY KEY,
+        account_id VARCHAR(50) NOT NULL UNIQUE,
+        account_name VARCHAR(255),
+        opted_in_at TIMESTAMP DEFAULT NOW(),
+        last_sync_at TIMESTAMP,
+        sync_status VARCHAR(20) DEFAULT 'pending',
+        sync_error TEXT,
+        auto_sync_enabled BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      -- Daily analytics snapshots (one row per campaign per day)
+      CREATE TABLE IF NOT EXISTS analytics_campaign_daily (
+        id SERIAL PRIMARY KEY,
+        account_id VARCHAR(50) NOT NULL,
+        campaign_id VARCHAR(50) NOT NULL,
+        campaign_name VARCHAR(500),
+        campaign_group_id VARCHAR(50),
+        campaign_status VARCHAR(50),
+        metric_date DATE NOT NULL,
+        impressions BIGINT DEFAULT 0,
+        clicks BIGINT DEFAULT 0,
+        spend DECIMAL(12,2) DEFAULT 0,
+        conversions INTEGER DEFAULT 0,
+        video_views BIGINT DEFAULT 0,
+        leads INTEGER DEFAULT 0,
+        ctr DECIMAL(8,4),
+        cpc DECIMAL(10,4),
+        cpm DECIMAL(10,4),
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(account_id, campaign_id, metric_date)
+      );
+
+      -- Daily analytics for ads/creatives
+      CREATE TABLE IF NOT EXISTS analytics_creative_daily (
+        id SERIAL PRIMARY KEY,
+        account_id VARCHAR(50) NOT NULL,
+        creative_id VARCHAR(50) NOT NULL,
+        creative_name VARCHAR(500),
+        campaign_id VARCHAR(50),
+        creative_status VARCHAR(50),
+        creative_type VARCHAR(100),
+        preview_url TEXT,
+        metric_date DATE NOT NULL,
+        impressions BIGINT DEFAULT 0,
+        clicks BIGINT DEFAULT 0,
+        spend DECIMAL(12,2) DEFAULT 0,
+        conversions INTEGER DEFAULT 0,
+        video_views BIGINT DEFAULT 0,
+        leads INTEGER DEFAULT 0,
+        ctr DECIMAL(8,4),
+        cpc DECIMAL(10,4),
+        cpm DECIMAL(10,4),
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(account_id, creative_id, metric_date)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_audit_accounts_account ON audit_accounts(account_id);
+      CREATE INDEX IF NOT EXISTS idx_analytics_campaign_daily_account_date ON analytics_campaign_daily(account_id, metric_date DESC);
+      CREATE INDEX IF NOT EXISTS idx_analytics_creative_daily_account_date ON analytics_creative_daily(account_id, metric_date DESC);
+      CREATE INDEX IF NOT EXISTS idx_analytics_campaign_daily_campaign ON analytics_campaign_daily(campaign_id, metric_date DESC);
+      CREATE INDEX IF NOT EXISTS idx_analytics_creative_daily_campaign ON analytics_creative_daily(campaign_id, metric_date DESC);
+
       -- Ideate Canvas tables
       CREATE TABLE IF NOT EXISTS ideate_canvases (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -487,6 +552,220 @@ export async function resolveComment(commentId: number, resolved: boolean = true
 
 export async function deleteComment(commentId: number) {
   await pool.query('DELETE FROM ideate_canvas_comments WHERE id = $1', [commentId]);
+}
+
+// Audit Account Management
+export async function getAuditAccount(accountId: string) {
+  const result = await pool.query(
+    'SELECT * FROM audit_accounts WHERE account_id = $1',
+    [accountId]
+  );
+  return result.rows[0] || null;
+}
+
+export async function optInAuditAccount(accountId: string, accountName: string) {
+  const result = await pool.query(
+    `INSERT INTO audit_accounts (account_id, account_name, sync_status)
+     VALUES ($1, $2, 'pending')
+     ON CONFLICT (account_id) DO UPDATE SET
+       account_name = EXCLUDED.account_name,
+       sync_status = 'pending',
+       sync_error = NULL
+     RETURNING *`,
+    [accountId, accountName]
+  );
+  return result.rows[0];
+}
+
+export async function updateAuditAccountSyncStatus(
+  accountId: string, 
+  status: 'pending' | 'syncing' | 'completed' | 'error',
+  error?: string
+) {
+  const result = await pool.query(
+    `UPDATE audit_accounts 
+     SET sync_status = $1, 
+         sync_error = $2,
+         last_sync_at = CASE WHEN $1 = 'completed' THEN NOW() ELSE last_sync_at END
+     WHERE account_id = $3
+     RETURNING *`,
+    [status, error || null, accountId]
+  );
+  return result.rows[0] || null;
+}
+
+export async function getOptedInAccounts() {
+  const result = await pool.query(
+    'SELECT * FROM audit_accounts WHERE auto_sync_enabled = TRUE ORDER BY opted_in_at'
+  );
+  return result.rows;
+}
+
+export async function removeAuditAccount(accountId: string) {
+  await pool.query('DELETE FROM audit_accounts WHERE account_id = $1', [accountId]);
+  await pool.query('DELETE FROM analytics_campaign_daily WHERE account_id = $1', [accountId]);
+  await pool.query('DELETE FROM analytics_creative_daily WHERE account_id = $1', [accountId]);
+}
+
+// Daily Analytics Storage
+export async function saveCampaignDailyMetrics(
+  accountId: string,
+  metrics: Array<{
+    campaignId: string;
+    campaignName?: string;
+    campaignGroupId?: string;
+    campaignStatus?: string;
+    metricDate: Date;
+    impressions: number;
+    clicks: number;
+    spend: number;
+    conversions?: number;
+    videoViews?: number;
+    leads?: number;
+  }>
+) {
+  for (const m of metrics) {
+    const ctr = m.impressions > 0 ? (m.clicks / m.impressions) * 100 : 0;
+    const cpc = m.clicks > 0 ? m.spend / m.clicks : 0;
+    const cpm = m.impressions > 0 ? (m.spend / m.impressions) * 1000 : 0;
+    
+    await pool.query(
+      `INSERT INTO analytics_campaign_daily 
+       (account_id, campaign_id, campaign_name, campaign_group_id, campaign_status, metric_date, impressions, clicks, spend, conversions, video_views, leads, ctr, cpc, cpm)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+       ON CONFLICT (account_id, campaign_id, metric_date) DO UPDATE SET
+         campaign_name = EXCLUDED.campaign_name,
+         campaign_group_id = EXCLUDED.campaign_group_id,
+         campaign_status = EXCLUDED.campaign_status,
+         impressions = EXCLUDED.impressions,
+         clicks = EXCLUDED.clicks,
+         spend = EXCLUDED.spend,
+         conversions = EXCLUDED.conversions,
+         video_views = EXCLUDED.video_views,
+         leads = EXCLUDED.leads,
+         ctr = EXCLUDED.ctr,
+         cpc = EXCLUDED.cpc,
+         cpm = EXCLUDED.cpm`,
+      [
+        accountId,
+        m.campaignId,
+        m.campaignName || null,
+        m.campaignGroupId || null,
+        m.campaignStatus || null,
+        m.metricDate,
+        m.impressions || 0,
+        m.clicks || 0,
+        m.spend || 0,
+        m.conversions || 0,
+        m.videoViews || 0,
+        m.leads || 0,
+        ctr,
+        cpc,
+        cpm
+      ]
+    );
+  }
+}
+
+export async function saveCreativeDailyMetrics(
+  accountId: string,
+  metrics: Array<{
+    creativeId: string;
+    creativeName?: string;
+    campaignId?: string;
+    creativeStatus?: string;
+    creativeType?: string;
+    previewUrl?: string;
+    metricDate: Date;
+    impressions: number;
+    clicks: number;
+    spend: number;
+    conversions?: number;
+    videoViews?: number;
+    leads?: number;
+  }>
+) {
+  for (const m of metrics) {
+    const ctr = m.impressions > 0 ? (m.clicks / m.impressions) * 100 : 0;
+    const cpc = m.clicks > 0 ? m.spend / m.clicks : 0;
+    const cpm = m.impressions > 0 ? (m.spend / m.impressions) * 1000 : 0;
+    
+    await pool.query(
+      `INSERT INTO analytics_creative_daily 
+       (account_id, creative_id, creative_name, campaign_id, creative_status, creative_type, preview_url, metric_date, impressions, clicks, spend, conversions, video_views, leads, ctr, cpc, cpm)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+       ON CONFLICT (account_id, creative_id, metric_date) DO UPDATE SET
+         creative_name = EXCLUDED.creative_name,
+         campaign_id = EXCLUDED.campaign_id,
+         creative_status = EXCLUDED.creative_status,
+         creative_type = EXCLUDED.creative_type,
+         preview_url = EXCLUDED.preview_url,
+         impressions = EXCLUDED.impressions,
+         clicks = EXCLUDED.clicks,
+         spend = EXCLUDED.spend,
+         conversions = EXCLUDED.conversions,
+         video_views = EXCLUDED.video_views,
+         leads = EXCLUDED.leads,
+         ctr = EXCLUDED.ctr,
+         cpc = EXCLUDED.cpc,
+         cpm = EXCLUDED.cpm`,
+      [
+        accountId,
+        m.creativeId,
+        m.creativeName || null,
+        m.campaignId || null,
+        m.creativeStatus || null,
+        m.creativeType || null,
+        m.previewUrl || null,
+        m.metricDate,
+        m.impressions || 0,
+        m.clicks || 0,
+        m.spend || 0,
+        m.conversions || 0,
+        m.videoViews || 0,
+        m.leads || 0,
+        ctr,
+        cpc,
+        cpm
+      ]
+    );
+  }
+}
+
+export async function getCampaignDailyMetrics(
+  accountId: string,
+  startDate: Date,
+  endDate: Date
+) {
+  const result = await pool.query(
+    `SELECT * FROM analytics_campaign_daily 
+     WHERE account_id = $1 AND metric_date >= $2 AND metric_date <= $3
+     ORDER BY metric_date DESC, campaign_id`,
+    [accountId, startDate, endDate]
+  );
+  return result.rows;
+}
+
+export async function getCreativeDailyMetrics(
+  accountId: string,
+  startDate: Date,
+  endDate: Date
+) {
+  const result = await pool.query(
+    `SELECT * FROM analytics_creative_daily 
+     WHERE account_id = $1 AND metric_date >= $2 AND metric_date <= $3
+     ORDER BY metric_date DESC, creative_id`,
+    [accountId, startDate, endDate]
+  );
+  return result.rows;
+}
+
+export async function getLatestMetricsDate(accountId: string): Promise<Date | null> {
+  const result = await pool.query(
+    `SELECT MAX(metric_date) as latest_date FROM analytics_campaign_daily WHERE account_id = $1`,
+    [accountId]
+  );
+  return result.rows[0]?.latest_date || null;
 }
 
 export default pool;

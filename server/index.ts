@@ -33,7 +33,17 @@ import {
   addComment,
   getComments,
   resolveComment,
-  deleteComment
+  deleteComment,
+  getAuditAccount,
+  optInAuditAccount,
+  updateAuditAccountSyncStatus,
+  getOptedInAccounts,
+  removeAuditAccount,
+  saveCampaignDailyMetrics,
+  saveCreativeDailyMetrics,
+  getCampaignDailyMetrics,
+  getCreativeDailyMetrics,
+  getLatestMetricsDate
 } from './database.js';
 import { runAuditRules, calculateAccountScore } from './auditRules.js';
 
@@ -1655,6 +1665,425 @@ app.delete('/api/linkedin/audit/:accountId', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Failed to delete audit data' });
   }
 });
+
+// ========== NEW AUDIT SYNC ENDPOINTS ==========
+
+// Check if account is opted into audit
+app.get('/api/audit/account/:accountId', requireAuth, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const auditAccount = await getAuditAccount(accountId);
+    
+    if (!auditAccount) {
+      return res.json({ optedIn: false });
+    }
+    
+    const latestDate = await getLatestMetricsDate(accountId);
+    
+    res.json({
+      optedIn: true,
+      accountId: auditAccount.account_id,
+      accountName: auditAccount.account_name,
+      optedInAt: auditAccount.opted_in_at,
+      lastSyncAt: auditAccount.last_sync_at,
+      syncStatus: auditAccount.sync_status,
+      syncError: auditAccount.sync_error,
+      autoSyncEnabled: auditAccount.auto_sync_enabled,
+      latestDataDate: latestDate
+    });
+  } catch (err: any) {
+    console.error('Audit account status error:', err.message);
+    res.status(500).json({ error: 'Failed to get audit account status' });
+  }
+});
+
+// Staggered sync function - processes API calls with delays
+async function runAuditSync(sessionId: string, accountId: string, accountName: string) {
+  console.log(`\n=== Starting audit sync for account ${accountId} (${accountName}) ===`);
+  
+  await updateAuditAccountSyncStatus(accountId, 'syncing');
+  
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  const extractId = (urn: string) => {
+    const match = urn?.match(/:(\d+)$/);
+    return match ? match[1] : urn;
+  };
+  
+  try {
+    // Step 1: Fetch campaigns (with delay before)
+    console.log('Fetching campaigns...');
+    await delay(200);
+    const campaignsResponse = await linkedinApiRequest(
+      sessionId, 
+      `/adAccounts/${accountId}/adCampaigns`, 
+      {}, 
+      'q=search&search=(status:(values:List(ACTIVE,PAUSED,ARCHIVED,CANCELED,DRAFT)))'
+    );
+    const campaigns = campaignsResponse.elements || [];
+    console.log(`Found ${campaigns.length} campaigns`);
+    
+    // Step 2: Fetch creatives (with delay)
+    console.log('Fetching creatives...');
+    await delay(300);
+    const creativesResponse = await linkedinApiRequest(
+      sessionId, 
+      `/adAccounts/${accountId}/creatives`, 
+      {}, 
+      'q=search'
+    );
+    const creatives = creativesResponse.elements || [];
+    console.log(`Found ${creatives.length} creatives`);
+    
+    // Step 3: Fetch analytics for the last 90 days (with delay)
+    console.log('Fetching analytics...');
+    await delay(300);
+    
+    const now = new Date();
+    const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    
+    const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
+    const encodedAccountUrn = encodeURIComponent(accountUrn);
+    
+    // Fetch campaign-level analytics with daily granularity
+    const campaignAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,dateRange,pivotValues`;
+    
+    let campaignAnalytics: any = { elements: [] };
+    try {
+      campaignAnalytics = await linkedinApiRequest(sessionId, '/adAnalytics', {}, campaignAnalyticsQuery);
+      console.log(`Got ${campaignAnalytics.elements?.length || 0} campaign analytics rows`);
+    } catch (err: any) {
+      console.warn('Campaign analytics fetch error:', err.message);
+    }
+    
+    // Step 4: Fetch creative-level analytics (with delay)
+    await delay(300);
+    const creativeAnalyticsQuery = `q=analytics&pivot=CREATIVE&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,dateRange,pivotValues`;
+    
+    let creativeAnalytics: any = { elements: [] };
+    try {
+      creativeAnalytics = await linkedinApiRequest(sessionId, '/adAnalytics', {}, creativeAnalyticsQuery);
+      console.log(`Got ${creativeAnalytics.elements?.length || 0} creative analytics rows`);
+    } catch (err: any) {
+      console.warn('Creative analytics fetch error:', err.message);
+    }
+    
+    // Build campaign lookup map
+    const campaignMap = new Map<string, any>();
+    for (const c of campaigns) {
+      const id = extractId(c.id);
+      campaignMap.set(id, {
+        name: c.name || `Campaign ${id}`,
+        groupId: extractId(c.campaignGroup),
+        status: c.status
+      });
+    }
+    
+    // Build creative lookup map
+    const creativeMap = new Map<string, any>();
+    for (const c of creatives) {
+      const id = extractId(c.id);
+      creativeMap.set(id, {
+        name: c.name || `Creative ${id}`,
+        campaignId: extractId(c.campaign),
+        status: c.status,
+        type: c.type || 'SPONSORED_UPDATE'
+      });
+    }
+    
+    // Process and save campaign daily metrics
+    const campaignMetrics: any[] = [];
+    for (const elem of (campaignAnalytics.elements || [])) {
+      const campaignId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
+      if (!campaignId) continue;
+      
+      const dateRange = elem.dateRange?.start;
+      if (!dateRange) continue;
+      
+      const metricDate = new Date(dateRange.year, dateRange.month - 1, dateRange.day);
+      const campaignInfo = campaignMap.get(campaignId) || {};
+      
+      campaignMetrics.push({
+        campaignId,
+        campaignName: campaignInfo.name,
+        campaignGroupId: campaignInfo.groupId,
+        campaignStatus: campaignInfo.status,
+        metricDate,
+        impressions: elem.impressions || 0,
+        clicks: elem.clicks || 0,
+        spend: parseFloat(elem.costInLocalCurrency || '0'),
+        conversions: elem.externalWebsiteConversions || 0,
+        videoViews: elem.videoViews || 0,
+        leads: elem.oneClickLeads || 0
+      });
+    }
+    
+    if (campaignMetrics.length > 0) {
+      console.log(`Saving ${campaignMetrics.length} campaign daily metrics...`);
+      await saveCampaignDailyMetrics(accountId, campaignMetrics);
+    }
+    
+    // Process and save creative daily metrics
+    const creativeMetrics: any[] = [];
+    for (const elem of (creativeAnalytics.elements || [])) {
+      const creativeId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
+      if (!creativeId) continue;
+      
+      const dateRange = elem.dateRange?.start;
+      if (!dateRange) continue;
+      
+      const metricDate = new Date(dateRange.year, dateRange.month - 1, dateRange.day);
+      const creativeInfo = creativeMap.get(creativeId) || {};
+      
+      creativeMetrics.push({
+        creativeId,
+        creativeName: creativeInfo.name,
+        campaignId: creativeInfo.campaignId,
+        creativeStatus: creativeInfo.status,
+        creativeType: creativeInfo.type,
+        metricDate,
+        impressions: elem.impressions || 0,
+        clicks: elem.clicks || 0,
+        spend: parseFloat(elem.costInLocalCurrency || '0'),
+        conversions: elem.externalWebsiteConversions || 0,
+        videoViews: elem.videoViews || 0,
+        leads: elem.oneClickLeads || 0
+      });
+    }
+    
+    if (creativeMetrics.length > 0) {
+      console.log(`Saving ${creativeMetrics.length} creative daily metrics...`);
+      await saveCreativeDailyMetrics(accountId, creativeMetrics);
+    }
+    
+    await updateAuditAccountSyncStatus(accountId, 'completed');
+    console.log(`=== Audit sync completed for account ${accountId} ===\n`);
+    
+    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length };
+    
+  } catch (err: any) {
+    console.error(`Audit sync error for account ${accountId}:`, err.message);
+    await updateAuditAccountSyncStatus(accountId, 'error', err.message);
+    throw err;
+  }
+}
+
+// Start audit (opt-in and sync)
+app.post('/api/audit/start/:accountId', requireAuth, async (req, res) => {
+  try {
+    const sessionId = (req as any).sessionId;
+    const { accountId } = req.params;
+    const { accountName } = req.body;
+    
+    // Opt in the account
+    await optInAuditAccount(accountId, accountName || `Account ${accountId}`);
+    
+    res.json({ status: 'started', message: 'Audit sync started' });
+    
+    // Run sync in background
+    runAuditSync(sessionId, accountId, accountName || `Account ${accountId}`)
+      .catch(err => console.error('Background sync error:', err.message));
+      
+  } catch (err: any) {
+    console.error('Audit start error:', err.message);
+    res.status(500).json({ error: 'Failed to start audit' });
+  }
+});
+
+// Refresh/resync audit data
+app.post('/api/audit/refresh/:accountId', requireAuth, async (req, res) => {
+  try {
+    const sessionId = (req as any).sessionId;
+    const { accountId } = req.params;
+    
+    const auditAccount = await getAuditAccount(accountId);
+    if (!auditAccount) {
+      return res.status(400).json({ error: 'Account not opted into audit' });
+    }
+    
+    res.json({ status: 'started', message: 'Audit refresh started' });
+    
+    // Run sync in background
+    runAuditSync(sessionId, accountId, auditAccount.account_name)
+      .catch(err => console.error('Background refresh error:', err.message));
+      
+  } catch (err: any) {
+    console.error('Audit refresh error:', err.message);
+    res.status(500).json({ error: 'Failed to refresh audit' });
+  }
+});
+
+// Get stored audit analytics data
+app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const { startDate, endDate } = req.query;
+    
+    const auditAccount = await getAuditAccount(accountId);
+    if (!auditAccount) {
+      return res.status(404).json({ error: 'Account not opted into audit' });
+    }
+    
+    // Default to last 90 days
+    const end = endDate ? new Date(endDate as string) : new Date();
+    const start = startDate ? new Date(startDate as string) : new Date(end.getFullYear(), end.getMonth() - 3, 1);
+    
+    const [campaignMetrics, creativeMetrics] = await Promise.all([
+      getCampaignDailyMetrics(accountId, start, end),
+      getCreativeDailyMetrics(accountId, start, end)
+    ]);
+    
+    // Aggregate metrics by campaign and month for the dashboard
+    const campaignsByMonth = new Map<string, Map<string, any>>();
+    const creativesByMonth = new Map<string, Map<string, any>>();
+    
+    for (const m of campaignMetrics) {
+      const monthKey = `${m.metric_date.getFullYear()}-${String(m.metric_date.getMonth() + 1).padStart(2, '0')}`;
+      if (!campaignsByMonth.has(monthKey)) {
+        campaignsByMonth.set(monthKey, new Map());
+      }
+      const monthMap = campaignsByMonth.get(monthKey)!;
+      
+      if (!monthMap.has(m.campaign_id)) {
+        monthMap.set(m.campaign_id, {
+          campaignId: m.campaign_id,
+          campaignName: m.campaign_name,
+          campaignGroupId: m.campaign_group_id,
+          campaignStatus: m.campaign_status,
+          impressions: 0,
+          clicks: 0,
+          spend: 0,
+          conversions: 0,
+          videoViews: 0,
+          leads: 0
+        });
+      }
+      
+      const agg = monthMap.get(m.campaign_id)!;
+      agg.impressions += parseInt(m.impressions) || 0;
+      agg.clicks += parseInt(m.clicks) || 0;
+      agg.spend += parseFloat(m.spend) || 0;
+      agg.conversions += parseInt(m.conversions) || 0;
+      agg.videoViews += parseInt(m.video_views) || 0;
+      agg.leads += parseInt(m.leads) || 0;
+    }
+    
+    for (const m of creativeMetrics) {
+      const monthKey = `${m.metric_date.getFullYear()}-${String(m.metric_date.getMonth() + 1).padStart(2, '0')}`;
+      if (!creativesByMonth.has(monthKey)) {
+        creativesByMonth.set(monthKey, new Map());
+      }
+      const monthMap = creativesByMonth.get(monthKey)!;
+      
+      if (!monthMap.has(m.creative_id)) {
+        monthMap.set(m.creative_id, {
+          creativeId: m.creative_id,
+          creativeName: m.creative_name,
+          campaignId: m.campaign_id,
+          creativeStatus: m.creative_status,
+          creativeType: m.creative_type,
+          previewUrl: m.preview_url,
+          impressions: 0,
+          clicks: 0,
+          spend: 0,
+          conversions: 0,
+          videoViews: 0,
+          leads: 0
+        });
+      }
+      
+      const agg = monthMap.get(m.creative_id)!;
+      agg.impressions += parseInt(m.impressions) || 0;
+      agg.clicks += parseInt(m.clicks) || 0;
+      agg.spend += parseFloat(m.spend) || 0;
+      agg.conversions += parseInt(m.conversions) || 0;
+      agg.videoViews += parseInt(m.video_views) || 0;
+      agg.leads += parseInt(m.leads) || 0;
+    }
+    
+    // Convert to response format
+    const months = Array.from(campaignsByMonth.keys()).sort().reverse();
+    const currentMonth = months[0];
+    const previousMonth = months[1];
+    
+    const campaigns = currentMonth ? Array.from(campaignsByMonth.get(currentMonth)!.values()).map(c => {
+      const prev = previousMonth ? campaignsByMonth.get(previousMonth)?.get(c.campaignId) : null;
+      const currentCtr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
+      const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
+      
+      return {
+        ...c,
+        ctr: currentCtr,
+        previousMonth: prev || { impressions: 0, clicks: 0, spend: 0, conversions: 0, videoViews: 0, leads: 0 },
+        previousCtr: prevCtr,
+        ctrChange: prevCtr > 0 ? ((currentCtr - prevCtr) / prevCtr) * 100 : 0
+      };
+    }) : [];
+    
+    const creatives = currentMonth ? Array.from(creativesByMonth.get(currentMonth)!.values()).map(c => {
+      const prev = previousMonth ? creativesByMonth.get(previousMonth)?.get(c.creativeId) : null;
+      const currentCtr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
+      const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
+      
+      return {
+        ...c,
+        ctr: currentCtr,
+        previousMonth: prev || { impressions: 0, clicks: 0, spend: 0, conversions: 0, videoViews: 0, leads: 0 },
+        previousCtr: prevCtr,
+        ctrChange: prevCtr > 0 ? ((currentCtr - prevCtr) / prevCtr) * 100 : 0
+      };
+    }) : [];
+    
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    
+    res.json({
+      account: auditAccount,
+      currentMonthLabel: currentMonth ? `${monthNames[parseInt(currentMonth.split('-')[1]) - 1]} ${currentMonth.split('-')[0]}` : '',
+      previousMonthLabel: previousMonth ? `${monthNames[parseInt(previousMonth.split('-')[1]) - 1]} ${previousMonth.split('-')[0]}` : '',
+      campaigns,
+      creatives,
+      rawCampaignMetrics: campaignMetrics,
+      rawCreativeMetrics: creativeMetrics
+    });
+    
+  } catch (err: any) {
+    console.error('Audit data error:', err.message);
+    res.status(500).json({ error: 'Failed to get audit data' });
+  }
+});
+
+// Remove account from audit
+app.delete('/api/audit/account/:accountId', requireAuth, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    await removeAuditAccount(accountId);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Audit remove error:', err.message);
+    res.status(500).json({ error: 'Failed to remove audit account' });
+  }
+});
+
+// Nightly sync job for all opted-in accounts
+async function runNightlyAuditSync() {
+  console.log('\n=== Running nightly audit sync ===');
+  
+  const accounts = await getOptedInAccounts();
+  console.log(`Found ${accounts.length} opted-in accounts`);
+  
+  for (const account of accounts) {
+    // We need a valid session to make API calls
+    // For nightly sync, we'd need to store refresh tokens or use a service account
+    // For now, this is a placeholder - nightly sync would require stored credentials
+    console.log(`Would sync account ${account.account_id} (${account.account_name})`);
+    
+    // Add 2 second delay between accounts
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  
+  console.log('=== Nightly sync complete ===\n');
+}
+
+// ========== END AUDIT SYNC ENDPOINTS ==========
 
 app.post('/api/linkedin/ideate', async (req, res) => {
   try {

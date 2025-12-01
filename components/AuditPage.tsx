@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { 
   TrendingUp, 
@@ -12,7 +12,13 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronRight,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Play,
+  Database,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  BarChart3
 } from 'lucide-react';
 
 interface AuditPageProps {
@@ -22,58 +28,63 @@ interface AuditPageProps {
   onNavigateToCampaign?: (campaignId: string) => void;
 }
 
+interface AuditAccountStatus {
+  optedIn: boolean;
+  accountId?: string;
+  accountName?: string;
+  optedInAt?: string;
+  lastSyncAt?: string;
+  syncStatus?: 'pending' | 'syncing' | 'completed' | 'error';
+  syncError?: string;
+  autoSyncEnabled?: boolean;
+  latestDataDate?: string;
+}
+
 interface CampaignMetrics {
   campaignId: string;
   campaignName: string;
-  currentMonth: {
-    impressions: number;
-    clicks: number;
-    ctr: number;
-    spend: number;
-  };
+  campaignGroupId?: string;
+  campaignStatus?: string;
+  impressions: number;
+  clicks: number;
+  spend: number;
+  ctr: number;
   previousMonth: {
     impressions: number;
     clicks: number;
-    ctr: number;
     spend: number;
   };
+  previousCtr: number;
   ctrChange: number;
   isUnderperforming: boolean;
 }
 
-interface AdMetrics {
-  adId: string;
-  adName: string;
-  adType: string;
+interface CreativeMetrics {
+  creativeId: string;
+  creativeName: string;
   campaignId: string;
-  campaignName: string;
-  currentMonth: {
-    impressions: number;
-    clicks: number;
-    ctr: number;
-  };
+  creativeStatus?: string;
+  creativeType?: string;
+  impressions: number;
+  clicks: number;
+  spend: number;
+  ctr: number;
   previousMonth: {
     impressions: number;
     clicks: number;
-    ctr: number;
+    spend: number;
   };
+  previousCtr: number;
   ctrChange: number;
   isUnderperforming: boolean;
-  previewUrl?: string;
 }
 
-interface AnalyticsData {
+interface AuditData {
   campaigns: CampaignMetrics[];
-  ads: AdMetrics[];
+  creatives: CreativeMetrics[];
   currentMonthLabel: string;
   previousMonthLabel: string;
-  accountSummary: {
-    currentCtr: number;
-    previousCtr: number;
-    ctrChange: number;
-    totalImpressions: number;
-    totalClicks: number;
-  };
+  account: AuditAccountStatus;
 }
 
 const CTR_THRESHOLD = 0.4;
@@ -92,6 +103,17 @@ function formatCtr(ctr: number): string {
 function formatChange(change: number): string {
   const sign = change > 0 ? '+' : '';
   return `${sign}${change.toFixed(1)}%`;
+}
+
+function formatDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('en-GB', { 
+    day: 'numeric', 
+    month: 'short', 
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 }
 
 function ChangeIndicator({ change, isUnderperforming }: { change: number; isUnderperforming: boolean }) {
@@ -121,32 +143,30 @@ function ChangeIndicator({ change, isUnderperforming }: { change: number; isUnde
   );
 }
 
-function AdPreviewCard({ ad, accountId }: { ad: AdMetrics; accountId: string }) {
+function AdPreviewCard({ creative, accountId }: { creative: CreativeMetrics; accountId: string }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
 
   useEffect(() => {
     const loadPreview = async () => {
       try {
         setLoading(true);
-        const response = await axios.get(`/api/linkedin/account/${accountId}/ad-preview/${ad.adId}`);
+        const response = await axios.get(`/api/linkedin/account/${accountId}/ad-preview/${creative.creativeId}`);
         if (response.data?.previewUrl) {
           setPreviewUrl(response.data.previewUrl);
         }
       } catch (err) {
-        setError(true);
       } finally {
         setLoading(false);
       }
     };
     
     loadPreview();
-  }, [ad.adId, accountId]);
+  }, [creative.creativeId, accountId]);
 
   return (
-    <div className={`bg-white rounded-lg border-2 ${ad.isUnderperforming ? 'border-red-300 ring-2 ring-red-100' : 'border-gray-200'} overflow-hidden`}>
-      {ad.isUnderperforming && (
+    <div className={`bg-white rounded-lg border-2 ${creative.isUnderperforming ? 'border-red-300 ring-2 ring-red-100' : 'border-gray-200'} overflow-hidden`}>
+      {creative.isUnderperforming && (
         <div className="bg-red-50 px-3 py-2 flex items-center gap-2 border-b border-red-200">
           <AlertTriangle className="w-4 h-4 text-red-500" />
           <span className="text-xs font-medium text-red-700">Consider replacing - Low CTR</span>
@@ -162,7 +182,7 @@ function AdPreviewCard({ ad, accountId }: { ad: AdMetrics; accountId: string }) 
           <iframe 
             src={previewUrl} 
             className="w-full h-full border-0"
-            title={`Ad Preview: ${ad.adName}`}
+            title={`Ad Preview: ${creative.creativeName}`}
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
@@ -175,11 +195,11 @@ function AdPreviewCard({ ad, accountId }: { ad: AdMetrics; accountId: string }) 
       <div className="p-3">
         <div className="flex items-start justify-between mb-2">
           <div className="flex-1 min-w-0">
-            <h4 className="text-sm font-medium text-gray-900 truncate">{ad.adName || `Ad ${ad.adId}`}</h4>
-            <p className="text-xs text-gray-500 truncate">{ad.campaignName}</p>
+            <h4 className="text-sm font-medium text-gray-900 truncate">{creative.creativeName || `Ad ${creative.creativeId}`}</h4>
+            <p className="text-xs text-gray-500 truncate">Campaign {creative.campaignId}</p>
           </div>
           <span className="text-xs px-2 py-0.5 bg-gray-100 rounded text-gray-600 ml-2 flex-shrink-0">
-            {ad.adType}
+            {creative.creativeType || 'Ad'}
           </span>
         </div>
         
@@ -188,22 +208,22 @@ function AdPreviewCard({ ad, accountId }: { ad: AdMetrics; accountId: string }) 
             <div className="flex items-center justify-center gap-1 text-gray-500 mb-1">
               <Eye className="w-3 h-3" />
             </div>
-            <p className="text-sm font-medium text-gray-900">{formatNumber(ad.currentMonth.impressions)}</p>
+            <p className="text-sm font-medium text-gray-900">{formatNumber(creative.impressions)}</p>
             <p className="text-xs text-gray-500">Impressions</p>
           </div>
           <div>
             <div className="flex items-center justify-center gap-1 text-gray-500 mb-1">
               <MousePointerClick className="w-3 h-3" />
             </div>
-            <p className="text-sm font-medium text-gray-900">{formatNumber(ad.currentMonth.clicks)}</p>
+            <p className="text-sm font-medium text-gray-900">{formatNumber(creative.clicks)}</p>
             <p className="text-xs text-gray-500">Clicks</p>
           </div>
           <div>
             <div className="flex items-center justify-center gap-1 text-gray-500 mb-1">
               <Percent className="w-3 h-3" />
             </div>
-            <p className={`text-sm font-medium ${ad.isUnderperforming ? 'text-red-600' : 'text-gray-900'}`}>
-              {formatCtr(ad.currentMonth.ctr)}
+            <p className={`text-sm font-medium ${creative.isUnderperforming ? 'text-red-600' : 'text-gray-900'}`}>
+              {formatCtr(creative.ctr)}
             </p>
             <p className="text-xs text-gray-500">CTR</p>
           </div>
@@ -211,30 +231,18 @@ function AdPreviewCard({ ad, accountId }: { ad: AdMetrics; accountId: string }) 
         
         <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-between">
           <span className="text-xs text-gray-500">vs last month</span>
-          <ChangeIndicator change={ad.ctrChange} isUnderperforming={ad.isUnderperforming} />
+          <ChangeIndicator change={creative.ctrChange} isUnderperforming={creative.isUnderperforming} />
         </div>
       </div>
     </div>
   );
 }
 
-function CampaignRow({ campaign, isExpanded, onToggle }: { 
-  campaign: CampaignMetrics; 
-  isExpanded: boolean;
-  onToggle: () => void;
-}) {
+function CampaignRow({ campaign }: { campaign: CampaignMetrics }) {
   return (
-    <tr 
-      className={`${campaign.isUnderperforming ? 'bg-red-50' : 'hover:bg-gray-50'} cursor-pointer`}
-      onClick={onToggle}
-    >
+    <tr className={`${campaign.isUnderperforming ? 'bg-red-50' : 'hover:bg-gray-50'}`}>
       <td className="px-4 py-3">
         <div className="flex items-center gap-2">
-          {isExpanded ? (
-            <ChevronDown className="w-4 h-4 text-gray-400" />
-          ) : (
-            <ChevronRight className="w-4 h-4 text-gray-400" />
-          )}
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-gray-900 truncate">{campaign.campaignName}</p>
             {campaign.isUnderperforming && (
@@ -247,18 +255,18 @@ function CampaignRow({ campaign, isExpanded, onToggle }: {
         </div>
       </td>
       <td className="px-4 py-3 text-right">
-        <p className="text-sm text-gray-900">{formatNumber(campaign.currentMonth.impressions)}</p>
+        <p className="text-sm text-gray-900">{formatNumber(campaign.impressions)}</p>
         <p className="text-xs text-gray-500">{formatNumber(campaign.previousMonth.impressions)}</p>
       </td>
       <td className="px-4 py-3 text-right">
-        <p className="text-sm text-gray-900">{formatNumber(campaign.currentMonth.clicks)}</p>
+        <p className="text-sm text-gray-900">{formatNumber(campaign.clicks)}</p>
         <p className="text-xs text-gray-500">{formatNumber(campaign.previousMonth.clicks)}</p>
       </td>
       <td className="px-4 py-3 text-right">
         <p className={`text-sm font-medium ${campaign.isUnderperforming ? 'text-red-600' : 'text-gray-900'}`}>
-          {formatCtr(campaign.currentMonth.ctr)}
+          {formatCtr(campaign.ctr)}
         </p>
-        <p className="text-xs text-gray-500">{formatCtr(campaign.previousMonth.ctr)}</p>
+        <p className="text-xs text-gray-500">{formatCtr(campaign.previousCtr)}</p>
       </td>
       <td className="px-4 py-3 text-right">
         <ChangeIndicator change={campaign.ctrChange} isUnderperforming={campaign.isUnderperforming} />
@@ -267,181 +275,274 @@ function CampaignRow({ campaign, isExpanded, onToggle }: {
   );
 }
 
-export default function AuditPage({ accountId, accountName, isLiveData, onNavigateToCampaign }: AuditPageProps) {
-  const [data, setData] = useState<AnalyticsData | null>(null);
+function StartAuditView({ accountId, accountName, onStart, isStarting }: { 
+  accountId: string; 
+  accountName: string; 
+  onStart: () => void;
+  isStarting: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-center h-full">
+      <div className="text-center max-w-md">
+        <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
+          <BarChart3 className="w-8 h-8 text-blue-600" />
+        </div>
+        <h2 className="text-2xl font-bold text-gray-900 mb-3">Start Account Audit</h2>
+        <p className="text-gray-600 mb-6">
+          Enable auditing for <span className="font-medium">{accountName}</span> to track CTR performance, 
+          identify underperforming ads, and store historical data for trend analysis.
+        </p>
+        
+        <div className="bg-gray-50 rounded-lg p-4 mb-6 text-left">
+          <h4 className="font-medium text-gray-900 mb-3">What happens when you start:</h4>
+          <ul className="space-y-2 text-sm text-gray-600">
+            <li className="flex items-start gap-2">
+              <Database className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+              <span>Campaign and ad performance data is synced and stored</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Clock className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+              <span>Historical data is saved for month-over-month comparisons</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+              <span>Underperforming ads are highlighted automatically</span>
+            </li>
+          </ul>
+        </div>
+        
+        <button
+          onClick={onStart}
+          disabled={isStarting}
+          className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+        >
+          {isStarting ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Starting Audit...
+            </>
+          ) : (
+            <>
+              <Play className="w-5 h-5" />
+              Start Audit
+            </>
+          )}
+        </button>
+        
+        <p className="text-xs text-gray-500 mt-4">
+          Only this account will be audited. You can stop at any time.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SyncStatusBanner({ status, lastSync, onRefresh, isRefreshing }: {
+  status: AuditAccountStatus;
+  lastSync?: string;
+  onRefresh: () => void;
+  isRefreshing: boolean;
+}) {
+  const isSyncing = status.syncStatus === 'syncing' || status.syncStatus === 'pending';
+  const hasError = status.syncStatus === 'error';
+  
+  return (
+    <div className={`rounded-lg p-3 mb-4 flex items-center justify-between ${
+      isSyncing ? 'bg-blue-50 border border-blue-200' :
+      hasError ? 'bg-red-50 border border-red-200' :
+      'bg-green-50 border border-green-200'
+    }`}>
+      <div className="flex items-center gap-3">
+        {isSyncing ? (
+          <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+        ) : hasError ? (
+          <XCircle className="w-5 h-5 text-red-600" />
+        ) : (
+          <CheckCircle2 className="w-5 h-5 text-green-600" />
+        )}
+        <div>
+          <p className={`text-sm font-medium ${
+            isSyncing ? 'text-blue-800' :
+            hasError ? 'text-red-800' :
+            'text-green-800'
+          }`}>
+            {isSyncing ? 'Syncing data from LinkedIn...' :
+             hasError ? 'Sync failed' :
+             'Data synced'}
+          </p>
+          {lastSync && !isSyncing && (
+            <p className="text-xs text-gray-600">
+              Last updated: {formatDate(lastSync)}
+            </p>
+          )}
+          {hasError && status.syncError && (
+            <p className="text-xs text-red-600">{status.syncError}</p>
+          )}
+        </div>
+      </div>
+      
+      <button
+        onClick={onRefresh}
+        disabled={isSyncing || isRefreshing}
+        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+        Refresh
+      </button>
+    </div>
+  );
+}
+
+export default function AuditPage({ accountId, accountName, isLiveData }: AuditPageProps) {
+  const [auditStatus, setAuditStatus] = useState<AuditAccountStatus | null>(null);
+  const [data, setData] = useState<AuditData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isStarting, setIsStarting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expandedCampaigns, setExpandedCampaigns] = useState<Set<string>>(new Set());
   const [showOnlyUnderperforming, setShowOnlyUnderperforming] = useState(false);
 
-  const fetchAnalytics = async () => {
-    if (!isLiveData || !accountId) {
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
+  const checkAuditStatus = useCallback(async () => {
+    if (!accountId) return;
+    
     try {
-      const [analyticsRes, hierarchyRes] = await Promise.all([
-        axios.get(`/api/linkedin/account/${accountId}/analytics`),
-        axios.get(`/api/linkedin/account/${accountId}/hierarchy?activeOnly=true`)
-      ]);
+      const response = await axios.get(`/api/audit/account/${accountId}`);
+      setAuditStatus(response.data);
+      return response.data;
+    } catch (err) {
+      console.error('Failed to check audit status:', err);
+      return null;
+    }
+  }, [accountId]);
 
-      const analytics = analyticsRes.data;
-      const hierarchy = hierarchyRes.data;
-
-      const campaignMap = new Map<string, any>();
-      const creativeMap = new Map<string, any>();
+  const fetchAuditData = useCallback(async () => {
+    if (!accountId) return;
+    
+    try {
+      const response = await axios.get(`/api/audit/data/${accountId}`);
+      const rawData = response.data;
       
-      hierarchy.campaigns?.forEach((c: any) => {
-        campaignMap.set(String(c.id), c);
-      });
-      
-      hierarchy.creatives?.forEach((c: any) => {
-        const campaignUrn = c.campaign;
-        const campaignId = campaignUrn?.split(':').pop() || '';
-        creativeMap.set(String(c.id), {
-          ...c,
-          campaignId,
-          campaignName: campaignMap.get(campaignId)?.name || `Campaign ${campaignId}`
-        });
-      });
-
-      const campaigns: CampaignMetrics[] = (analytics.campaigns || []).map((c: any) => {
-        const currentCtr = c.currentMonth.impressions > 0 
-          ? (c.currentMonth.clicks / c.currentMonth.impressions) * 100 
-          : 0;
-        const previousCtr = c.previousMonth.impressions > 0 
-          ? (c.previousMonth.clicks / c.previousMonth.impressions) * 100 
-          : 0;
-        const ctrChange = previousCtr > 0 
-          ? ((currentCtr - previousCtr) / previousCtr) * 100 
-          : 0;
-        
-        const isUnderperforming = currentCtr < CTR_THRESHOLD || ctrChange < CTR_DROP_THRESHOLD;
-        const campaignInfo = campaignMap.get(c.campaignId);
-
+      const campaigns: CampaignMetrics[] = (rawData.campaigns || []).map((c: any) => {
+        const isUnderperforming = c.ctr < CTR_THRESHOLD || c.ctrChange < CTR_DROP_THRESHOLD;
         return {
           campaignId: c.campaignId,
-          campaignName: campaignInfo?.name || c.campaignName || `Campaign ${c.campaignId}`,
-          currentMonth: {
-            impressions: c.currentMonth.impressions || 0,
-            clicks: c.currentMonth.clicks || 0,
-            ctr: currentCtr,
-            spend: c.currentMonth.costInLocalCurrency || 0
-          },
-          previousMonth: {
-            impressions: c.previousMonth.impressions || 0,
-            clicks: c.previousMonth.clicks || 0,
-            ctr: previousCtr,
-            spend: c.previousMonth.costInLocalCurrency || 0
-          },
-          ctrChange,
+          campaignName: c.campaignName || `Campaign ${c.campaignId}`,
+          campaignGroupId: c.campaignGroupId,
+          campaignStatus: c.campaignStatus,
+          impressions: c.impressions || 0,
+          clicks: c.clicks || 0,
+          spend: c.spend || 0,
+          ctr: c.ctr || 0,
+          previousMonth: c.previousMonth || { impressions: 0, clicks: 0, spend: 0 },
+          previousCtr: c.previousCtr || 0,
+          ctrChange: c.ctrChange || 0,
           isUnderperforming
         };
-      });
-
-      const ads: AdMetrics[] = [];
-      creativeMap.forEach((creative, adId) => {
-        const campaignMetrics = campaigns.find(c => c.campaignId === creative.campaignId);
-        if (campaignMetrics) {
-          const impressionShare = campaignMetrics.currentMonth.impressions > 0 ? 0.3 : 0;
-          const estimatedImpressions = Math.floor(campaignMetrics.currentMonth.impressions * impressionShare);
-          const estimatedClicks = Math.floor(campaignMetrics.currentMonth.clicks * impressionShare);
-          const ctr = estimatedImpressions > 0 ? (estimatedClicks / estimatedImpressions) * 100 : 0;
-          
-          const prevImpressions = Math.floor(campaignMetrics.previousMonth.impressions * impressionShare);
-          const prevClicks = Math.floor(campaignMetrics.previousMonth.clicks * impressionShare);
-          const prevCtr = prevImpressions > 0 ? (prevClicks / prevImpressions) * 100 : 0;
-          
-          const ctrChange = prevCtr > 0 ? ((ctr - prevCtr) / prevCtr) * 100 : 0;
-          
-          let adType = 'UNKNOWN';
-          if (creative.type) {
-            adType = creative.type.replace('AD_', '').replace(/_/g, ' ');
-          } else if (creative.content?.reference) {
-            if (creative.content.reference.includes('video')) adType = 'VIDEO';
-            else if (creative.content.reference.includes('image')) adType = 'IMAGE';
-          }
-          
-          ads.push({
-            adId,
-            adName: creative.name || `Ad ${adId}`,
-            adType,
-            campaignId: creative.campaignId,
-            campaignName: creative.campaignName,
-            currentMonth: {
-              impressions: estimatedImpressions,
-              clicks: estimatedClicks,
-              ctr
-            },
-            previousMonth: {
-              impressions: prevImpressions,
-              clicks: prevClicks,
-              ctr: prevCtr
-            },
-            ctrChange,
-            isUnderperforming: ctr < CTR_THRESHOLD || ctrChange < CTR_DROP_THRESHOLD
-          });
+      }).sort((a: CampaignMetrics, b: CampaignMetrics) => {
+        if (a.isUnderperforming !== b.isUnderperforming) {
+          return a.isUnderperforming ? -1 : 1;
         }
+        return b.impressions - a.impressions;
       });
-
-      const totalCurrentImpressions = campaigns.reduce((sum, c) => sum + c.currentMonth.impressions, 0);
-      const totalCurrentClicks = campaigns.reduce((sum, c) => sum + c.currentMonth.clicks, 0);
-      const totalPrevImpressions = campaigns.reduce((sum, c) => sum + c.previousMonth.impressions, 0);
-      const totalPrevClicks = campaigns.reduce((sum, c) => sum + c.previousMonth.clicks, 0);
       
-      const currentCtr = totalCurrentImpressions > 0 ? (totalCurrentClicks / totalCurrentImpressions) * 100 : 0;
-      const previousCtr = totalPrevImpressions > 0 ? (totalPrevClicks / totalPrevImpressions) * 100 : 0;
-      const ctrChange = previousCtr > 0 ? ((currentCtr - previousCtr) / previousCtr) * 100 : 0;
-
-      setData({
-        campaigns: campaigns.sort((a, b) => {
-          if (a.isUnderperforming !== b.isUnderperforming) {
-            return a.isUnderperforming ? -1 : 1;
-          }
-          return b.currentMonth.impressions - a.currentMonth.impressions;
-        }),
-        ads: ads.sort((a, b) => {
-          if (a.isUnderperforming !== b.isUnderperforming) {
-            return a.isUnderperforming ? -1 : 1;
-          }
-          return b.currentMonth.impressions - a.currentMonth.impressions;
-        }),
-        currentMonthLabel: analytics.currentMonthLabel || 'Current Month',
-        previousMonthLabel: analytics.previousMonthLabel || 'Previous Month',
-        accountSummary: {
-          currentCtr,
-          previousCtr,
-          ctrChange,
-          totalImpressions: totalCurrentImpressions,
-          totalClicks: totalCurrentClicks
+      const creatives: CreativeMetrics[] = (rawData.creatives || []).map((c: any) => {
+        const isUnderperforming = c.ctr < CTR_THRESHOLD || c.ctrChange < CTR_DROP_THRESHOLD;
+        return {
+          creativeId: c.creativeId,
+          creativeName: c.creativeName || `Creative ${c.creativeId}`,
+          campaignId: c.campaignId,
+          creativeStatus: c.creativeStatus,
+          creativeType: c.creativeType,
+          impressions: c.impressions || 0,
+          clicks: c.clicks || 0,
+          spend: c.spend || 0,
+          ctr: c.ctr || 0,
+          previousMonth: c.previousMonth || { impressions: 0, clicks: 0, spend: 0 },
+          previousCtr: c.previousCtr || 0,
+          ctrChange: c.ctrChange || 0,
+          isUnderperforming
+        };
+      }).sort((a: CreativeMetrics, b: CreativeMetrics) => {
+        if (a.isUnderperforming !== b.isUnderperforming) {
+          return a.isUnderperforming ? -1 : 1;
         }
+        return b.impressions - a.impressions;
       });
+      
+      setData({
+        campaigns,
+        creatives,
+        currentMonthLabel: rawData.currentMonthLabel || 'Current Month',
+        previousMonthLabel: rawData.previousMonthLabel || 'Previous Month',
+        account: rawData.account
+      });
+      
     } catch (err: any) {
-      console.error('Failed to fetch analytics:', err);
-      setError('Failed to load performance data');
-    } finally {
+      if (err.response?.status !== 404) {
+        console.error('Failed to fetch audit data:', err);
+        setError('Failed to load audit data');
+      }
+    }
+  }, [accountId]);
+
+  const initialize = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    
+    const status = await checkAuditStatus();
+    
+    if (status?.optedIn && status?.syncStatus === 'completed') {
+      await fetchAuditData();
+    }
+    
+    setLoading(false);
+  }, [checkAuditStatus, fetchAuditData]);
+
+  useEffect(() => {
+    if (isLiveData && accountId) {
+      initialize();
+    } else {
       setLoading(false);
+    }
+  }, [accountId, isLiveData, initialize]);
+
+  useEffect(() => {
+    if (!auditStatus?.optedIn) return;
+    if (auditStatus.syncStatus !== 'syncing' && auditStatus.syncStatus !== 'pending') return;
+    
+    const interval = setInterval(async () => {
+      const status = await checkAuditStatus();
+      if (status?.syncStatus === 'completed') {
+        await fetchAuditData();
+      }
+    }, 3000);
+    
+    return () => clearInterval(interval);
+  }, [auditStatus, checkAuditStatus, fetchAuditData]);
+
+  const handleStartAudit = async () => {
+    setIsStarting(true);
+    try {
+      await axios.post(`/api/audit/start/${accountId}`, { accountName });
+      await checkAuditStatus();
+    } catch (err) {
+      console.error('Failed to start audit:', err);
+      setError('Failed to start audit');
+    } finally {
+      setIsStarting(false);
     }
   };
 
-  useEffect(() => {
-    fetchAnalytics();
-  }, [accountId, isLiveData]);
-
-  const toggleCampaign = (campaignId: string) => {
-    setExpandedCampaigns(prev => {
-      const next = new Set(prev);
-      if (next.has(campaignId)) {
-        next.delete(campaignId);
-      } else {
-        next.add(campaignId);
-      }
-      return next;
-    });
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await axios.post(`/api/audit/refresh/${accountId}`);
+      await checkAuditStatus();
+    } catch (err) {
+      console.error('Failed to refresh:', err);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   if (!isLiveData) {
@@ -449,8 +550,8 @@ export default function AuditPage({ accountId, accountName, isLiveData, onNaviga
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
           <AlertTriangle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Connect LinkedIn to View Performance</h3>
-          <p className="text-gray-500">Login to see CTR stats and ad performance for your account.</p>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Connect LinkedIn to View Audit</h3>
+          <p className="text-gray-500">Login to enable account auditing and performance tracking.</p>
         </div>
       </div>
     );
@@ -461,7 +562,37 @@ export default function AuditPage({ accountId, accountName, isLiveData, onNaviga
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
           <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-4" />
-          <p className="text-gray-500">Loading performance data...</p>
+          <p className="text-gray-500">Loading audit status...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!auditStatus?.optedIn) {
+    return (
+      <StartAuditView 
+        accountId={accountId}
+        accountName={accountName}
+        onStart={handleStartAudit}
+        isStarting={isStarting}
+      />
+    );
+  }
+
+  const isSyncing = auditStatus.syncStatus === 'syncing' || auditStatus.syncStatus === 'pending';
+
+  if (isSyncing && (!data || data.campaigns.length === 0)) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 text-blue-500 animate-spin mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Syncing Account Data</h3>
+          <p className="text-gray-500 mb-2">
+            Fetching campaigns, ads, and performance metrics from LinkedIn...
+          </p>
+          <p className="text-xs text-gray-400">
+            This may take a minute for large accounts
+          </p>
         </div>
       </div>
     );
@@ -472,10 +603,10 @@ export default function AuditPage({ accountId, accountName, isLiveData, onNaviga
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
           <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Failed to Load Data</h3>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Failed to Load Audit Data</h3>
           <p className="text-gray-500 mb-4">{error}</p>
           <button 
-            onClick={fetchAnalytics}
+            onClick={handleRefresh}
             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
           >
             <RefreshCw className="w-4 h-4" />
@@ -488,27 +619,49 @@ export default function AuditPage({ accountId, accountName, isLiveData, onNaviga
 
   if (!data || data.campaigns.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center">
-          <Eye className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No Performance Data</h3>
-          <p className="text-gray-500">No campaign data available for this account.</p>
+      <div className="p-6">
+        <SyncStatusBanner 
+          status={auditStatus}
+          lastSync={auditStatus.lastSyncAt}
+          onRefresh={handleRefresh}
+          isRefreshing={isRefreshing}
+        />
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <Eye className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No Performance Data Yet</h3>
+            <p className="text-gray-500">
+              Data will appear here after campaigns generate impressions.
+            </p>
+          </div>
         </div>
       </div>
     );
   }
 
   const underperformingCampaigns = data.campaigns.filter(c => c.isUnderperforming);
-  const underperformingAds = data.ads.filter(a => a.isUnderperforming);
-  const filteredCampaigns = showOnlyUnderperforming 
-    ? underperformingCampaigns 
-    : data.campaigns;
-  const filteredAds = showOnlyUnderperforming 
-    ? underperformingAds 
-    : data.ads;
+  const underperformingCreatives = data.creatives.filter(c => c.isUnderperforming);
+  const filteredCampaigns = showOnlyUnderperforming ? underperformingCampaigns : data.campaigns;
+  const filteredCreatives = showOnlyUnderperforming ? underperformingCreatives : data.creatives;
+
+  const totalImpressions = data.campaigns.reduce((sum, c) => sum + c.impressions, 0);
+  const totalClicks = data.campaigns.reduce((sum, c) => sum + c.clicks, 0);
+  const accountCtr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
+  
+  const totalPrevImpressions = data.campaigns.reduce((sum, c) => sum + c.previousMonth.impressions, 0);
+  const totalPrevClicks = data.campaigns.reduce((sum, c) => sum + c.previousMonth.clicks, 0);
+  const prevAccountCtr = totalPrevImpressions > 0 ? (totalPrevClicks / totalPrevImpressions) * 100 : 0;
+  const accountCtrChange = prevAccountCtr > 0 ? ((accountCtr - prevAccountCtr) / prevAccountCtr) * 100 : 0;
 
   return (
-    <div className="h-full overflow-auto">
+    <div className="h-full overflow-auto p-6">
+      <SyncStatusBanner 
+        status={auditStatus}
+        lastSync={auditStatus.lastSyncAt}
+        onRefresh={handleRefresh}
+        isRefreshing={isRefreshing}
+      />
+      
       <div className="space-y-6 pb-8">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-white rounded-lg border border-gray-200 p-4">
@@ -517,7 +670,7 @@ export default function AuditPage({ accountId, accountName, isLiveData, onNaviga
               <span className="text-sm">Total Impressions</span>
             </div>
             <p className="text-2xl font-bold text-gray-900">
-              {formatNumber(data.accountSummary.totalImpressions)}
+              {formatNumber(totalImpressions)}
             </p>
             <p className="text-xs text-gray-500 mt-1">{data.currentMonthLabel}</p>
           </div>
@@ -528,7 +681,7 @@ export default function AuditPage({ accountId, accountName, isLiveData, onNaviga
               <span className="text-sm">Total Clicks</span>
             </div>
             <p className="text-2xl font-bold text-gray-900">
-              {formatNumber(data.accountSummary.totalClicks)}
+              {formatNumber(totalClicks)}
             </p>
             <p className="text-xs text-gray-500 mt-1">{data.currentMonthLabel}</p>
           </div>
@@ -539,23 +692,23 @@ export default function AuditPage({ accountId, accountName, isLiveData, onNaviga
               <span className="text-sm">Account CTR</span>
             </div>
             <p className="text-2xl font-bold text-gray-900">
-              {formatCtr(data.accountSummary.currentCtr)}
+              {formatCtr(accountCtr)}
             </p>
             <div className="mt-1">
-              <ChangeIndicator change={data.accountSummary.ctrChange} isUnderperforming={false} />
+              <ChangeIndicator change={accountCtrChange} isUnderperforming={false} />
             </div>
           </div>
           
-          <div className={`rounded-lg border-2 p-4 ${underperformingAds.length > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
+          <div className={`rounded-lg border-2 p-4 ${underperformingCreatives.length > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
             <div className="flex items-center gap-2 mb-2">
-              <AlertTriangle className={`w-4 h-4 ${underperformingAds.length > 0 ? 'text-red-500' : 'text-green-500'}`} />
+              <AlertTriangle className={`w-4 h-4 ${underperformingCreatives.length > 0 ? 'text-red-500' : 'text-green-500'}`} />
               <span className="text-sm text-gray-700">Ads to Review</span>
             </div>
-            <p className={`text-2xl font-bold ${underperformingAds.length > 0 ? 'text-red-600' : 'text-green-600'}`}>
-              {underperformingAds.length}
+            <p className={`text-2xl font-bold ${underperformingCreatives.length > 0 ? 'text-red-600' : 'text-green-600'}`}>
+              {underperformingCreatives.length}
             </p>
             <p className="text-xs text-gray-600 mt-1">
-              {underperformingAds.length > 0 ? 'Need attention' : 'All performing well'}
+              {underperformingCreatives.length > 0 ? 'Need attention' : 'All performing well'}
             </p>
           </div>
         </div>
@@ -588,12 +741,7 @@ export default function AuditPage({ accountId, accountName, isLiveData, onNaviga
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredCampaigns.map(campaign => (
-                <CampaignRow
-                  key={campaign.campaignId}
-                  campaign={campaign}
-                  isExpanded={expandedCampaigns.has(campaign.campaignId)}
-                  onToggle={() => toggleCampaign(campaign.campaignId)}
-                />
+                <CampaignRow key={campaign.campaignId} campaign={campaign} />
               ))}
             </tbody>
           </table>
@@ -609,27 +757,21 @@ export default function AuditPage({ accountId, accountName, isLiveData, onNaviga
           <div>
             <h3 className="text-lg font-semibold text-gray-900">Ad Creative Performance</h3>
             <p className="text-sm text-gray-500">
-              Ads with CTR below {CTR_THRESHOLD}% or {Math.abs(CTR_DROP_THRESHOLD)}%+ decline are flagged for review
+              Ads with CTR below {CTR_THRESHOLD}% or more than {Math.abs(CTR_DROP_THRESHOLD)}% decline are highlighted
             </p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filteredAds.slice(0, 12).map(ad => (
-            <AdPreviewCard key={ad.adId} ad={ad} accountId={accountId} />
+          {filteredCreatives.map(creative => (
+            <AdPreviewCard key={creative.creativeId} creative={creative} accountId={accountId} />
           ))}
         </div>
         
-        {filteredAds.length === 0 && (
+        {filteredCreatives.length === 0 && (
           <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">
             No {showOnlyUnderperforming ? 'underperforming ' : ''}ads found
           </div>
-        )}
-        
-        {filteredAds.length > 12 && (
-          <p className="text-center text-sm text-gray-500">
-            Showing 12 of {filteredAds.length} ads
-          </p>
         )}
       </div>
     </div>
