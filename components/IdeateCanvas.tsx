@@ -823,16 +823,18 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   const handleNodeMouseDown = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
     if (e.button !== 0) return; // Only interact with left mouse button
+    
+    // Always set justClickedNode to prevent canvas click from clearing selection
+    setJustClickedNode(true);
+    setTimeout(() => setJustClickedNode(false), 100);
+    setSelectedNode(nodeId);
+    
     // In read-only mode, only allow selection (not dragging)
     if (isReadOnly) {
-      setSelectedNode(nodeId);
       return;
     }
     setPendingDragNode(nodeId);
     setDragStartPos({ x: e.clientX, y: e.clientY });
-    setSelectedNode(nodeId);
-    setJustClickedNode(true);
-    setTimeout(() => setJustClickedNode(false), 100);
   };
 
   const handleCanvasClick = () => {
