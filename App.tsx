@@ -25,6 +25,7 @@ const App: React.FC = () => {
   const [useRealData, setUseRealData] = useState<boolean>(false);
   const [activeOnly, setActiveOnly] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [sharedCanvasToken, setSharedCanvasToken] = useState<string | null>(null);
   
   // State to hold the details of the currently selected node for the inspector
   const [selectedNode, setSelectedNode] = useState<{
@@ -45,6 +46,14 @@ const App: React.FC = () => {
         const urlParams = new URLSearchParams(window.location.search);
         const authSuccess = urlParams.get('auth') === 'success';
         const authError = urlParams.get('error');
+        const shareToken = urlParams.get('share');
+        
+        // Handle shared canvas links - switch to Ideate view
+        if (shareToken) {
+          setSharedCanvasToken(shareToken);
+          setViewMode('IDEATE');
+          // Don't clear URL so the share token stays visible
+        }
         
         if (authError) {
           setError(`Authentication failed: ${authError}`);
@@ -383,16 +392,20 @@ const App: React.FC = () => {
         
         {viewMode === 'IDEATE' && (
           <div className="mb-6 flex-shrink-0">
-            <h2 className="text-lg font-semibold text-gray-800 mb-1">Campaign Ideation Canvas</h2>
+            <h2 className="text-lg font-semibold text-gray-800 mb-1">
+              {sharedCanvasToken ? 'Shared Campaign Canvas' : 'Campaign Ideation Canvas'}
+            </h2>
             <p className="text-sm text-gray-500">
-              Plan and visualize your campaign structure. Use AI to generate ideas or manually create your funnel.
+              {sharedCanvasToken 
+                ? 'Viewing a shared campaign design. Leave comments to provide feedback.'
+                : 'Plan and visualize your campaign structure. Use AI to generate ideas or manually create your funnel.'}
             </p>
           </div>
         )}
 
         <div className="flex-1 min-h-0 relative">
           {viewMode === 'IDEATE' ? (
-            <IdeateCanvas />
+            <IdeateCanvas shareToken={sharedCanvasToken || undefined} />
           ) : viewMode === 'AUDIT' ? (
             <AuditPage 
               accountId={selectedAccountId}
