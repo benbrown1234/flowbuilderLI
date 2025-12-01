@@ -83,6 +83,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [editingNode, setEditingNode] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  const [justClickedNode, setJustClickedNode] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -131,6 +132,14 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
     e.stopPropagation();
     setDraggedNode(nodeId);
     setSelectedNode(nodeId);
+    setJustClickedNode(true);
+    setTimeout(() => setJustClickedNode(false), 100);
+  };
+
+  const handleCanvasClick = () => {
+    if (!justClickedNode && !draggedNode) {
+      setSelectedNode(null);
+    }
   };
 
   const zoomIn = () => setTransform(t => ({ ...t, scale: Math.min(t.scale + 0.2, 3) }));
@@ -549,7 +558,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onWheel={handleWheel}
-        onClick={() => !draggedNode && setSelectedNode(null)}
+        onClick={handleCanvasClick}
       >
         <div
           className="relative transition-transform duration-75 origin-top-left will-change-transform"
