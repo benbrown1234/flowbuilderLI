@@ -1,9 +1,9 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Plus, Minus, Maximize, Move, Trash2, Sparkles, Download, Copy, Folder, LayoutGrid, FileImage, Lightbulb, Send, X, GripVertical, Edit2, Check, ChevronDown, ChevronRight, Target, Settings, Image } from 'lucide-react';
+import { Plus, Minus, Maximize, Move, Trash2, Sparkles, Download, Copy, Folder, LayoutGrid, FileImage, Lightbulb, Send, X, GripVertical, Edit2, Check, ChevronDown, ChevronRight, Target, Settings, Image, Users, Percent, ArrowRight } from 'lucide-react';
 
 export interface IdeateNode {
   id: string;
-  type: 'group' | 'campaign' | 'ad';
+  type: 'group' | 'campaign' | 'ad' | 'audience';
   name: string;
   x: number;
   y: number;
@@ -13,11 +13,25 @@ export interface IdeateNode {
   notes?: string;
   industries?: string[];
   funnelStage?: 'awareness' | 'consideration' | 'activation';
+  audienceType?: string;
+  audiencePercentage?: number;
+  sourceCampaignId?: string;
+  targetCampaignId?: string;
 }
 
 interface Props {
   onExport?: (nodes: IdeateNode[]) => void;
 }
+
+const AUDIENCE_TYPES = [
+  { value: 'video_viewers', label: 'Video Viewers', icon: '🎬', description: 'People who watched your video ads' },
+  { value: 'website_visitors', label: 'Website Visitors', icon: '🌐', description: 'People who visited your website' },
+  { value: 'lead_form_opens', label: 'Lead Form Opens', icon: '📋', description: 'People who opened but didn\'t submit' },
+  { value: 'ad_engagers', label: 'Ad Engagers', icon: '👆', description: 'People who clicked or engaged with ads' },
+  { value: 'page_visitors', label: 'Company Page Visitors', icon: '🏢', description: 'People who visited your LinkedIn page' },
+  { value: 'event_attendees', label: 'Event Attendees', icon: '📅', description: 'People who RSVPd to your events' },
+  { value: 'lookalike', label: 'Lookalike Audience', icon: '👥', description: 'Similar to your best customers' },
+];
 
 const INDUSTRY_CATEGORIES: Record<string, string[]> = {
   'Technology & IT': [
@@ -341,7 +355,44 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
       y,
       parentId,
       objective: type === 'campaign' ? 'Website Visits' : undefined,
-      adFormat: type === 'ad' ? 'Image Ad' : undefined,
+      adFormat: type === 'ad' ? 'Single Image Ad' : undefined,
+    };
+    setNodes(prev => [...prev, newNode]);
+    setSelectedNode(newNode.id);
+  };
+
+  const addAudienceNode = () => {
+    const campaigns = nodes.filter(n => n.type === 'campaign');
+    if (campaigns.length < 2) {
+      alert('Create at least 2 campaigns to connect with an audience flow');
+      return;
+    }
+    
+    const selectedNodeData = nodes.find(n => n.id === selectedNode);
+    let sourceCampaign: IdeateNode | undefined;
+    
+    if (selectedNodeData?.type === 'campaign') {
+      sourceCampaign = selectedNodeData;
+    } else {
+      sourceCampaign = campaigns[0];
+    }
+    
+    const otherCampaigns = campaigns.filter(c => c.id !== sourceCampaign?.id);
+    const targetCampaign = otherCampaigns[0];
+    
+    const midX = (sourceCampaign.x + targetCampaign.x) / 2;
+    const midY = (sourceCampaign.y + targetCampaign.y) / 2 + 50;
+    
+    const newNode: IdeateNode = {
+      id: generateId(),
+      type: 'audience',
+      name: 'Video Viewers',
+      x: midX,
+      y: midY,
+      audienceType: 'video_viewers',
+      audiencePercentage: 25,
+      sourceCampaignId: sourceCampaign.id,
+      targetCampaignId: targetCampaign.id,
     };
     setNodes(prev => [...prev, newNode]);
     setSelectedNode(newNode.id);
@@ -534,8 +585,9 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
             {selectedNodeData.type === 'group' && <Folder size={18} className="text-gray-500" />}
             {selectedNodeData.type === 'campaign' && <LayoutGrid size={18} className="text-orange-500" />}
             {selectedNodeData.type === 'ad' && <FileImage size={18} className="text-green-500" />}
+            {selectedNodeData.type === 'audience' && <Users size={18} className="text-purple-500" />}
             <span className="text-xs font-semibold uppercase text-gray-400">
-              {selectedNodeData.type === 'group' ? 'Campaign Group' : selectedNodeData.type}
+              {selectedNodeData.type === 'group' ? 'Campaign Group' : selectedNodeData.type === 'audience' ? 'Audience Flow' : selectedNodeData.type}
             </span>
           </div>
           <h3 className="font-semibold text-gray-900 text-lg leading-tight">{selectedNodeData.name}</h3>
@@ -680,6 +732,90 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
           </div>
         )}
 
+        {selectedNodeData.type === 'audience' && (
+          <>
+            <div className="p-4 border-b border-gray-100">
+              <div className="flex items-center gap-2 mb-3">
+                <Users size={16} className="text-purple-500" />
+                <h4 className="font-semibold text-gray-700 text-sm">Audience Type</h4>
+              </div>
+              <div className="space-y-2">
+                {AUDIENCE_TYPES.map(type => (
+                  <button
+                    key={type.value}
+                    onClick={() => updateNode(selectedNodeData.id, { audienceType: type.value, name: type.label })}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg border-2 transition-colors text-left ${
+                      selectedNodeData.audienceType === type.value
+                        ? 'border-purple-400 bg-purple-50'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <span className="text-xl">{type.icon}</span>
+                    <div>
+                      <div className="font-medium text-sm text-gray-800">{type.label}</div>
+                      <div className="text-xs text-gray-500">{type.description}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="p-4 border-b border-gray-100">
+              <div className="flex items-center gap-2 mb-3">
+                <Percent size={16} className="text-purple-500" />
+                <h4 className="font-semibold text-gray-700 text-sm">Conversion Rate</h4>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">Estimated % of source audience that flows to target</p>
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min="1"
+                  max="100"
+                  value={selectedNodeData.audiencePercentage || 25}
+                  onChange={(e) => updateNode(selectedNodeData.id, { audiencePercentage: parseInt(e.target.value) })}
+                  className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                />
+                <span className="w-12 text-right font-bold text-purple-600">{selectedNodeData.audiencePercentage || 25}%</span>
+              </div>
+            </div>
+
+            <div className="p-4 border-b border-gray-100">
+              <div className="flex items-center gap-2 mb-3">
+                <ArrowRight size={16} className="text-purple-500" />
+                <h4 className="font-semibold text-gray-700 text-sm">Flow Connection</h4>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1 block">Source Campaign</label>
+                  <select
+                    value={selectedNodeData.sourceCampaignId || ''}
+                    onChange={(e) => updateNode(selectedNodeData.id, { sourceCampaignId: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="">Select source...</option>
+                    {nodes.filter(n => n.type === 'campaign').map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1 block">Target Campaign</label>
+                  <select
+                    value={selectedNodeData.targetCampaignId || ''}
+                    onChange={(e) => updateNode(selectedNodeData.id, { targetCampaignId: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="">Select target...</option>
+                    {nodes.filter(n => n.type === 'campaign' && n.id !== selectedNodeData.sourceCampaignId).map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
         <div className="p-4">
           <div className="flex items-center gap-2 mb-3">
             <Edit2 size={16} className="text-gray-500" />
@@ -728,6 +864,15 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
           >
             <FileImage size={16} className="text-green-500" />
             <span>Ad</span>
+          </button>
+          <div className="w-px h-6 bg-gray-200" />
+          <button
+            onClick={addAudienceNode}
+            className="flex items-center gap-1.5 px-3 py-2 hover:bg-gray-100 rounded text-gray-700 text-sm font-medium"
+            title="Add Audience Flow"
+          >
+            <Users size={16} className="text-purple-500" />
+            <span>Audience</span>
           </button>
         </div>
         
@@ -867,6 +1012,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
         <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-gray-500"></span> Campaign Group</div>
         <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-orange-500"></span> Campaign</div>
         <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-500"></span> Ad</div>
+        <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-purple-500"></span> Audience Flow</div>
         <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-1 text-gray-400">
           <Move size={10} /> Drag to Pan
         </div>
@@ -932,10 +1078,64 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
                 />
               );
             })}
+            
+            {/* Audience Flow Lines */}
+            {nodes.filter(n => n.type === 'audience').map(audience => {
+              const sourceCampaign = nodes.find(n => n.id === audience.sourceCampaignId);
+              const targetCampaign = nodes.find(n => n.id === audience.targetCampaignId);
+              
+              if (!sourceCampaign || !targetCampaign) return null;
+              
+              const sourceX = sourceCampaign.x + 260;
+              const sourceY = sourceCampaign.y + 45;
+              const audienceX = audience.x;
+              const audienceY = audience.y + 35;
+              const audienceEndX = audience.x + 180;
+              const targetX = targetCampaign.x;
+              const targetY = targetCampaign.y + 45;
+              
+              return (
+                <g key={`audience-flow-${audience.id}`}>
+                  {/* Source to Audience */}
+                  <path
+                    d={`M ${sourceX} ${sourceY} Q ${(sourceX + audienceX) / 2} ${sourceY}, ${audienceX} ${audienceY}`}
+                    fill="none"
+                    stroke="#a855f7"
+                    strokeWidth="2"
+                    strokeDasharray="6,4"
+                    strokeOpacity="0.7"
+                  />
+                  {/* Audience to Target */}
+                  <path
+                    d={`M ${audienceEndX} ${audienceY} Q ${(audienceEndX + targetX) / 2} ${targetY}, ${targetX} ${targetY}`}
+                    fill="none"
+                    stroke="#a855f7"
+                    strokeWidth="2"
+                    strokeDasharray="6,4"
+                    strokeOpacity="0.7"
+                    markerEnd="url(#arrowhead)"
+                  />
+                </g>
+              );
+            })}
+            
+            {/* Arrow marker definition */}
+            <defs>
+              <marker
+                id="arrowhead"
+                markerWidth="10"
+                markerHeight="7"
+                refX="9"
+                refY="3.5"
+                orient="auto"
+              >
+                <polygon points="0 0, 10 3.5, 0 7" fill="#a855f7" fillOpacity="0.7" />
+              </marker>
+            </defs>
           </svg>
 
           {/* Nodes */}
-          {nodes.map(node => (
+          {nodes.filter(n => n.type !== 'audience').map(node => (
             <div
               key={node.id}
               onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
@@ -1008,6 +1208,49 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
               )}
             </div>
           ))}
+
+          {/* Audience Nodes */}
+          {nodes.filter(n => n.type === 'audience').map(node => {
+            const audienceTypeInfo = AUDIENCE_TYPES.find(t => t.value === node.audienceType);
+            return (
+              <div
+                key={node.id}
+                onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+                onDoubleClick={() => startEditing(node.id, node.name)}
+                className={`
+                  absolute transition-shadow duration-200 rounded-full border-2 flex items-center justify-center z-20 select-none
+                  w-[180px] h-[70px] px-4
+                  ${draggedNode === node.id ? 'cursor-grabbing shadow-2xl scale-105' : 'cursor-grab hover:shadow-xl'}
+                  ${selectedNode === node.id ? 'ring-2 ring-offset-2 ring-purple-400' : ''}
+                  bg-gradient-to-r from-purple-50 to-purple-100 border-purple-300
+                `}
+                style={{
+                  left: node.x,
+                  top: node.y,
+                }}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl">{audienceTypeInfo?.icon || '👥'}</span>
+                  <div className="flex flex-col">
+                    {editingNode === node.id ? (
+                      <input
+                        type="text"
+                        value={editingName}
+                        onChange={(e) => setEditingName(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && finishEditing()}
+                        onBlur={finishEditing}
+                        autoFocus
+                        className="text-sm font-semibold bg-white border border-purple-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-purple-500 w-24"
+                      />
+                    ) : (
+                      <span className="text-sm font-semibold text-purple-900 leading-tight">{node.name}</span>
+                    )}
+                    <span className="text-lg font-bold text-purple-600">{node.audiencePercentage || 25}%</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
       </div>
