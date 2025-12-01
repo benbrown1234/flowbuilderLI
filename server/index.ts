@@ -290,6 +290,19 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ success: true });
 });
 
+// API request throttling to prevent LinkedIn rate limiting
+let lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL = 150; // 150ms between requests
+
+async function throttledDelay(): Promise<void> {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
+    await new Promise(resolve => setTimeout(resolve, MIN_REQUEST_INTERVAL - timeSinceLastRequest));
+  }
+  lastRequestTime = Date.now();
+}
+
 async function linkedinApiRequest(sessionId: string, endpoint: string, params: Record<string, any> = {}, rawQueryString?: string) {
   const session = getSession(sessionId);
   
@@ -300,6 +313,9 @@ async function linkedinApiRequest(sessionId: string, endpoint: string, params: R
   if (session.expiresAt && Date.now() >= session.expiresAt) {
     throw new Error('Token expired');
   }
+  
+  // Apply throttling before each request
+  await throttledDelay();
   
   let url = `https://api.linkedin.com/rest${endpoint}`;
   
@@ -312,6 +328,7 @@ async function linkedinApiRequest(sessionId: string, endpoint: string, params: R
       'Authorization': `Bearer ${session.accessToken}`,
       'LinkedIn-Version': '202511',
       'X-Restli-Protocol-Version': '2.0.0',
+      'User-Agent': 'LinkedIn-Audience-Visualizer/1.0',
     },
     params: rawQueryString ? undefined : params,
   });
@@ -322,7 +339,7 @@ async function linkedinApiRequest(sessionId: string, endpoint: string, params: R
 async function linkedinApiRequestPaginated(sessionId: string, endpoint: string, params: Record<string, any> = {}, rawQueryString?: string): Promise<any[]> {
   const allElements: any[] = [];
   let pageToken: string | undefined;
-  const pageSize = 500;
+  const pageSize = 100; // Reduced from 500 to prevent rate limiting
   
   do {
     const requestParams: Record<string, any> = {

@@ -2,7 +2,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { AccountStructure, NodeType, TargetingSummary, CreativeNode, AccountSummary } from './types';
-import { buildAccountHierarchy, getAvailableAccounts } from './services/linkedinLogic';
 import { getAuthStatus, getAuthUrl, logout, getAvailableAccountsFromApi, buildAccountHierarchyFromApi } from './services/linkedinApi';
 import { transformAccountToIdeateNodes, createTofAudiencesFromTargeting } from './services/ideateTransformer';
 import { StructureTree } from './components/StructureTree';
@@ -12,7 +11,7 @@ import { TargetingInspector } from './components/TargetingInspector';
 import { AIAuditor } from './components/AIAuditor';
 import AuditPage from './components/AuditPage';
 import { IdeateCanvas } from './components/IdeateCanvas';
-import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, Database, ClipboardCheck, Lightbulb } from 'lucide-react';
+import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, ClipboardCheck, Lightbulb } from 'lucide-react';
 
 const App: React.FC = () => {
   const [data, setData] = useState<AccountStructure | null>(null);
@@ -24,7 +23,6 @@ const App: React.FC = () => {
   });
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [useRealData, setUseRealData] = useState<boolean>(false);
   const [activeOnly, setActiveOnly] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [sharedCanvasToken, setSharedCanvasToken] = useState<string | null>(null);
@@ -69,10 +67,6 @@ const App: React.FC = () => {
         
         const status = await getAuthStatus();
         setIsAuthenticated(status.isAuthenticated);
-        
-        if (status.isAuthenticated) {
-          setUseRealData(true);
-        }
       } catch (err) {
         console.error('Auth check failed:', err);
       } finally {
@@ -83,66 +77,55 @@ const App: React.FC = () => {
     checkAuth();
   }, []);
 
-  // Load accounts based on data source
+  // Load accounts when authenticated
   useEffect(() => {
     const loadAccounts = async () => {
-      if (useRealData && isAuthenticated) {
-        try {
-          setIsLoading(true);
-          const apiAccounts = await getAvailableAccountsFromApi();
-          if (apiAccounts.length > 0) {
-            setAccounts(apiAccounts);
-            // Use saved account if it exists in the list, otherwise use first
-            const savedAccountId = localStorage.getItem('selectedAccountId');
-            const savedAccountExists = savedAccountId && apiAccounts.some(a => a.id === savedAccountId);
-            if (savedAccountExists) {
-              setSelectedAccountId(savedAccountId);
-            } else if (!selectedAccountId) {
-              setSelectedAccountId(apiAccounts[0].id);
-              localStorage.setItem('selectedAccountId', apiAccounts[0].id);
-            }
-          } else {
-            setError('No ad accounts found. Make sure your LinkedIn app has access to your ad accounts.');
-            setAccounts([]);
+      if (!isAuthenticated) {
+        setAccounts([]);
+        setIsLoading(false);
+        return;
+      }
+      
+      try {
+        setIsLoading(true);
+        const apiAccounts = await getAvailableAccountsFromApi();
+        if (apiAccounts.length > 0) {
+          setAccounts(apiAccounts);
+          // Use saved account if it exists in the list, otherwise use first
+          const savedAccountId = localStorage.getItem('selectedAccountId');
+          const savedAccountExists = savedAccountId && apiAccounts.some(a => a.id === savedAccountId);
+          if (savedAccountExists) {
+            setSelectedAccountId(savedAccountId);
+          } else if (!selectedAccountId) {
+            setSelectedAccountId(apiAccounts[0].id);
+            localStorage.setItem('selectedAccountId', apiAccounts[0].id);
           }
-        } catch (err: any) {
-          console.error('Failed to load accounts:', err);
-          setError('Failed to load accounts from LinkedIn API');
-        } finally {
-          setIsLoading(false);
+        } else {
+          setError('No ad accounts found. Make sure your LinkedIn app has access to your ad accounts.');
+          setAccounts([]);
         }
-      } else {
-        const available = getAvailableAccounts();
-        setAccounts(available);
-        // Use saved account if it exists in demo list, otherwise use first
-        const savedAccountId = localStorage.getItem('selectedAccountId');
-        const savedAccountExists = savedAccountId && available.some(a => a.id === savedAccountId);
-        if (savedAccountExists) {
-          setSelectedAccountId(savedAccountId);
-        } else if (available.length > 0 && !selectedAccountId) {
-          setSelectedAccountId(available[0].id);
-        }
+      } catch (err: any) {
+        console.error('Failed to load accounts:', err);
+        setError('Failed to load accounts from LinkedIn API');
+      } finally {
+        setIsLoading(false);
       }
     };
     
     loadAccounts();
-  }, [useRealData, isAuthenticated]);
+  }, [isAuthenticated]);
 
   // Fetch Data when Account Changes
   useEffect(() => {
     const loadData = async () => {
-      if (!selectedAccountId) return;
+      if (!selectedAccountId || !isAuthenticated) {
+        setData(null);
+        return;
+      }
       
       setIsLoading(true);
       try {
-        let result: AccountStructure | null;
-        
-        if (useRealData && isAuthenticated) {
-          result = await buildAccountHierarchyFromApi(selectedAccountId, activeOnly);
-        } else {
-          result = buildAccountHierarchy(selectedAccountId);
-        }
-        
+        const result = await buildAccountHierarchyFromApi(selectedAccountId, activeOnly);
         setData(result);
         setSelectedNode(null);
         setError(null);
@@ -155,7 +138,7 @@ const App: React.FC = () => {
     };
     
     loadData();
-  }, [selectedAccountId, useRealData, isAuthenticated, activeOnly]);
+  }, [selectedAccountId, isAuthenticated, activeOnly]);
 
   const handleLogin = async () => {
     try {
@@ -171,18 +154,11 @@ const App: React.FC = () => {
     try {
       await logout();
       setIsAuthenticated(false);
-      setUseRealData(false);
+      setData(null);
+      setAccounts([]);
       setError(null);
     } catch (err) {
       console.error('Logout failed:', err);
-    }
-  };
-
-  const toggleDataSource = () => {
-    if (!isAuthenticated && !useRealData) {
-      handleLogin();
-    } else {
-      setUseRealData(!useRealData);
     }
   };
 
@@ -281,7 +257,8 @@ const App: React.FC = () => {
             <div className="flex flex-col">
               <h1 className="text-xl font-bold text-gray-900 tracking-tight leading-none">Audience Visualizer</h1>
               
-              {/* Account Switcher */}
+              {/* Account Switcher - only show when authenticated */}
+              {isAuthenticated && accounts.length > 0 && (
               <div className="relative mt-1 flex items-center gap-2">
                  <select 
                    value={selectedAccountId} 
@@ -294,33 +271,15 @@ const App: React.FC = () => {
                      </option>
                    ))}
                  </select>
-                 <ChevronDown className="absolute right-12 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 pointer-events-none" />
-                 
-                 {/* Data Source Badge */}
-                 <span className={`text-xs px-2 py-0.5 rounded-full ${useRealData ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
-                   {useRealData ? 'Live' : 'Demo'}
-                 </span>
+                 <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-400 pointer-events-none" />
               </div>
+              )}
             </div>
           </div>
           
           <div className="flex items-center gap-4">
-             {/* Data Source Toggle */}
-             <button
-               onClick={toggleDataSource}
-               className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all border ${
-                 useRealData 
-                   ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100' 
-                   : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
-               }`}
-               title={useRealData ? 'Switch to demo data' : 'Connect LinkedIn to use real data'}
-             >
-               <Database size={16} />
-               {useRealData ? 'Live Data' : 'Demo Data'}
-             </button>
-
-             {/* Active Only Toggle - only show when using real data */}
-             {useRealData && isAuthenticated && (
+             {/* Active Only Toggle - only show when authenticated */}
+             {isAuthenticated && (
                <button
                  onClick={() => setActiveOnly(!activeOnly)}
                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all border ${
@@ -349,7 +308,7 @@ const App: React.FC = () => {
                  className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium bg-[#0077b5] text-white hover:bg-[#005f8e] transition-all"
                >
                  <LogIn size={16} />
-                 Connect LinkedIn
+                 Login
                </button>
              )}
              
@@ -440,7 +399,7 @@ const App: React.FC = () => {
             <AuditPage 
               accountId={selectedAccountId}
               accountName={accounts.find(a => a.id === selectedAccountId)?.name || `Account ${selectedAccountId}`}
-              isLiveData={useRealData && isAuthenticated}
+              isLiveData={isAuthenticated}
               onNavigateToCampaign={(campaignId) => {
                 setViewMode('TREE');
               }}
@@ -493,7 +452,7 @@ const App: React.FC = () => {
         node={selectedNode} 
         onClose={handleCloseInspector}
         accountId={selectedAccountId}
-        isLiveData={useRealData}
+        isLiveData={isAuthenticated}
       />
 
       {/* Overlay for side panel on mobile */}
@@ -508,7 +467,7 @@ const App: React.FC = () => {
       <AIAuditor
         data={data}
         accountId={selectedAccountId}
-        isLiveData={useRealData}
+        isLiveData={isAuthenticated}
       />
     </div>
   );
