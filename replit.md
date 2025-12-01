@@ -23,6 +23,7 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   Includes a default funnel template (Awareness → Consideration → Activation) with hierarchy enforcement (Campaign Groups → Campaigns → Ads).
     *   Offers AI-powered generation of campaign structures based on natural language prompts.
     *   Allows inline editing, export as text brief, and detailed configuration of campaign groups, campaigns, ads, and retargeting audiences via a sidebar.
+    *   **Ad Format Enforcement**: All ads within a single campaign must use the same ad format type. New ads automatically inherit the format from existing ads. Changing format prompts to update all ads in the campaign.
     *   **Audience Flows**: Three categories with different connection rules:
         - **Remarketing** (purple): Video Views, Lead Form Opens, Ad Engagers, Event Attendees - has Source AND Target campaign
         - **BOF (Website)** (orange): Website Visitors, Company Page Visitors, High Company Engagers - Target campaign only

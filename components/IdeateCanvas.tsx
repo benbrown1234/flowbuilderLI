@@ -272,6 +272,14 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
     setNodes(prev => prev.map(n => n.id === nodeId ? { ...n, ...updates } : n));
   };
 
+  const getCampaignAdFormat = (campaignId: string): string | null => {
+    const campaignAds = nodes.filter(n => n.type === 'ad' && n.parentId === campaignId);
+    if (campaignAds.length > 0 && campaignAds[0].adFormat) {
+      return campaignAds[0].adFormat;
+    }
+    return null;
+  };
+
   const toggleIndustry = (nodeId: string, industry: string) => {
     const node = nodes.find(n => n.id === nodeId);
     if (!node) return;
@@ -415,6 +423,12 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
       }
     }
     
+    let adFormat: string | undefined;
+    if (type === 'ad' && parentId) {
+      const existingFormat = getCampaignAdFormat(parentId);
+      adFormat = existingFormat || 'Single Image Ad';
+    }
+    
     const newNode: IdeateNode = {
       id: generateId(),
       type,
@@ -423,7 +437,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
       y,
       parentId,
       objective: type === 'campaign' ? 'Website Visits' : undefined,
-      adFormat: type === 'ad' ? 'Single Image Ad' : undefined,
+      adFormat: type === 'ad' ? adFormat : undefined,
     };
     setNodes(prev => [...prev, newNode]);
     setSelectedNode(newNode.id);
@@ -908,30 +922,62 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
           </>
         )}
 
-        {selectedNodeData.type === 'ad' && (
-          <div className="p-4 border-b border-gray-100">
-            <div className="flex items-center gap-2 mb-3">
-              <Image size={16} className="text-gray-500" />
-              <h4 className="font-semibold text-gray-700 text-sm">Ad Format</h4>
+        {selectedNodeData.type === 'ad' && (() => {
+          const campaignId = selectedNodeData.parentId;
+          const siblingAds = campaignId ? nodes.filter(n => n.type === 'ad' && n.parentId === campaignId && n.id !== selectedNodeData.id) : [];
+          const isFormatLocked = siblingAds.length > 0;
+          const lockedFormat = isFormatLocked && siblingAds[0].adFormat ? siblingAds[0].adFormat : null;
+          
+          const handleFormatChange = (newFormat: string) => {
+            if (isFormatLocked && lockedFormat && newFormat !== lockedFormat) {
+              const confirmChange = window.confirm(
+                `This campaign already has ${siblingAds.length} ad(s) using "${lockedFormat}" format.\n\nAll ads in a campaign must use the same format. Do you want to change ALL ads in this campaign to "${newFormat}"?`
+              );
+              if (confirmChange && campaignId) {
+                setNodes(prev => prev.map(n => 
+                  (n.type === 'ad' && n.parentId === campaignId) 
+                    ? { ...n, adFormat: newFormat } 
+                    : n
+                ));
+              }
+            } else {
+              updateNode(selectedNodeData.id, { adFormat: newFormat });
+            }
+          };
+          
+          return (
+            <div className="p-4 border-b border-gray-100">
+              <div className="flex items-center gap-2 mb-2">
+                <Image size={16} className="text-gray-500" />
+                <h4 className="font-semibold text-gray-700 text-sm">Ad Format</h4>
+              </div>
+              {isFormatLocked && (
+                <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                  <p className="text-[10px] text-amber-700 flex items-center gap-1">
+                    <span>⚠️</span>
+                    <span>All ads in a campaign must use the same format. Current: <strong>{lockedFormat}</strong></span>
+                  </p>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                {AD_FORMAT_OPTIONS.map(format => (
+                  <button
+                    key={format.value}
+                    onClick={() => handleFormatChange(format.value)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 transition-colors ${
+                      selectedNodeData.adFormat === format.value
+                        ? 'border-green-400 bg-green-50'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <span className="text-lg">{format.icon}</span>
+                    <span className="text-xs font-medium text-gray-700">{format.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {AD_FORMAT_OPTIONS.map(format => (
-                <button
-                  key={format.value}
-                  onClick={() => updateNode(selectedNodeData.id, { adFormat: format.value })}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 transition-colors ${
-                    selectedNodeData.adFormat === format.value
-                      ? 'border-green-400 bg-green-50'
-                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                  }`}
-                >
-                  <span className="text-lg">{format.icon}</span>
-                  <span className="text-xs font-medium text-gray-700">{format.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {selectedNodeData.type === 'audience' && (() => {
           const currentCategory = selectedNodeData.audienceCategory || 'remarketing';
