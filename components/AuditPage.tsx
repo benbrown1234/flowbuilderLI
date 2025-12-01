@@ -3,29 +3,26 @@ import axios from 'axios';
 import { 
   TrendingUp, 
   TrendingDown, 
-  Minus,
   AlertTriangle,
   Loader2,
-  Eye,
-  MousePointerClick,
-  Percent,
   RefreshCw,
-  ChevronDown,
-  ChevronRight,
-  Image as ImageIcon,
+  CheckCircle2,
+  XCircle,
+  BarChart3,
+  ExternalLink,
   Play,
   Database,
   Clock,
-  CheckCircle2,
-  XCircle,
-  BarChart3
+  DollarSign,
+  Users,
+  Zap,
+  Target
 } from 'lucide-react';
 
 interface AuditPageProps {
   accountId: string;
   accountName: string;
   isLiveData: boolean;
-  onNavigateToCampaign?: (campaignId: string) => void;
 }
 
 interface AuditAccountStatus {
@@ -37,58 +34,52 @@ interface AuditAccountStatus {
   syncStatus?: 'pending' | 'syncing' | 'completed' | 'error';
   syncError?: string;
   autoSyncEnabled?: boolean;
-  latestDataDate?: string;
 }
 
-interface CampaignMetrics {
+interface CampaignItem {
+  id: string;
+  name: string;
+  ctr: number;
+  ctrChange: number;
+  impressions: number;
+  clicks: number;
+  spend: number;
+  dailyBudget?: number;
+  budgetUtilization?: number;
+  hasLan?: boolean;
+  hasExpansion?: boolean;
+  audiencePenetration?: number;
+  isPerformingWell: boolean;
+  issues: string[];
+}
+
+interface AdItem {
+  id: string;
+  name: string;
   campaignId: string;
   campaignName: string;
-  campaignGroupId?: string;
-  campaignStatus?: string;
+  ctr: number;
+  ctrChange: number;
+  dwellTime?: number;
+  dwellTimeChange?: number;
   impressions: number;
   clicks: number;
-  spend: number;
-  ctr: number;
-  previousMonth: {
-    impressions: number;
-    clicks: number;
-    spend: number;
-  };
-  previousCtr: number;
-  ctrChange: number;
-  isUnderperforming: boolean;
-}
-
-interface CreativeMetrics {
-  creativeId: string;
-  creativeName: string;
-  campaignId: string;
-  creativeStatus?: string;
-  creativeType?: string;
-  impressions: number;
-  clicks: number;
-  spend: number;
-  ctr: number;
-  previousMonth: {
-    impressions: number;
-    clicks: number;
-    spend: number;
-  };
-  previousCtr: number;
-  ctrChange: number;
-  isUnderperforming: boolean;
+  isPerformingWell: boolean;
+  issues: string[];
 }
 
 interface AuditData {
-  campaigns: CampaignMetrics[];
-  creatives: CreativeMetrics[];
-  currentMonthLabel: string;
-  previousMonthLabel: string;
-  account: AuditAccountStatus;
+  campaigns: CampaignItem[];
+  ads: AdItem[];
+  alerts: {
+    type: 'budget' | 'penetration' | 'lan_expansion';
+    message: string;
+    campaignId?: string;
+    campaignName?: string;
+  }[];
+  lastSyncAt?: string;
+  syncFrequency: 'daily' | 'weekly';
 }
-
-const CTR_THRESHOLD = 0.4;
-const CTR_DROP_THRESHOLD = -20;
 
 function formatNumber(num: number): string {
   if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
@@ -116,167 +107,183 @@ function formatDate(dateStr: string): string {
   });
 }
 
-function ChangeIndicator({ change, isUnderperforming }: { change: number; isUnderperforming: boolean }) {
+function getLinkedInCampaignUrl(accountId: string, campaignId: string): string {
+  return `https://www.linkedin.com/campaignmanager/accounts/${accountId}/campaigns/${campaignId}`;
+}
+
+function getLinkedInAdUrl(accountId: string, campaignId: string, adId: string): string {
+  return `https://www.linkedin.com/campaignmanager/accounts/${accountId}/campaigns/${campaignId}/creatives/${adId}`;
+}
+
+function PerformanceIndicator({ change, isPositive }: { change: number; isPositive: boolean }) {
   if (Math.abs(change) < 0.5) {
-    return (
-      <span className="flex items-center gap-1 text-gray-500">
-        <Minus className="w-3 h-3" />
-        <span className="text-xs">No change</span>
-      </span>
-    );
-  }
-  
-  if (change > 0) {
-    return (
-      <span className="flex items-center gap-1 text-green-600">
-        <TrendingUp className="w-3 h-3" />
-        <span className="text-xs font-medium">{formatChange(change)}</span>
-      </span>
-    );
+    return <span className="text-gray-500 text-sm">No change</span>;
   }
   
   return (
-    <span className={`flex items-center gap-1 ${isUnderperforming ? 'text-red-600' : 'text-orange-500'}`}>
-      <TrendingDown className="w-3 h-3" />
-      <span className="text-xs font-medium">{formatChange(change)}</span>
+    <span className={`flex items-center gap-1 ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
+      {isPositive ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+      <span className="text-sm font-medium">{formatChange(change)}</span>
     </span>
   );
 }
 
-function AdPreviewCard({ creative, accountId }: { creative: CreativeMetrics; accountId: string }) {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const loadPreview = async () => {
-      try {
-        setLoading(true);
-        const response = await axios.get(`/api/linkedin/account/${accountId}/ad-preview/${creative.creativeId}`);
-        if (response.data?.previewUrl) {
-          setPreviewUrl(response.data.previewUrl);
-        }
-      } catch (err) {
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    loadPreview();
-  }, [creative.creativeId, accountId]);
-
+function CampaignCard({ campaign, accountId, showIssues }: { campaign: CampaignItem; accountId: string; showIssues: boolean }) {
+  const linkedInUrl = getLinkedInCampaignUrl(accountId, campaign.id);
+  
   return (
-    <div className={`bg-white rounded-lg border-2 ${creative.isUnderperforming ? 'border-red-300 ring-2 ring-red-100' : 'border-gray-200'} overflow-hidden`}>
-      {creative.isUnderperforming && (
-        <div className="bg-red-50 px-3 py-2 flex items-center gap-2 border-b border-red-200">
-          <AlertTriangle className="w-4 h-4 text-red-500" />
-          <span className="text-xs font-medium text-red-700">Consider replacing - Low CTR</span>
+    <div className={`bg-white rounded-lg border ${showIssues ? 'border-red-200' : 'border-green-200'} p-4`}>
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex-1 min-w-0">
+          <a 
+            href={linkedInUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-medium text-gray-900 hover:text-blue-600 flex items-center gap-1 group"
+          >
+            <span className="truncate">{campaign.name}</span>
+            <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 flex-shrink-0" />
+          </a>
+        </div>
+        <PerformanceIndicator change={campaign.ctrChange} isPositive={campaign.ctrChange > 0} />
+      </div>
+      
+      <div className="grid grid-cols-3 gap-4 text-center mb-3">
+        <div>
+          <p className="text-lg font-semibold text-gray-900">{formatCtr(campaign.ctr)}</p>
+          <p className="text-xs text-gray-500">CTR</p>
+        </div>
+        <div>
+          <p className="text-lg font-semibold text-gray-900">{formatNumber(campaign.impressions)}</p>
+          <p className="text-xs text-gray-500">Impressions</p>
+        </div>
+        <div>
+          <p className="text-lg font-semibold text-gray-900">${formatNumber(campaign.spend)}</p>
+          <p className="text-xs text-gray-500">Spend</p>
+        </div>
+      </div>
+      
+      {campaign.budgetUtilization !== undefined && campaign.budgetUtilization < 80 && (
+        <div className="flex items-center gap-2 text-amber-600 text-xs bg-amber-50 rounded px-2 py-1 mb-2">
+          <DollarSign className="w-3 h-3" />
+          <span>Budget utilization: {campaign.budgetUtilization.toFixed(0)}%</span>
         </div>
       )}
       
-      <div className="aspect-video bg-gray-100 relative">
-        {loading ? (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Loader2 className="w-6 h-6 text-gray-400 animate-spin" />
-          </div>
-        ) : previewUrl ? (
-          <iframe 
-            src={previewUrl} 
-            className="w-full h-full border-0"
-            title={`Ad Preview: ${creative.creativeName}`}
-          />
-        ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
-            <ImageIcon className="w-8 h-8 mb-2" />
-            <span className="text-xs">Preview unavailable</span>
-          </div>
-        )}
+      {(campaign.hasLan || campaign.hasExpansion) && (
+        <div className="flex items-center gap-2 text-blue-600 text-xs bg-blue-50 rounded px-2 py-1 mb-2">
+          <Zap className="w-3 h-3" />
+          <span>{campaign.hasLan ? 'LAN' : ''}{campaign.hasLan && campaign.hasExpansion ? ' + ' : ''}{campaign.hasExpansion ? 'Expansion' : ''} enabled</span>
+        </div>
+      )}
+      
+      {showIssues && campaign.issues.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-red-100">
+          {campaign.issues.map((issue, idx) => (
+            <div key={idx} className="flex items-center gap-2 text-red-600 text-xs">
+              <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+              <span>{issue}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdCard({ ad, accountId, showIssues }: { ad: AdItem; accountId: string; showIssues: boolean }) {
+  const linkedInUrl = getLinkedInAdUrl(accountId, ad.campaignId, ad.id);
+  
+  return (
+    <div className={`bg-white rounded-lg border ${showIssues ? 'border-red-200' : 'border-green-200'} p-4`}>
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex-1 min-w-0">
+          <a 
+            href={linkedInUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-medium text-gray-900 hover:text-blue-600 flex items-center gap-1 group"
+          >
+            <span className="truncate">{ad.name}</span>
+            <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 flex-shrink-0" />
+          </a>
+          <p className="text-xs text-gray-500 truncate">{ad.campaignName}</p>
+        </div>
+        <PerformanceIndicator change={ad.ctrChange} isPositive={ad.ctrChange > 0} />
       </div>
       
-      <div className="p-3">
-        <div className="flex items-start justify-between mb-2">
-          <div className="flex-1 min-w-0">
-            <h4 className="text-sm font-medium text-gray-900 truncate">{creative.creativeName || `Ad ${creative.creativeId}`}</h4>
-            <p className="text-xs text-gray-500 truncate">Campaign {creative.campaignId}</p>
-          </div>
-          <span className="text-xs px-2 py-0.5 bg-gray-100 rounded text-gray-600 ml-2 flex-shrink-0">
-            {creative.creativeType || 'Ad'}
-          </span>
+      <div className="grid grid-cols-3 gap-4 text-center mb-3">
+        <div>
+          <p className="text-lg font-semibold text-gray-900">{formatCtr(ad.ctr)}</p>
+          <p className="text-xs text-gray-500">CTR</p>
         </div>
-        
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div>
-            <div className="flex items-center justify-center gap-1 text-gray-500 mb-1">
-              <Eye className="w-3 h-3" />
-            </div>
-            <p className="text-sm font-medium text-gray-900">{formatNumber(creative.impressions)}</p>
-            <p className="text-xs text-gray-500">Impressions</p>
-          </div>
-          <div>
-            <div className="flex items-center justify-center gap-1 text-gray-500 mb-1">
-              <MousePointerClick className="w-3 h-3" />
-            </div>
-            <p className="text-sm font-medium text-gray-900">{formatNumber(creative.clicks)}</p>
-            <p className="text-xs text-gray-500">Clicks</p>
-          </div>
-          <div>
-            <div className="flex items-center justify-center gap-1 text-gray-500 mb-1">
-              <Percent className="w-3 h-3" />
-            </div>
-            <p className={`text-sm font-medium ${creative.isUnderperforming ? 'text-red-600' : 'text-gray-900'}`}>
-              {formatCtr(creative.ctr)}
-            </p>
-            <p className="text-xs text-gray-500">CTR</p>
-          </div>
+        <div>
+          <p className="text-lg font-semibold text-gray-900">{ad.dwellTime ? `${ad.dwellTime.toFixed(1)}s` : '-'}</p>
+          <p className="text-xs text-gray-500">Dwell Time</p>
         </div>
-        
-        <div className="mt-2 pt-2 border-t border-gray-100 flex items-center justify-between">
-          <span className="text-xs text-gray-500">vs last month</span>
-          <ChangeIndicator change={creative.ctrChange} isUnderperforming={creative.isUnderperforming} />
+        <div>
+          <p className="text-lg font-semibold text-gray-900">{formatNumber(ad.clicks)}</p>
+          <p className="text-xs text-gray-500">Clicks</p>
+        </div>
+      </div>
+      
+      {ad.dwellTimeChange !== undefined && Math.abs(ad.dwellTimeChange) > 0.5 && (
+        <div className={`flex items-center gap-2 text-xs rounded px-2 py-1 mb-2 ${ad.dwellTimeChange > 0 ? 'text-green-600 bg-green-50' : 'text-amber-600 bg-amber-50'}`}>
+          <Clock className="w-3 h-3" />
+          <span>Dwell time {ad.dwellTimeChange > 0 ? 'up' : 'down'} {formatChange(ad.dwellTimeChange)}</span>
+        </div>
+      )}
+      
+      {showIssues && ad.issues.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-red-100">
+          {ad.issues.map((issue, idx) => (
+            <div key={idx} className="flex items-center gap-2 text-red-600 text-xs">
+              <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+              <span>{issue}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AlertCard({ alert, accountId }: { alert: AuditData['alerts'][0]; accountId: string }) {
+  const Icon = alert.type === 'budget' ? DollarSign : 
+               alert.type === 'penetration' ? Users : Zap;
+  
+  const bgColor = alert.type === 'budget' ? 'bg-amber-50 border-amber-200' :
+                  alert.type === 'penetration' ? 'bg-purple-50 border-purple-200' : 
+                  'bg-blue-50 border-blue-200';
+  
+  const iconColor = alert.type === 'budget' ? 'text-amber-600' :
+                    alert.type === 'penetration' ? 'text-purple-600' : 
+                    'text-blue-600';
+  
+  return (
+    <div className={`rounded-lg border p-3 ${bgColor}`}>
+      <div className="flex items-start gap-3">
+        <Icon className={`w-5 h-5 ${iconColor} flex-shrink-0 mt-0.5`} />
+        <div className="flex-1">
+          <p className="text-sm text-gray-900">{alert.message}</p>
+          {alert.campaignId && alert.campaignName && (
+            <a 
+              href={getLinkedInCampaignUrl(accountId, alert.campaignId)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-blue-600 hover:underline flex items-center gap-1 mt-1"
+            >
+              View {alert.campaignName}
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function CampaignRow({ campaign }: { campaign: CampaignMetrics }) {
-  return (
-    <tr className={`${campaign.isUnderperforming ? 'bg-red-50' : 'hover:bg-gray-50'}`}>
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-2">
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900 truncate">{campaign.campaignName}</p>
-            {campaign.isUnderperforming && (
-              <span className="inline-flex items-center gap-1 text-xs text-red-600 mt-0.5">
-                <AlertTriangle className="w-3 h-3" />
-                Underperforming
-              </span>
-            )}
-          </div>
-        </div>
-      </td>
-      <td className="px-4 py-3 text-right">
-        <p className="text-sm text-gray-900">{formatNumber(campaign.impressions)}</p>
-        <p className="text-xs text-gray-500">{formatNumber(campaign.previousMonth.impressions)}</p>
-      </td>
-      <td className="px-4 py-3 text-right">
-        <p className="text-sm text-gray-900">{formatNumber(campaign.clicks)}</p>
-        <p className="text-xs text-gray-500">{formatNumber(campaign.previousMonth.clicks)}</p>
-      </td>
-      <td className="px-4 py-3 text-right">
-        <p className={`text-sm font-medium ${campaign.isUnderperforming ? 'text-red-600' : 'text-gray-900'}`}>
-          {formatCtr(campaign.ctr)}
-        </p>
-        <p className="text-xs text-gray-500">{formatCtr(campaign.previousCtr)}</p>
-      </td>
-      <td className="px-4 py-3 text-right">
-        <ChangeIndicator change={campaign.ctrChange} isUnderperforming={campaign.isUnderperforming} />
-      </td>
-    </tr>
-  );
-}
-
-function StartAuditView({ accountId, accountName, onStart, isStarting }: { 
-  accountId: string; 
+function StartAuditView({ accountName, onStart, isStarting }: { 
   accountName: string; 
   onStart: () => void;
   isStarting: boolean;
@@ -287,26 +294,30 @@ function StartAuditView({ accountId, accountName, onStart, isStarting }: {
         <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
           <BarChart3 className="w-8 h-8 text-blue-600" />
         </div>
-        <h2 className="text-2xl font-bold text-gray-900 mb-3">Start Account Audit</h2>
+        <h2 className="text-2xl font-bold text-gray-900 mb-3">Start Weekly Audit</h2>
         <p className="text-gray-600 mb-6">
-          Enable auditing for <span className="font-medium">{accountName}</span> to track CTR performance, 
-          identify underperforming ads, and store historical data for trend analysis.
+          Enable auditing for <span className="font-medium">{accountName}</span> to track performance 
+          and get weekly reports on campaigns and ads.
         </p>
         
         <div className="bg-gray-50 rounded-lg p-4 mb-6 text-left">
-          <h4 className="font-medium text-gray-900 mb-3">What happens when you start:</h4>
+          <h4 className="font-medium text-gray-900 mb-3">What you'll get:</h4>
           <ul className="space-y-2 text-sm text-gray-600">
             <li className="flex items-start gap-2">
-              <Database className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
-              <span>Campaign and ad performance data is synced and stored</span>
+              <TrendingUp className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+              <span>Campaigns & ads performing well (month-on-month)</span>
             </li>
             <li className="flex items-start gap-2">
-              <Clock className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
-              <span>Historical data is saved for month-over-month comparisons</span>
+              <TrendingDown className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+              <span>Campaigns & ads needing attention</span>
             </li>
             <li className="flex items-start gap-2">
-              <AlertTriangle className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
-              <span>Underperforming ads are highlighted automatically</span>
+              <DollarSign className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
+              <span>Budget utilization alerts</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Zap className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+              <span>Daily refresh for LAN/Expansion campaigns</span>
             </li>
           </ul>
         </div>
@@ -319,7 +330,7 @@ function StartAuditView({ accountId, accountName, onStart, isStarting }: {
           {isStarting ? (
             <>
               <Loader2 className="w-5 h-5 animate-spin" />
-              Starting Audit...
+              Starting...
             </>
           ) : (
             <>
@@ -328,20 +339,17 @@ function StartAuditView({ accountId, accountName, onStart, isStarting }: {
             </>
           )}
         </button>
-        
-        <p className="text-xs text-gray-500 mt-4">
-          Only this account will be audited. You can stop at any time.
-        </p>
       </div>
     </div>
   );
 }
 
-function SyncStatusBanner({ status, lastSync, onRefresh, isRefreshing }: {
+function SyncStatusBanner({ status, lastSync, onRefresh, isRefreshing, syncFrequency }: {
   status: AuditAccountStatus;
   lastSync?: string;
   onRefresh: () => void;
   isRefreshing: boolean;
+  syncFrequency: 'daily' | 'weekly';
 }) {
   const isSyncing = status.syncStatus === 'syncing' || status.syncStatus === 'pending';
   const hasError = status.syncStatus === 'error';
@@ -366,9 +374,9 @@ function SyncStatusBanner({ status, lastSync, onRefresh, isRefreshing }: {
             hasError ? 'text-red-800' :
             'text-green-800'
           }`}>
-            {isSyncing ? 'Syncing data from LinkedIn...' :
+            {isSyncing ? 'Syncing...' :
              hasError ? 'Sync failed' :
-             'Data synced'}
+             `${syncFrequency === 'daily' ? 'Daily' : 'Weekly'} sync active`}
           </p>
           {lastSync && !isSyncing && (
             <p className="text-xs text-gray-600">
@@ -400,7 +408,6 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
   const [isStarting, setIsStarting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showOnlyUnderperforming, setShowOnlyUnderperforming] = useState(false);
 
   const checkAuditStatus = useCallback(async () => {
     if (!accountId) return;
@@ -422,59 +429,98 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
       const response = await axios.get(`/api/audit/data/${accountId}`);
       const rawData = response.data;
       
-      const campaigns: CampaignMetrics[] = (rawData.campaigns || []).map((c: any) => {
-        const isUnderperforming = c.ctr < CTR_THRESHOLD || c.ctrChange < CTR_DROP_THRESHOLD;
+      const campaigns: CampaignItem[] = (rawData.campaigns || []).map((c: any) => {
+        const issues: string[] = [];
+        const isPerformingWell = c.ctrChange >= 0 && c.ctr >= 0.4;
+        
+        if (c.ctrChange < -10) issues.push(`CTR dropped ${Math.abs(c.ctrChange).toFixed(0)}% vs last month`);
+        if (c.ctr < 0.3) issues.push('CTR below 0.3%');
+        if (c.budgetUtilization !== undefined && c.budgetUtilization < 80) {
+          issues.push(`Only using ${c.budgetUtilization.toFixed(0)}% of budget`);
+        }
+        
         return {
-          campaignId: c.campaignId,
-          campaignName: c.campaignName || `Campaign ${c.campaignId}`,
-          campaignGroupId: c.campaignGroupId,
-          campaignStatus: c.campaignStatus,
+          id: c.campaignId,
+          name: c.campaignName || `Campaign ${c.campaignId}`,
+          ctr: c.ctr || 0,
+          ctrChange: c.ctrChange || 0,
           impressions: c.impressions || 0,
           clicks: c.clicks || 0,
           spend: c.spend || 0,
-          ctr: c.ctr || 0,
-          previousMonth: c.previousMonth || { impressions: 0, clicks: 0, spend: 0 },
-          previousCtr: c.previousCtr || 0,
-          ctrChange: c.ctrChange || 0,
-          isUnderperforming
+          dailyBudget: c.dailyBudget,
+          budgetUtilization: c.budgetUtilization,
+          hasLan: c.hasLan,
+          hasExpansion: c.hasExpansion,
+          audiencePenetration: c.audiencePenetration,
+          isPerformingWell,
+          issues
         };
-      }).sort((a: CampaignMetrics, b: CampaignMetrics) => {
-        if (a.isUnderperforming !== b.isUnderperforming) {
-          return a.isUnderperforming ? -1 : 1;
-        }
-        return b.impressions - a.impressions;
       });
       
-      const creatives: CreativeMetrics[] = (rawData.creatives || []).map((c: any) => {
-        const isUnderperforming = c.ctr < CTR_THRESHOLD || c.ctrChange < CTR_DROP_THRESHOLD;
-        return {
-          creativeId: c.creativeId,
-          creativeName: c.creativeName || `Creative ${c.creativeId}`,
-          campaignId: c.campaignId,
-          creativeStatus: c.creativeStatus,
-          creativeType: c.creativeType,
-          impressions: c.impressions || 0,
-          clicks: c.clicks || 0,
-          spend: c.spend || 0,
-          ctr: c.ctr || 0,
-          previousMonth: c.previousMonth || { impressions: 0, clicks: 0, spend: 0 },
-          previousCtr: c.previousCtr || 0,
-          ctrChange: c.ctrChange || 0,
-          isUnderperforming
-        };
-      }).sort((a: CreativeMetrics, b: CreativeMetrics) => {
-        if (a.isUnderperforming !== b.isUnderperforming) {
-          return a.isUnderperforming ? -1 : 1;
+      const ads: AdItem[] = (rawData.creatives || []).map((a: any) => {
+        const issues: string[] = [];
+        const isPerformingWell = a.ctrChange >= 0 && a.ctr >= 0.4 && 
+                                  (a.dwellTimeChange === undefined || a.dwellTimeChange >= 0);
+        
+        if (a.ctrChange < -10) issues.push(`CTR dropped ${Math.abs(a.ctrChange).toFixed(0)}%`);
+        if (a.ctr < 0.3) issues.push('Low CTR');
+        if (a.dwellTimeChange !== undefined && a.dwellTimeChange < -15) {
+          issues.push(`Dwell time dropped ${Math.abs(a.dwellTimeChange).toFixed(0)}%`);
         }
-        return b.impressions - a.impressions;
+        
+        return {
+          id: a.creativeId,
+          name: a.creativeName || `Ad ${a.creativeId}`,
+          campaignId: a.campaignId,
+          campaignName: a.campaignName || `Campaign ${a.campaignId}`,
+          ctr: a.ctr || 0,
+          ctrChange: a.ctrChange || 0,
+          dwellTime: a.dwellTime,
+          dwellTimeChange: a.dwellTimeChange,
+          impressions: a.impressions || 0,
+          clicks: a.clicks || 0,
+          isPerformingWell,
+          issues
+        };
       });
+      
+      const alerts: AuditData['alerts'] = [];
+      
+      campaigns.forEach(c => {
+        if (c.budgetUtilization !== undefined && c.budgetUtilization < 80) {
+          alerts.push({
+            type: 'budget',
+            message: `${c.name} is only using ${c.budgetUtilization.toFixed(0)}% of daily budget`,
+            campaignId: c.id,
+            campaignName: c.name
+          });
+        }
+        if (c.audiencePenetration !== undefined && c.audiencePenetration < 20) {
+          alerts.push({
+            type: 'penetration',
+            message: `Low audience penetration (${c.audiencePenetration.toFixed(0)}%) - consider allocating more budget`,
+            campaignId: c.id,
+            campaignName: c.name
+          });
+        }
+        if (c.hasLan || c.hasExpansion) {
+          alerts.push({
+            type: 'lan_expansion',
+            message: `${c.hasLan ? 'LinkedIn Audience Network' : 'Audience Expansion'} enabled - monitored daily`,
+            campaignId: c.id,
+            campaignName: c.name
+          });
+        }
+      });
+      
+      const hasLanOrExpansion = campaigns.some(c => c.hasLan || c.hasExpansion);
       
       setData({
         campaigns,
-        creatives,
-        currentMonthLabel: rawData.currentMonthLabel || 'Current Month',
-        previousMonthLabel: rawData.previousMonthLabel || 'Previous Month',
-        account: rawData.account
+        ads,
+        alerts,
+        lastSyncAt: rawData.account?.lastSyncAt,
+        syncFrequency: hasLanOrExpansion ? 'daily' : 'weekly'
       });
       
     } catch (err: any) {
@@ -562,7 +608,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
           <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-4" />
-          <p className="text-gray-500">Loading audit status...</p>
+          <p className="text-gray-500">Loading audit...</p>
         </div>
       </div>
     );
@@ -571,7 +617,6 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
   if (!auditStatus?.optedIn) {
     return (
       <StartAuditView 
-        accountId={accountId}
         accountName={accountName}
         onStart={handleStartAudit}
         isStarting={isStarting}
@@ -588,10 +633,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
           <Loader2 className="w-10 h-10 text-blue-500 animate-spin mx-auto mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">Syncing Account Data</h3>
           <p className="text-gray-500 mb-2">
-            Fetching campaigns, ads, and performance metrics from LinkedIn...
-          </p>
-          <p className="text-xs text-gray-400">
-            This may take a minute for large accounts
+            Fetching campaigns, ads, and performance metrics...
           </p>
         </div>
       </div>
@@ -603,7 +645,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
           <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">Failed to Load Audit Data</h3>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Failed to Load</h3>
           <p className="text-gray-500 mb-4">{error}</p>
           <button 
             onClick={handleRefresh}
@@ -617,162 +659,113 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
     );
   }
 
-  if (!data || data.campaigns.length === 0) {
-    return (
-      <div className="p-6">
-        <SyncStatusBanner 
-          status={auditStatus}
-          lastSync={auditStatus.lastSyncAt}
-          onRefresh={handleRefresh}
-          isRefreshing={isRefreshing}
-        />
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <Eye className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No Performance Data Yet</h3>
-            <p className="text-gray-500">
-              Data will appear here after campaigns generate impressions.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
+  if (!data) {
+    return null;
   }
 
-  const underperformingCampaigns = data.campaigns.filter(c => c.isUnderperforming);
-  const underperformingCreatives = data.creatives.filter(c => c.isUnderperforming);
-  const filteredCampaigns = showOnlyUnderperforming ? underperformingCampaigns : data.campaigns;
-  const filteredCreatives = showOnlyUnderperforming ? underperformingCreatives : data.creatives;
-
-  const totalImpressions = data.campaigns.reduce((sum, c) => sum + c.impressions, 0);
-  const totalClicks = data.campaigns.reduce((sum, c) => sum + c.clicks, 0);
-  const accountCtr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
-  
-  const totalPrevImpressions = data.campaigns.reduce((sum, c) => sum + c.previousMonth.impressions, 0);
-  const totalPrevClicks = data.campaigns.reduce((sum, c) => sum + c.previousMonth.clicks, 0);
-  const prevAccountCtr = totalPrevImpressions > 0 ? (totalPrevClicks / totalPrevImpressions) * 100 : 0;
-  const accountCtrChange = prevAccountCtr > 0 ? ((accountCtr - prevAccountCtr) / prevAccountCtr) * 100 : 0;
+  const performingWellCampaigns = data.campaigns.filter(c => c.isPerformingWell);
+  const needsAttentionCampaigns = data.campaigns.filter(c => !c.isPerformingWell);
+  const performingWellAds = data.ads.filter(a => a.isPerformingWell);
+  const needsAttentionAds = data.ads.filter(a => !a.isPerformingWell);
 
   return (
     <div className="h-full overflow-auto p-6">
       <SyncStatusBanner 
         status={auditStatus}
-        lastSync={auditStatus.lastSyncAt}
+        lastSync={data.lastSyncAt}
         onRefresh={handleRefresh}
         isRefreshing={isRefreshing}
+        syncFrequency={data.syncFrequency}
       />
       
-      <div className="space-y-6 pb-8">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <div className="flex items-center gap-2 text-gray-500 mb-2">
-              <Eye className="w-4 h-4" />
-              <span className="text-sm">Total Impressions</span>
-            </div>
-            <p className="text-2xl font-bold text-gray-900">
-              {formatNumber(totalImpressions)}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">{data.currentMonthLabel}</p>
-          </div>
-          
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <div className="flex items-center gap-2 text-gray-500 mb-2">
-              <MousePointerClick className="w-4 h-4" />
-              <span className="text-sm">Total Clicks</span>
-            </div>
-            <p className="text-2xl font-bold text-gray-900">
-              {formatNumber(totalClicks)}
-            </p>
-            <p className="text-xs text-gray-500 mt-1">{data.currentMonthLabel}</p>
-          </div>
-          
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
-            <div className="flex items-center gap-2 text-gray-500 mb-2">
-              <Percent className="w-4 h-4" />
-              <span className="text-sm">Account CTR</span>
-            </div>
-            <p className="text-2xl font-bold text-gray-900">
-              {formatCtr(accountCtr)}
-            </p>
-            <div className="mt-1">
-              <ChangeIndicator change={accountCtrChange} isUnderperforming={false} />
-            </div>
-          </div>
-          
-          <div className={`rounded-lg border-2 p-4 ${underperformingCreatives.length > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
-            <div className="flex items-center gap-2 mb-2">
-              <AlertTriangle className={`w-4 h-4 ${underperformingCreatives.length > 0 ? 'text-red-500' : 'text-green-500'}`} />
-              <span className="text-sm text-gray-700">Ads to Review</span>
-            </div>
-            <p className={`text-2xl font-bold ${underperformingCreatives.length > 0 ? 'text-red-600' : 'text-green-600'}`}>
-              {underperformingCreatives.length}
-            </p>
-            <p className="text-xs text-gray-600 mt-1">
-              {underperformingCreatives.length > 0 ? 'Need attention' : 'All performing well'}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-900">Campaign Performance</h3>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={showOnlyUnderperforming}
-              onChange={(e) => setShowOnlyUnderperforming(e.target.checked)}
-              className="rounded border-gray-300 text-red-600 focus:ring-red-500"
-            />
-            <span className="text-sm text-gray-600">
-              Show only underperforming ({underperformingCampaigns.length})
-            </span>
-          </label>
-        </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Campaign</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Impressions</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Clicks</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">CTR</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Change</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {filteredCampaigns.map(campaign => (
-                <CampaignRow key={campaign.campaignId} campaign={campaign} />
-              ))}
-            </tbody>
-          </table>
-          
-          {filteredCampaigns.length === 0 && (
-            <div className="p-8 text-center text-gray-500">
-              No {showOnlyUnderperforming ? 'underperforming ' : ''}campaigns found
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between">
+      <div className="space-y-8 pb-8">
+        {data.alerts.length > 0 && (
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Ad Creative Performance</h3>
-            <p className="text-sm text-gray-500">
-              Ads with CTR below {CTR_THRESHOLD}% or more than {Math.abs(CTR_DROP_THRESHOLD)}% decline are highlighted
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filteredCreatives.map(creative => (
-            <AdPreviewCard key={creative.creativeId} creative={creative} accountId={accountId} />
-          ))}
-        </div>
-        
-        {filteredCreatives.length === 0 && (
-          <div className="bg-white rounded-lg border border-gray-200 p-8 text-center text-gray-500">
-            No {showOnlyUnderperforming ? 'underperforming ' : ''}ads found
+            <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-500" />
+              Alerts
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {data.alerts.slice(0, 6).map((alert, idx) => (
+                <AlertCard key={idx} alert={alert} accountId={accountId} />
+              ))}
+            </div>
           </div>
         )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-green-500" />
+              Performing Well
+              <span className="text-sm font-normal text-gray-500">
+                ({performingWellCampaigns.length} campaigns, {performingWellAds.length} ads)
+              </span>
+            </h3>
+            
+            {performingWellCampaigns.length > 0 && (
+              <div className="mb-4">
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Campaigns</h4>
+                <div className="space-y-3">
+                  {performingWellCampaigns.slice(0, 5).map(campaign => (
+                    <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={false} />
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {performingWellAds.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Ads</h4>
+                <div className="space-y-3">
+                  {performingWellAds.slice(0, 5).map(ad => (
+                    <AdCard key={ad.id} ad={ad} accountId={accountId} showIssues={false} />
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {performingWellCampaigns.length === 0 && performingWellAds.length === 0 && (
+              <p className="text-gray-500 text-sm">No campaigns or ads performing well this period.</p>
+            )}
+          </div>
+
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-red-500" />
+              Needs Attention
+              <span className="text-sm font-normal text-gray-500">
+                ({needsAttentionCampaigns.length} campaigns, {needsAttentionAds.length} ads)
+              </span>
+            </h3>
+            
+            {needsAttentionCampaigns.length > 0 && (
+              <div className="mb-4">
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Campaigns</h4>
+                <div className="space-y-3">
+                  {needsAttentionCampaigns.map(campaign => (
+                    <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={true} />
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {needsAttentionAds.length > 0 && (
+              <div>
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Ads</h4>
+                <div className="space-y-3">
+                  {needsAttentionAds.map(ad => (
+                    <AdCard key={ad.id} ad={ad} accountId={accountId} showIssues={true} />
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {needsAttentionCampaigns.length === 0 && needsAttentionAds.length === 0 && (
+              <p className="text-gray-500 text-sm">All campaigns and ads are performing well!</p>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

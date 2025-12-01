@@ -1747,7 +1747,7 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     const encodedAccountUrn = encodeURIComponent(accountUrn);
     
     // Fetch campaign-level analytics with daily granularity
-    const campaignAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,dateRange,pivotValues`;
+    const campaignAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,dateRange,pivotValues`;
     
     let campaignAnalytics: any = { elements: [] };
     try {
@@ -1759,7 +1759,7 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     
     // Step 4: Fetch creative-level analytics (with delay)
     await delay(300);
-    const creativeAnalyticsQuery = `q=analytics&pivot=CREATIVE&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,dateRange,pivotValues`;
+    const creativeAnalyticsQuery = `q=analytics&pivot=CREATIVE&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,dateRange,pivotValues`;
     
     let creativeAnalytics: any = { elements: [] };
     try {
@@ -1769,14 +1769,18 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
       console.warn('Creative analytics fetch error:', err.message);
     }
     
-    // Build campaign lookup map
+    // Build campaign lookup map with settings
     const campaignMap = new Map<string, any>();
     for (const c of campaigns) {
       const id = extractId(c.id);
+      const dailyBudget = c.dailyBudget?.amount ? parseFloat(c.dailyBudget.amount) / 100 : null;
       campaignMap.set(id, {
         name: c.name || `Campaign ${id}`,
         groupId: extractId(c.campaignGroup),
-        status: c.status
+        status: c.status,
+        dailyBudget,
+        hasLan: c.audienceExpansionEnabled === true || c.offsiteDeliveryEnabled === true,
+        hasExpansion: c.audienceExpansionEnabled === true
       });
     }
     
@@ -1927,6 +1931,7 @@ app.post('/api/audit/refresh/:accountId', requireAuth, async (req, res) => {
 // Get stored audit analytics data
 app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
   try {
+    const sessionId = (req as any).sessionId;
     const { accountId } = req.params;
     const { startDate, endDate } = req.query;
     
@@ -1943,6 +1948,28 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       getCampaignDailyMetrics(accountId, start, end),
       getCreativeDailyMetrics(accountId, start, end)
     ]);
+    
+    // Fetch live campaign settings for LAN/Expansion flags and budget
+    let liveCampaignSettings = new Map<string, any>();
+    try {
+      const campaignsResponse = await linkedinApiRequest(
+        sessionId, 
+        `/adAccounts/${accountId}/adCampaigns`, 
+        {}, 
+        'q=search&search=(status:(values:List(ACTIVE,PAUSED)))'
+      );
+      for (const c of (campaignsResponse.elements || [])) {
+        const id = c.id?.match(/:(\d+)$/)?.[1] || c.id;
+        const dailyBudget = c.dailyBudget?.amount ? parseFloat(c.dailyBudget.amount) / 100 : null;
+        liveCampaignSettings.set(id, {
+          dailyBudget,
+          hasLan: c.offsiteDeliveryEnabled === true,
+          hasExpansion: c.audienceExpansionEnabled === true
+        });
+      }
+    } catch (err: any) {
+      console.warn('Could not fetch live campaign settings:', err.message);
+    }
     
     // Aggregate metrics by campaign and month for the dashboard
     const campaignsByMonth = new Map<string, Map<string, any>>();
@@ -2022,14 +2049,31 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       const currentCtr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
       const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
       
+      // Get live settings
+      const liveSettings = liveCampaignSettings.get(c.campaignId) || {};
+      const dailyBudget = liveSettings.dailyBudget;
+      const budgetUtilization = dailyBudget && dailyBudget > 0 ? (c.spend / (dailyBudget * 30)) * 100 : undefined;
+      
       return {
         ...c,
         ctr: currentCtr,
         previousMonth: prev || { impressions: 0, clicks: 0, spend: 0, conversions: 0, videoViews: 0, leads: 0 },
         previousCtr: prevCtr,
-        ctrChange: prevCtr > 0 ? ((currentCtr - prevCtr) / prevCtr) * 100 : 0
+        ctrChange: prevCtr > 0 ? ((currentCtr - prevCtr) / prevCtr) * 100 : 0,
+        dailyBudget,
+        budgetUtilization,
+        hasLan: liveSettings.hasLan,
+        hasExpansion: liveSettings.hasExpansion
       };
     }) : [];
+    
+    // Build campaign name lookup from the aggregated data
+    const campaignNameLookup = new Map<string, string>();
+    if (currentMonth) {
+      for (const [campId, campData] of campaignsByMonth.get(currentMonth)!) {
+        campaignNameLookup.set(campId, campData.campaignName || `Campaign ${campId}`);
+      }
+    }
     
     const creatives = currentMonth ? Array.from(creativesByMonth.get(currentMonth)!.values()).map(c => {
       const prev = previousMonth ? creativesByMonth.get(previousMonth)?.get(c.creativeId) : null;
@@ -2038,6 +2082,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       
       return {
         ...c,
+        campaignName: campaignNameLookup.get(c.campaignId) || `Campaign ${c.campaignId}`,
         ctr: currentCtr,
         previousMonth: prev || { impressions: 0, clicks: 0, spend: 0, conversions: 0, videoViews: 0, leads: 0 },
         previousCtr: prevCtr,
