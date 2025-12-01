@@ -632,8 +632,9 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
     const { accountId } = req.params;
     const sessionId = (req as any).sessionId;
     const activeOnly = req.query.activeOnly === 'true';
+    const depth = req.query.depth as string || 'full'; // 'summary' = groups+campaigns only, 'full' = everything
     
-    console.log(`\n=== Fetching hierarchy for account: ${accountId} (activeOnly: ${activeOnly}) ===`);
+    console.log(`\n=== Fetching hierarchy for account: ${accountId} (activeOnly: ${activeOnly}, depth: ${depth}) ===`);
     
     let groups: any[] = [];
     let campaigns: any[] = [];
@@ -678,7 +679,8 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
       errors.push(errorMsg);
     }
     
-    if (campaigns.length > 0) {
+    // Only fetch creatives if depth is 'full'
+    if (depth === 'full' && campaigns.length > 0) {
       try {
         const campaignUrns = campaigns.map((c: any) => {
           const id = typeof c.id === 'number' ? c.id : c.id;
@@ -712,44 +714,51 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, r
         console.error(errorMsg);
         errors.push(errorMsg);
       }
+    } else if (depth === 'summary') {
+      console.log('Skipping creatives fetch (depth=summary)');
     }
     
-    try {
-      const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
-      const segmentsResponse = await linkedinApiRequest(
-        sessionId, 
-        '/adSegments',
-        {},
-        `q=accounts&accounts=List(${accountUrn})`
-      );
-      segments = segmentsResponse.elements || [];
-      console.log(`Segments fetched: ${segments.length} items`);
-      if (segments.length > 0) {
-        console.log(`First segment sample: ${JSON.stringify(segments[0], null, 2).substring(0, 500)}`);
+    // Only fetch segments and engagement rules if depth is 'full'
+    if (depth === 'full') {
+      try {
+        const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+        const segmentsResponse = await linkedinApiRequest(
+          sessionId, 
+          '/adSegments',
+          {},
+          `q=accounts&accounts=List(${accountUrn})`
+        );
+        segments = segmentsResponse.elements || [];
+        console.log(`Segments fetched: ${segments.length} items`);
+        if (segments.length > 0) {
+          console.log(`First segment sample: ${JSON.stringify(segments[0], null, 2).substring(0, 500)}`);
+        }
+      } catch (err: any) {
+        const errorMsg = `Segments error: ${JSON.stringify(err.response?.data || err.message)}`;
+        console.error(errorMsg);
+        errors.push(errorMsg);
       }
-    } catch (err: any) {
-      const errorMsg = `Segments error: ${JSON.stringify(err.response?.data || err.message)}`;
-      console.error(errorMsg);
-      errors.push(errorMsg);
-    }
-    
-    try {
-      const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
-      const rulesResponse = await linkedinApiRequest(
-        sessionId, 
-        '/dmpEngagementRules',
-        {},
-        `q=account&account=${accountUrn}`
-      );
-      engagementRules = rulesResponse.elements || [];
-      console.log(`Engagement rules fetched: ${engagementRules.length} items`);
-      if (engagementRules.length > 0) {
-        console.log(`First engagement rule sample: ${JSON.stringify(engagementRules[0], null, 2).substring(0, 800)}`);
+      
+      try {
+        const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+        const rulesResponse = await linkedinApiRequest(
+          sessionId, 
+          '/dmpEngagementRules',
+          {},
+          `q=account&account=${accountUrn}`
+        );
+        engagementRules = rulesResponse.elements || [];
+        console.log(`Engagement rules fetched: ${engagementRules.length} items`);
+        if (engagementRules.length > 0) {
+          console.log(`First engagement rule sample: ${JSON.stringify(engagementRules[0], null, 2).substring(0, 800)}`);
+        }
+      } catch (err: any) {
+        const errorMsg = `Engagement rules error: ${JSON.stringify(err.response?.data || err.message)}`;
+        console.error(errorMsg);
+        errors.push(errorMsg);
       }
-    } catch (err: any) {
-      const errorMsg = `Engagement rules error: ${JSON.stringify(err.response?.data || err.message)}`;
-      console.error(errorMsg);
-      errors.push(errorMsg);
+    } else {
+      console.log('Skipping segments and engagement rules fetch (depth=summary)');
     }
     
     console.log(`=== Summary: ${groups.length} groups, ${campaigns.length} campaigns, ${creatives.length} creatives, ${segments.length} segments, ${engagementRules.length} engagement rules ===\n`);

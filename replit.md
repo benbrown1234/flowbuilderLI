@@ -1,7 +1,7 @@
 # LinkedIn Audience Visualizer
 
 ## Overview
-This project is a React-based visualization tool for LinkedIn advertising account structures, designed to offer comprehensive insights into campaign hierarchies, targeting strategies, and remarketing flows. It supports both demo data and real LinkedIn Marketing API data via OAuth 2.0. Key features include an AI-powered chatbot for campaign insights, an extensive account auditing system, and a visual campaign planning canvas. The tool aims to streamline the analysis and optimization of LinkedIn ad campaigns, providing a clear overview of complex account structures and aiding in strategic decision-making.
+This project is a React-based visualization tool for LinkedIn advertising account structures, designed to offer comprehensive insights into campaign hierarchies, targeting strategies, and remarketing flows. It uses LinkedIn Marketing API data via OAuth 2.0 (requires login). Key features include an AI-powered chatbot for campaign insights, a CTR performance audit system with ad previews, and a visual campaign planning canvas. The tool aims to streamline the analysis and optimization of LinkedIn ad campaigns, providing a clear overview of complex account structures and aiding in strategic decision-making.
 
 ## User Preferences
 N/A
@@ -15,9 +15,11 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   **Targeting Flow**: Visualizes audience composition.
     *   **Remarketing Flow**: Illustrates campaign and audience flow through a 3-column marketing funnel (Cold Campaigns → Remarketing Audiences → Remarketing Campaigns), showing connections and audience movement.
 *   **Account Audit**:
-    *   Provides on-demand account analysis with a health score (0-100, A-F grade) and categorized recommendations (Structure, Performance, Targeting, Creative, Budget).
-    *   Stores audit snapshots in PostgreSQL, ensuring multi-tenant isolation and 30-day auto-expiry for compliance.
-    *   Analyzes various aspects like empty groups, ad diversity, CTR trends, duplicate targeting, and budget pacing.
+    *   **Performance Dashboard**: Shows CTR stats month-on-month for all campaigns and ads.
+    *   **Live Ad Previews**: Displays ad creatives with embedded LinkedIn preview iframes.
+    *   **Underperforming Ads Detection**: Highlights ads with CTR below 0.4% or >20% decline from previous month with red visual indicators.
+    *   **Summary Metrics**: Total impressions, clicks, account-level CTR, and count of ads needing review.
+    *   **Filter Toggle**: Option to show only underperforming campaigns and ads.
 *   **Ideate Canvas**:
     *   A visual planning tool for campaigns, featuring a drag-and-drop interface.
     *   **Import from Structure**: One-click import of live LinkedIn campaign data into Ideate canvas. Transforms campaign groups, campaigns, and ads into editable nodes with full targeting data preserved. Auto-generates TOF audience nodes from targeting criteria (industries, company sizes, seniorities).
