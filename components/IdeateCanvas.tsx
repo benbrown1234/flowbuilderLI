@@ -329,6 +329,14 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
   const justFinishedSelectingRef = useRef(false);
+  
+  // Multi-drag state
+  const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const originalNodePositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  
+  // Undo history
+  const [undoHistory, setUndoHistory] = useState<IdeateNode[][]>([]);
+  const MAX_UNDO_HISTORY = 50;
 
   // Load canvas or create new one
   useEffect(() => {
@@ -455,6 +463,42 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
       console.error('Failed to load canvas:', err);
     }
   };
+
+  // Push current state to undo history before making changes
+  const pushToUndo = () => {
+    if (isReadOnly) return;
+    setUndoHistory(prev => {
+      const newHistory = [...prev, [...nodes.map(n => ({ ...n }))]];
+      if (newHistory.length > MAX_UNDO_HISTORY) {
+        return newHistory.slice(-MAX_UNDO_HISTORY);
+      }
+      return newHistory;
+    });
+  };
+
+  // Undo last action
+  const undo = () => {
+    if (isReadOnly || undoHistory.length === 0) return;
+    const previousState = undoHistory[undoHistory.length - 1];
+    setUndoHistory(prev => prev.slice(0, -1));
+    setNodes(previousState);
+    setSelectedNode(null);
+    setSelectedNodes([]);
+  };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+Z / Cmd+Z for undo
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undoHistory, isReadOnly]);
 
   const deleteCanvasItem = async (id: string) => {
     if (!confirm('Are you sure you want to delete this canvas?')) return;
@@ -628,6 +672,25 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
       
       if (distance > DRAG_THRESHOLD) {
         setDraggedNode(pendingDragNode);
+        // Initialize drag start position and capture original positions of all selected nodes
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          dragStartPosRef.current = {
+            x: (e.clientX - rect.left - transform.x) / transform.scale,
+            y: (e.clientY - rect.top - transform.y) / transform.scale
+          };
+          // Capture original positions of all selected nodes for multi-drag
+          originalNodePositionsRef.current = new Map();
+          const nodesToCapture = selectedNodes.length > 1 && selectedNodes.includes(pendingDragNode)
+            ? selectedNodes
+            : [pendingDragNode];
+          nodes.forEach(n => {
+            if (nodesToCapture.includes(n.id)) {
+              originalNodePositionsRef.current.set(n.id, { x: n.x, y: n.y });
+            }
+          });
+          pushToUndo();
+        }
       }
     }
     
@@ -636,12 +699,31 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
       
-      const x = (e.clientX - rect.left - transform.x) / transform.scale;
-      const y = (e.clientY - rect.top - transform.y) / transform.scale;
+      const currentX = (e.clientX - rect.left - transform.x) / transform.scale;
+      const currentY = (e.clientY - rect.top - transform.y) / transform.scale;
       
-      setNodes(prev => prev.map(n => 
-        n.id === draggedNode ? { ...n, x, y } : n
-      ));
+      // Check if dragged node is part of multi-selection
+      const isMultiDrag = selectedNodes.length > 1 && selectedNodes.includes(draggedNode);
+      
+      if (isMultiDrag && dragStartPosRef.current) {
+        // Calculate delta from the original drag start position
+        const deltaX = currentX - dragStartPosRef.current.x;
+        const deltaY = currentY - dragStartPosRef.current.y;
+        
+        // Apply delta to original positions to maintain relative spacing
+        setNodes(prev => prev.map(n => {
+          const originalPos = originalNodePositionsRef.current.get(n.id);
+          if (originalPos) {
+            return { ...n, x: originalPos.x + deltaX, y: originalPos.y + deltaY };
+          }
+          return n;
+        }));
+      } else {
+        // Single node drag
+        setNodes(prev => prev.map(n => 
+          n.id === draggedNode ? { ...n, x: currentX, y: currentY } : n
+        ));
+      }
     } else if (isDragging) {
       // Canvas panning is allowed in read-only mode
       setTransform(t => ({
@@ -699,12 +781,16 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
     setIsDragging(false);
     setDraggedNode(null);
     setPendingDragNode(null);
+    dragStartPosRef.current = null;
+    originalNodePositionsRef.current.clear();
   };
 
   // Delete selected nodes (bulk delete)
   const deleteSelectedNodes = () => {
     if (isReadOnly || selectedNodes.length === 0) return;
     if (!confirm(`Are you sure you want to delete ${selectedNodes.length} selected item(s)?`)) return;
+    
+    pushToUndo();
     
     // Get all IDs to delete including children
     const idsToDelete = new Set<string>();
@@ -903,6 +989,8 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
     const node = nodes.find(n => n.id === nodeId);
     if (!node) return;
     
+    pushToUndo();
+    
     const childIds = nodes.filter(n => n.parentId === nodeId).map(n => n.id);
     const grandchildIds = nodes.filter(n => childIds.includes(n.parentId || '')).map(n => n.id);
     
@@ -1014,6 +1102,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
 
   const resetToDefault = () => {
     if (isReadOnly) return; // No resetting in read-only mode
+    pushToUndo();
     setNodes(createDefaultFunnel());
     setSelectedNode(null);
     resetZoom();
@@ -1023,6 +1112,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
     if (isReadOnly) return; // No clearing in read-only mode
     if (nodes.length === 0) return;
     if (confirm('Are you sure you want to clear the entire canvas?')) {
+      pushToUndo();
       setNodes([]);
       setSelectedNode(null);
     }
