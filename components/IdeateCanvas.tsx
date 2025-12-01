@@ -1232,55 +1232,77 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
               </div>
             </div>
             
-            {/* Group-Level TOF Audiences */}
+            {/* Group-Level Audiences */}
             {(() => {
-              const groupTofAudiences = nodes.filter(n => 
+              const groupAudiences = nodes.filter(n => 
                 n.type === 'audience' && 
-                n.audienceCategory === 'tof' && 
                 n.targetGroupId === selectedNodeData.id
               );
               const campaignsInGroup = nodes.filter(n => n.type === 'campaign' && n.parentId === selectedNodeData.id);
               
+              const getAudienceIcon = (aud: IdeateNode) => {
+                const type = aud.audienceType;
+                if (type === 'video_views') return '🎬';
+                if (type === 'lead_form_opens') return '📋';
+                if (type === 'ad_engagers') return '👆';
+                if (type === 'event_attendees') return '📅';
+                if (type === 'website_visitors') return '🌐';
+                if (type === 'company_page_visitors') return '🏢';
+                if (type === 'high_company_engagers') return '📊';
+                if (type === 'saved_audience') return '💾';
+                if (type === 'abm_list') return '📋';
+                return '👥';
+              };
+              
+              const getCategoryColor = (category: string) => {
+                if (category === 'remarketing') return { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-800', badge: 'text-purple-600' };
+                if (category === 'bof') return { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-800', badge: 'text-orange-600' };
+                return { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-800', badge: 'text-blue-600' };
+              };
+              
               return (
                 <div className="p-4 border-b border-gray-100">
                   <div className="flex items-center gap-2 mb-3">
-                    <Users size={16} className="text-blue-500" />
-                    <h4 className="font-semibold text-gray-700 text-sm">Group-Level TOF Audience</h4>
+                    <Users size={16} className="text-gray-500" />
+                    <h4 className="font-semibold text-gray-700 text-sm">Group-Level Audiences</h4>
                   </div>
                   <p className="text-xs text-gray-500 mb-3">
-                    TOF audiences applied here will target all {campaignsInGroup.length} campaign(s) in this group
+                    Audiences applied here will target all {campaignsInGroup.length} campaign(s) in this group
                   </p>
                   
-                  {groupTofAudiences.length > 0 ? (
+                  {groupAudiences.length > 0 ? (
                     <div className="space-y-2">
-                      {groupTofAudiences.map(aud => (
-                        <div 
-                          key={aud.id}
-                          className="flex items-center justify-between p-3 bg-blue-50 rounded-lg border border-blue-200"
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="text-lg">{aud.audienceType === 'saved_audience' ? '💾' : '📋'}</span>
-                            <div>
-                              <div className="text-sm font-medium text-blue-800">{aud.name}</div>
-                              <div className="text-[10px] text-blue-600">
-                                {aud.audienceType === 'saved_audience' ? 'Saved Audience' : 'ABM List'}
+                      {groupAudiences.map(aud => {
+                        const colors = getCategoryColor(aud.audienceCategory || 'tof');
+                        return (
+                          <div 
+                            key={aud.id}
+                            className={`flex items-center justify-between p-3 ${colors.bg} rounded-lg border ${colors.border}`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-lg">{getAudienceIcon(aud)}</span>
+                              <div>
+                                <div className={`text-sm font-medium ${colors.text}`}>{aud.name}</div>
+                                <div className={`text-[10px] ${colors.badge}`}>
+                                  {aud.audienceCategory === 'remarketing' ? 'Remarketing' : aud.audienceCategory === 'bof' ? 'BOF' : 'TOF'}
+                                </div>
                               </div>
                             </div>
+                            <button
+                              onClick={() => setSelectedNode(aud.id)}
+                              className={`text-xs ${colors.badge} hover:underline`}
+                            >
+                              Edit
+                            </button>
                           </div>
-                          <button
-                            onClick={() => setSelectedNode(aud.id)}
-                            className="text-xs text-blue-600 hover:text-blue-800 underline"
-                          >
-                            Edit
-                          </button>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="text-center py-4 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
-                      <p className="text-xs text-gray-500 mb-2">No group-level audience applied</p>
+                      <p className="text-xs text-gray-500 mb-2">No group-level audiences applied</p>
                       <p className="text-[10px] text-gray-400">
-                        Add a TOF audience and set it to target this group
+                        Add an audience and set it to target this group
                       </p>
                     </div>
                   )}
@@ -1292,36 +1314,67 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
 
         {selectedNodeData.type === 'campaign' && (
           <>
-            {/* TOF Audience Association */}
+            {/* Inherited Group Audiences */}
             {(() => {
               const parentGroup = nodes.find(n => n.id === selectedNodeData.parentId);
-              const groupLevelTofAudience = parentGroup 
-                ? nodes.find(n => n.type === 'audience' && n.audienceCategory === 'tof' && n.targetGroupId === parentGroup.id)
-                : null;
+              const groupLevelAudiences = parentGroup 
+                ? nodes.filter(n => n.type === 'audience' && n.targetGroupId === parentGroup.id)
+                : [];
+              
+              const getAudienceIcon = (aud: IdeateNode) => {
+                const type = aud.audienceType;
+                if (type === 'video_views') return '🎬';
+                if (type === 'lead_form_opens') return '📋';
+                if (type === 'ad_engagers') return '👆';
+                if (type === 'event_attendees') return '📅';
+                if (type === 'website_visitors') return '🌐';
+                if (type === 'company_page_visitors') return '🏢';
+                if (type === 'high_company_engagers') return '📊';
+                if (type === 'saved_audience') return '💾';
+                if (type === 'abm_list') return '📋';
+                return '👥';
+              };
+              
+              const getCategoryColor = (category: string) => {
+                if (category === 'remarketing') return { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-800', badge: 'text-purple-600' };
+                if (category === 'bof') return { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-800', badge: 'text-orange-600' };
+                return { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-800', badge: 'text-blue-600' };
+              };
               
               return (
                 <div className="p-4 border-b border-gray-100">
                   <div className="flex items-center gap-2 mb-3">
-                    <Users size={16} className="text-blue-500" />
-                    <h4 className="font-semibold text-gray-700 text-sm">TOF Audience</h4>
+                    <Users size={16} className="text-gray-500" />
+                    <h4 className="font-semibold text-gray-700 text-sm">Audience Targeting</h4>
                   </div>
                   
-                  {groupLevelTofAudience ? (
-                    <div className="bg-blue-50 rounded-lg p-3 border border-blue-200">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-lg">{groupLevelTofAudience.audienceType === 'saved_audience' ? '💾' : '📋'}</span>
-                        <div>
-                          <div className="text-sm font-medium text-blue-800">{groupLevelTofAudience.name}</div>
-                          <div className="text-[10px] text-blue-600">Inherited from group: {parentGroup?.name}</div>
-                        </div>
-                      </div>
-                      <p className="text-xs text-blue-700">
-                        This campaign inherits its TOF audience from the parent group. All campaigns in this group share the same audience targeting.
+                  {groupLevelAudiences.length > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs text-gray-500 mb-2">Inherited from group: {parentGroup?.name}</p>
+                      {groupLevelAudiences.map(aud => {
+                        const colors = getCategoryColor(aud.audienceCategory || 'tof');
+                        return (
+                          <div 
+                            key={aud.id}
+                            className={`flex items-center gap-2 p-3 ${colors.bg} rounded-lg border ${colors.border}`}
+                          >
+                            <span className="text-lg">{getAudienceIcon(aud)}</span>
+                            <div className="flex-1">
+                              <div className={`text-sm font-medium ${colors.text}`}>{aud.name}</div>
+                              <div className={`text-[10px] ${colors.badge}`}>
+                                {aud.audienceCategory === 'remarketing' ? 'Remarketing' : aud.audienceCategory === 'bof' ? 'BOF' : 'TOF'}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <p className="text-xs text-gray-500 mt-2">
+                        All campaigns in this group share these audience(s).
                       </p>
                     </div>
                   ) : (
                     <>
-                      <p className="text-xs text-gray-500 mb-3">Select the top-of-funnel audience feeding this campaign</p>
+                      <p className="text-xs text-gray-500 mb-3">Select a TOF audience for this campaign</p>
                       <select
                         value={selectedNodeData.tofAudienceId || ''}
                         onChange={(e) => updateNode(selectedNodeData.id, { tofAudienceId: e.target.value || undefined })}
@@ -1334,7 +1387,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
                       </select>
                       {parentGroup && (
                         <p className="text-[10px] text-gray-400 mt-2">
-                          Tip: You can also apply a TOF audience at the group level to target all campaigns at once
+                          Tip: Apply audiences at the group level to target all campaigns at once
                         </p>
                       )}
                     </>
@@ -1653,67 +1706,52 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
                     <p className="text-[10px] text-gray-400 mt-1">Campaign that feeds this audience</p>
                   </div>
                 )}
-                {/* Target - For TOF, allow group or campaign targeting */}
-                {currentCategory === 'tof' ? (
-                  <>
-                    <div>
-                      <label className="text-xs font-medium text-gray-500 mb-1 block">Apply to Group</label>
-                      <select
-                        value={selectedNodeData.targetGroupId || ''}
-                        onChange={(e) => {
-                          if (e.target.value) {
-                            updateNode(selectedNodeData.id, { targetGroupId: e.target.value, targetCampaignId: undefined });
-                          } else {
-                            updateNode(selectedNodeData.id, { targetGroupId: undefined });
-                          }
-                        }}
-                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="">None (target specific campaign)</option>
-                        {nodes.filter(n => n.type === 'group').map(g => (
-                          <option key={g.id} value={g.id}>📁 {g.name}</option>
-                        ))}
-                      </select>
-                      <p className="text-[10px] text-gray-400 mt-1">All campaigns in this group will use this audience</p>
-                    </div>
-                    {!selectedNodeData.targetGroupId && (
-                      <div>
-                        <label className="text-xs font-medium text-gray-500 mb-1 block">Or Target Specific Campaign</label>
-                        <select
-                          value={selectedNodeData.targetCampaignId || ''}
-                          onChange={(e) => updateNode(selectedNodeData.id, { targetCampaignId: e.target.value })}
-                          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                          <option value="">Select campaign...</option>
-                          {nodes.filter(n => n.type === 'campaign').map(c => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
-                          ))}
-                        </select>
-                        <p className="text-[10px] text-gray-400 mt-1">Single campaign that uses this audience</p>
-                      </div>
-                    )}
-                    {selectedNodeData.targetGroupId && (
-                      <div className="bg-blue-50 rounded-lg p-3">
-                        <p className="text-xs text-blue-700">
-                          <strong>Group Targeting:</strong> All {nodes.filter(n => n.type === 'campaign' && n.parentId === selectedNodeData.targetGroupId).length} campaign(s) in this group will inherit this audience targeting.
-                        </p>
-                      </div>
-                    )}
-                  </>
-                ) : (
+                {/* Target - Allow group or campaign targeting for all audience types */}
+                <div>
+                  <label className="text-xs font-medium text-gray-500 mb-1 block">Apply to Group</label>
+                  <select
+                    value={selectedNodeData.targetGroupId || ''}
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        updateNode(selectedNodeData.id, { targetGroupId: e.target.value, targetCampaignId: undefined });
+                      } else {
+                        updateNode(selectedNodeData.id, { targetGroupId: undefined });
+                      }
+                    }}
+                    className={`w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-${colorClass}-500`}
+                  >
+                    <option value="">None (target specific campaign)</option>
+                    {nodes.filter(n => n.type === 'group').map(g => (
+                      <option key={g.id} value={g.id}>📁 {g.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-gray-400 mt-1">All campaigns in this group will use this audience</p>
+                </div>
+                {!selectedNodeData.targetGroupId && (
                   <div>
-                    <label className="text-xs font-medium text-gray-500 mb-1 block">Target Campaign</label>
+                    <label className="text-xs font-medium text-gray-500 mb-1 block">Or Target Specific Campaign</label>
                     <select
                       value={selectedNodeData.targetCampaignId || ''}
                       onChange={(e) => updateNode(selectedNodeData.id, { targetCampaignId: e.target.value })}
                       className={`w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-${colorClass}-500`}
                     >
-                      <option value="">Select target...</option>
+                      <option value="">Select campaign...</option>
                       {nodes.filter(n => n.type === 'campaign' && n.id !== selectedNodeData.sourceCampaignId).map(c => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
-                    <p className="text-[10px] text-gray-400 mt-1">Campaign that uses this audience</p>
+                    <p className="text-[10px] text-gray-400 mt-1">Single campaign that uses this audience</p>
+                  </div>
+                )}
+                {selectedNodeData.targetGroupId && (
+                  <div className={`rounded-lg p-3 ${
+                    currentCategory === 'remarketing' ? 'bg-purple-50' : currentCategory === 'bof' ? 'bg-orange-50' : 'bg-blue-50'
+                  }`}>
+                    <p className={`text-xs ${
+                      currentCategory === 'remarketing' ? 'text-purple-700' : currentCategory === 'bof' ? 'text-orange-700' : 'text-blue-700'
+                    }`}>
+                      <strong>Group Targeting:</strong> All {nodes.filter(n => n.type === 'campaign' && n.parentId === selectedNodeData.targetGroupId).length} campaign(s) in this group will inherit this audience targeting.
+                    </p>
                   </div>
                 )}
               </div>
@@ -2483,19 +2521,40 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
                 </div>
               )}
 
-              {/* Group TOF Badge */}
+              {/* Group Audience Badge */}
               {node.type === 'group' && (() => {
-                const groupTofAudience = nodes.find(n => 
+                const groupAudiences = nodes.filter(n => 
                   n.type === 'audience' && 
-                  n.audienceCategory === 'tof' && 
                   n.targetGroupId === node.id
                 );
-                if (!groupTofAudience) return null;
+                if (groupAudiences.length === 0) return null;
+                
+                const categories = [...new Set(groupAudiences.map(a => a.audienceCategory))];
+                const hasRemarketing = categories.includes('remarketing');
+                const hasBof = categories.includes('bof');
+                const hasTof = categories.includes('tof');
+                
                 return (
-                  <span className="mt-1.5 text-[9px] font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 self-start flex items-center gap-1">
-                    <Users size={10} />
-                    {groupTofAudience.audienceType === 'saved_audience' ? 'Saved Audience' : 'ABM List'}
-                  </span>
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {hasRemarketing && (
+                      <span className="text-[8px] font-medium px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 flex items-center gap-0.5">
+                        <Users size={8} />
+                        Remarketing
+                      </span>
+                    )}
+                    {hasBof && (
+                      <span className="text-[8px] font-medium px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 flex items-center gap-0.5">
+                        <Users size={8} />
+                        BOF
+                      </span>
+                    )}
+                    {hasTof && (
+                      <span className="text-[8px] font-medium px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 flex items-center gap-0.5">
+                        <Users size={8} />
+                        TOF
+                      </span>
+                    )}
+                  </div>
                 );
               })()}
               

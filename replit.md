@@ -29,10 +29,10 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   **Ad Format Enforcement**: All ads within a single campaign must use the same ad format type. New ads automatically inherit the format from existing ads. Changing format prompts to update all ads in the campaign.
     *   **Thought Leader Ads**: Toggle in ad sidebar marks ads as Thought Leader Ads (TLA), showing a TLA badge on the ad node.
     *   **Audience Flows**: Three categories with different connection rules:
-        - **Remarketing** (purple): Video Views, Lead Form Opens, Ad Engagers, Event Attendees - has Source AND Target campaign
-        - **BOF (Website)** (orange): Website Visitors, Company Page Visitors, High Company Engagers - Target campaign only
+        - **Remarketing** (purple): Video Views, Lead Form Opens, Ad Engagers, Event Attendees - has Source AND Target campaign/group
+        - **BOF (Website)** (orange): Website Visitors, Company Page Visitors, High Company Engagers - Target campaign/group only
         - **TOF** (blue): Saved Audience, ABM Lists - Can target a specific campaign OR an entire campaign group
-    *   **Group-Level TOF Targeting**: TOF audiences can be applied to a campaign group, automatically targeting all campaigns within that group. Visual connection lines show the flow from audience to group to campaigns. Groups with TOF targeting display a badge indicator.
+    *   **Group-Level Audience Targeting**: All audience types (Remarketing, BOF, TOF) can be applied to a campaign group, automatically targeting all campaigns within that group. Visual connection lines show the flow from audience to group to campaigns. Groups with audience targeting display category badges (purple for Remarketing, orange for BOF, blue for TOF). Campaigns show inherited audiences from their parent group.
     *   **Saved Audience Targeting**: TOF "Saved Audience" nodes include Industry, Company Size, and Seniority targeting options.
     *   **Campaign Objectives**: Full LinkedIn objective list organized by category (Awareness: Brand Awareness; Consideration: Website Visits, Engagement, Video Views; Conversions: Lead Generation, Talent Leads, Website Conversions, Job Applicants) with recommendations based on funnel stage.
     *   **Campaign Settings**: TOF audience association, bidding type (Manual/Maximize Delivery), Enhanced Audience checkbox, LinkedIn Audience Network checkbox
