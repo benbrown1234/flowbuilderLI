@@ -38,6 +38,8 @@ import {
   optInAuditAccount,
   updateAuditAccountSyncStatus,
   getOptedInAccounts,
+  getStuckSyncs,
+  markStuckSyncsAsError,
   removeAuditAccount,
   saveCampaignDailyMetrics,
   saveCreativeDailyMetrics,
@@ -1862,7 +1864,17 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     
   } catch (err: any) {
     console.error(`Audit sync error for account ${accountId}:`, err.message);
-    await updateAuditAccountSyncStatus(accountId, 'error', err.message);
+    
+    let errorMessage = err.message;
+    if (err.message?.includes('Not authenticated') || err.message?.includes('401') || err.response?.status === 401) {
+      errorMessage = 'LinkedIn connection expired - please reconnect your account';
+    } else if (err.message?.includes('429') || err.response?.status === 429) {
+      errorMessage = 'LinkedIn rate limit reached - please try again later';
+    } else if (err.message?.includes('403') || err.response?.status === 403) {
+      errorMessage = 'Access denied - check account permissions';
+    }
+    
+    await updateAuditAccountSyncStatus(accountId, 'error', errorMessage);
     throw err;
   }
 }
@@ -2398,9 +2410,16 @@ app.delete('/api/canvas/comments/:commentId', async (req, res) => {
   }
 });
 
-initDatabase().catch(err => {
-  console.error('Failed to initialize database:', err.message);
-});
+initDatabase()
+  .then(async () => {
+    const stuckSyncs = await markStuckSyncsAsError();
+    if (stuckSyncs.length > 0) {
+      console.log(`Marked ${stuckSyncs.length} stuck sync(s) as error - they can be retried via Refresh`);
+    }
+  })
+  .catch(err => {
+    console.error('Failed to initialize database:', err.message);
+  });
 
 if (isProduction) {
   const distPath = path.join(__dirname, '..', 'dist');

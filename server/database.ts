@@ -601,6 +601,26 @@ export async function getOptedInAccounts() {
   return result.rows;
 }
 
+export async function getStuckSyncs() {
+  const result = await pool.query(
+    `SELECT * FROM audit_accounts 
+     WHERE sync_status IN ('pending', 'syncing')
+     ORDER BY opted_in_at`
+  );
+  return result.rows;
+}
+
+export async function markStuckSyncsAsError() {
+  const result = await pool.query(
+    `UPDATE audit_accounts 
+     SET sync_status = 'error', 
+         sync_error = 'Sync was interrupted - click Refresh to retry'
+     WHERE sync_status IN ('pending', 'syncing')
+     RETURNING *`
+  );
+  return result.rows;
+}
+
 export async function removeAuditAccount(accountId: string) {
   await pool.query('DELETE FROM audit_accounts WHERE account_id = $1', [accountId]);
   await pool.query('DELETE FROM analytics_campaign_daily WHERE account_id = $1', [accountId]);
