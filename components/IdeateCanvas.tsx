@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Plus, Minus, Maximize, Move, Trash2, Sparkles, Download, Copy, Folder, LayoutGrid, FileImage, Lightbulb, Send, X, GripVertical, Edit2, Check, ChevronDown, ChevronRight, Target, Settings, Image, Users, Percent, ArrowRight, Save, Share2, MessageSquare, Clock, FolderOpen, Link2, ExternalLink, CheckCircle, XCircle } from 'lucide-react';
+import { Plus, Minus, Maximize, Move, Trash2, Sparkles, Download, Copy, Folder, LayoutGrid, FileImage, Lightbulb, Send, X, GripVertical, Edit2, Check, ChevronDown, ChevronRight, Target, Settings, Image, Users, Percent, ArrowRight, Save, Share2, MessageSquare, Clock, FolderOpen, Link2, ExternalLink, CheckCircle, XCircle, Hand, MousePointer2 } from 'lucide-react';
 import axios from 'axios';
 
 export interface IdeateNode {
@@ -322,6 +322,12 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   const [titleInput, setTitleInput] = useState('');
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedNodesRef = useRef<string>('');
+  
+  // Tool mode and multi-select state
+  const [toolMode, setToolMode] = useState<'pan' | 'select'>('pan');
+  const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
+  const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
+  const [isSelecting, setIsSelecting] = useState(false);
 
   // Load canvas or create new one
   useEffect(() => {
@@ -579,15 +585,38 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return; // Only pan with left mouse button
+    if (e.button !== 0) return; // Only interact with left mouse button
     if (draggedNode) return;
-    setIsDragging(true);
-    setStartPos({ x: e.clientX - transform.x, y: e.clientY - transform.y });
+    
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    
+    if (toolMode === 'select' && !isReadOnly) {
+      // Start selection box
+      const canvasX = (e.clientX - rect.left - transform.x) / transform.scale;
+      const canvasY = (e.clientY - rect.top - transform.y) / transform.scale;
+      setSelectionBox({ startX: canvasX, startY: canvasY, endX: canvasX, endY: canvasY });
+      setIsSelecting(true);
+    } else {
+      // Pan mode
+      setIsDragging(true);
+      setStartPos({ x: e.clientX - transform.x, y: e.clientY - transform.y });
+    }
   };
 
   const DRAG_THRESHOLD = 5;
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    // Handle selection box drawing
+    if (isSelecting && selectionBox && toolMode === 'select') {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const canvasX = (e.clientX - rect.left - transform.x) / transform.scale;
+      const canvasY = (e.clientY - rect.top - transform.y) / transform.scale;
+      setSelectionBox(prev => prev ? { ...prev, endX: canvasX, endY: canvasY } : null);
+      return;
+    }
+    
     if (pendingDragNode && !draggedNode && !isReadOnly) {
       const dx = e.clientX - dragStartPos.x;
       const dy = e.clientY - dragStartPos.y;
@@ -619,10 +648,81 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
     }
   };
 
+  // Helper to get node dimensions based on type
+  const getNodeDimensions = (node: IdeateNode) => {
+    if (node.type === 'group') return { width: 220, height: 60 };
+    if (node.type === 'campaign') return { width: 220, height: 90 };
+    if (node.type === 'ad') return { width: 120, height: 100 };
+    if (node.type === 'audience') return { width: 180, height: 80 };
+    return { width: 150, height: 60 };
+  };
+
+  // Check if a node intersects with the selection box
+  const nodeIntersectsBox = (node: IdeateNode, box: { startX: number; startY: number; endX: number; endY: number }) => {
+    const dims = getNodeDimensions(node);
+    const boxLeft = Math.min(box.startX, box.endX);
+    const boxRight = Math.max(box.startX, box.endX);
+    const boxTop = Math.min(box.startY, box.endY);
+    const boxBottom = Math.max(box.startY, box.endY);
+    
+    const nodeLeft = node.x;
+    const nodeRight = node.x + dims.width;
+    const nodeTop = node.y;
+    const nodeBottom = node.y + dims.height;
+    
+    return !(nodeRight < boxLeft || nodeLeft > boxRight || nodeBottom < boxTop || nodeTop > boxBottom);
+  };
+
   const handleMouseUp = () => {
+    // Handle selection box completion
+    if (isSelecting && selectionBox && toolMode === 'select') {
+      const selected = nodes.filter(node => nodeIntersectsBox(node, selectionBox)).map(n => n.id);
+      setSelectedNodes(selected);
+      setSelectionBox(null);
+      setIsSelecting(false);
+      if (selected.length === 1) {
+        setSelectedNode(selected[0]);
+      } else {
+        setSelectedNode(null);
+      }
+      return;
+    }
+    
     setIsDragging(false);
     setDraggedNode(null);
     setPendingDragNode(null);
+  };
+
+  // Delete selected nodes (bulk delete)
+  const deleteSelectedNodes = () => {
+    if (isReadOnly || selectedNodes.length === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedNodes.length} selected item(s)?`)) return;
+    
+    // Get all IDs to delete including children
+    const idsToDelete = new Set<string>();
+    selectedNodes.forEach(nodeId => {
+      idsToDelete.add(nodeId);
+      // Add children
+      nodes.forEach(n => {
+        if (n.parentId === nodeId) {
+          idsToDelete.add(n.id);
+          // Add grandchildren
+          nodes.forEach(gc => {
+            if (gc.parentId === n.id) idsToDelete.add(gc.id);
+          });
+        }
+      });
+    });
+    
+    setNodes(prev => prev.filter(n => !idsToDelete.has(n.id)));
+    setSelectedNodes([]);
+    setSelectedNode(null);
+  };
+
+  // Clear selection
+  const clearSelection = () => {
+    setSelectedNodes([]);
+    setSelectedNode(null);
   };
 
   const handleNodeMouseDown = (e: React.MouseEvent, nodeId: string) => {
@@ -641,8 +741,9 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const handleCanvasClick = () => {
-    if (!justClickedNode && !draggedNode) {
+    if (!justClickedNode && !draggedNode && !isSelecting) {
       setSelectedNode(null);
+      setSelectedNodes([]);
     }
   };
 
@@ -1739,6 +1840,58 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
           <Trash2 size={16} />
           <span>Clear All</span>
         </button>
+        
+        <div className="w-px h-8 bg-gray-300 mx-1" />
+        
+        {/* Tool Mode Switcher */}
+        <div className="flex items-center gap-1 bg-white rounded-lg shadow-lg border border-gray-200 p-1">
+          <button
+            onClick={() => { setToolMode('pan'); clearSelection(); }}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium transition-colors ${
+              toolMode === 'pan' 
+                ? 'bg-blue-100 text-blue-700' 
+                : 'hover:bg-gray-100 text-gray-600'
+            }`}
+            title="Pan Mode (drag to move around)"
+          >
+            <Hand size={16} />
+            <span>Pan</span>
+          </button>
+          <button
+            onClick={() => setToolMode('select')}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium transition-colors ${
+              toolMode === 'select' 
+                ? 'bg-blue-100 text-blue-700' 
+                : 'hover:bg-gray-100 text-gray-600'
+            }`}
+            title="Select Mode (drag to select multiple items)"
+          >
+            <MousePointer2 size={16} />
+            <span>Select</span>
+          </button>
+        </div>
+        
+        {/* Multi-Select Actions */}
+        {selectedNodes.length > 0 && (
+          <div className="flex items-center gap-2 bg-blue-50 rounded-lg px-3 py-1.5 border border-blue-200">
+            <span className="text-sm text-blue-700 font-medium">{selectedNodes.length} selected</span>
+            <button
+              onClick={deleteSelectedNodes}
+              className="flex items-center gap-1 px-2 py-1 bg-red-100 hover:bg-red-200 rounded text-red-600 text-sm font-medium"
+              title="Delete selected items"
+            >
+              <Trash2 size={14} />
+              Delete
+            </button>
+            <button
+              onClick={clearSelection}
+              className="p-1 hover:bg-blue-100 rounded text-blue-600"
+              title="Clear selection"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
       </div>
       )}
 
@@ -1861,7 +2014,11 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
       {/* Canvas Area */}
       <div
         ref={containerRef}
-        className={`w-full h-full ${draggedNode ? 'cursor-grabbing' : isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+        className={`w-full h-full ${
+          toolMode === 'select' 
+            ? isSelecting ? 'cursor-crosshair' : 'cursor-crosshair'
+            : draggedNode ? 'cursor-grabbing' : isDragging ? 'cursor-grabbing' : 'cursor-grab'
+        }`}
         onMouseDown={handleCanvasMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -1973,8 +2130,26 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
             </defs>
           </svg>
 
+          {/* Selection Box */}
+          {selectionBox && isSelecting && (
+            <div
+              className="absolute border-2 border-blue-500 bg-blue-100/30 pointer-events-none z-50"
+              style={{
+                left: Math.min(selectionBox.startX, selectionBox.endX),
+                top: Math.min(selectionBox.startY, selectionBox.endY),
+                width: Math.abs(selectionBox.endX - selectionBox.startX),
+                height: Math.abs(selectionBox.endY - selectionBox.startY),
+              }}
+            />
+          )}
+
           {/* Nodes */}
-          {nodes.filter(n => n.type !== 'audience').map(node => (
+          {nodes.filter(n => n.type !== 'audience').map(node => {
+            const isMultiSelected = selectedNodes.includes(node.id);
+            const isSingleSelected = selectedNode === node.id;
+            const isSelected = isMultiSelected || isSingleSelected;
+            
+            return (
             <div
               key={node.id}
               onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
@@ -1983,10 +2158,10 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
                 absolute transition-shadow duration-200 rounded-lg border-2 flex flex-col justify-center z-10 select-none
                 ${node.type === 'ad' ? 'w-[140px] px-3 py-2' : 'w-[260px] px-4 py-3'}
                 ${draggedNode === node.id ? 'cursor-grabbing shadow-2xl scale-105' : 'cursor-grab hover:shadow-xl'}
-                ${selectedNode === node.id ? 'ring-2 ring-offset-2' : ''}
-                ${node.type === 'group' ? `bg-white border-gray-300 ${selectedNode === node.id ? 'ring-gray-400' : ''}` : ''}
-                ${node.type === 'campaign' ? `bg-white border-orange-300 border-l-4 border-l-orange-500 ${selectedNode === node.id ? 'ring-orange-400' : ''}` : ''}
-                ${node.type === 'ad' ? `bg-white border-green-300 border-l-4 border-l-green-500 ${selectedNode === node.id ? 'ring-green-400' : ''}` : ''}
+                ${isSelected ? 'ring-2 ring-offset-2 ring-blue-500' : ''}
+                ${node.type === 'group' ? `bg-white border-gray-300` : ''}
+                ${node.type === 'campaign' ? `bg-white border-orange-300 border-l-4 border-l-orange-500` : ''}
+                ${node.type === 'ad' ? `bg-white border-green-300 border-l-4 border-l-green-500` : ''}
               `}
               style={{
                 left: node.x,
@@ -2053,7 +2228,8 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
                 </div>
               )}
             </div>
-          ))}
+          );
+          })}
 
           {/* Audience Nodes */}
           {nodes.filter(n => n.type === 'audience').map(node => {
@@ -2066,6 +2242,9 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
               tof: { bg: 'from-blue-50 to-blue-100', border: 'border-blue-300', ring: 'ring-blue-400', text: 'text-blue-900', accent: 'text-blue-600' },
             };
             const colors = colorClasses[category];
+            const isMultiSelected = selectedNodes.includes(node.id);
+            const isSingleSelected = selectedNode === node.id;
+            const isSelected = isMultiSelected || isSingleSelected;
             
             return (
               <div
@@ -2076,7 +2255,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
                   absolute transition-shadow duration-200 rounded-full border-2 flex items-center justify-center z-20 select-none
                   w-[180px] h-[70px] px-4
                   ${draggedNode === node.id ? 'cursor-grabbing shadow-2xl scale-105' : 'cursor-grab hover:shadow-xl'}
-                  ${selectedNode === node.id ? `ring-2 ring-offset-2 ${colors.ring}` : ''}
+                  ${isSelected ? `ring-2 ring-offset-2 ring-blue-500` : ''}
                   bg-gradient-to-r ${colors.bg} ${colors.border}
                 `}
                 style={{
