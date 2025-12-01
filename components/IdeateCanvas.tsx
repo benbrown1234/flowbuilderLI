@@ -579,6 +579,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return; // Only pan with left mouse button
     if (draggedNode) return;
     setIsDragging(true);
     setStartPos({ x: e.clientX - transform.x, y: e.clientY - transform.y });
@@ -626,6 +627,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
 
   const handleNodeMouseDown = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
+    if (e.button !== 0) return; // Only interact with left mouse button
     // In read-only mode, only allow selection (not dragging)
     if (isReadOnly) {
       setSelectedNode(nodeId);

@@ -54,6 +54,7 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect }) => {
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return; // Only pan with left mouse button
     setIsDragging(true);
     setStartPos({ x: e.clientX - transform.x, y: e.clientY - transform.y });
   };
