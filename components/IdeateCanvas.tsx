@@ -328,7 +328,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
   const [selectionBox, setSelectionBox] = useState<{ startX: number; startY: number; endX: number; endY: number } | null>(null);
   const [isSelecting, setIsSelecting] = useState(false);
-  const [justFinishedSelecting, setJustFinishedSelecting] = useState(false);
+  const justFinishedSelectingRef = useRef(false);
 
   // Load canvas or create new one
   useEffect(() => {
@@ -592,10 +592,13 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
     
+    console.log('Canvas mousedown:', { toolMode, isReadOnly });
+    
     if (toolMode === 'select' && !isReadOnly) {
       // Start selection box
       const canvasX = (e.clientX - rect.left - transform.x) / transform.scale;
       const canvasY = (e.clientY - rect.top - transform.y) / transform.scale;
+      console.log('Starting selection at:', { canvasX, canvasY });
       setSelectionBox({ startX: canvasX, startY: canvasY, endX: canvasX, endY: canvasY });
       setIsSelecting(true);
     } else {
@@ -674,16 +677,17 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
     return !(nodeRight < boxLeft || nodeLeft > boxRight || nodeBottom < boxTop || nodeTop > boxBottom);
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e: React.MouseEvent) => {
     // Handle selection box completion
     if (isSelecting && selectionBox && toolMode === 'select') {
       const selected = nodes.filter(node => nodeIntersectsBox(node, selectionBox)).map(n => n.id);
+      console.log('Selection complete:', { boxSize: { w: Math.abs(selectionBox.endX - selectionBox.startX), h: Math.abs(selectionBox.endY - selectionBox.startY) }, nodesChecked: nodes.length, selectedCount: selected.length });
       setSelectedNodes(selected);
       setSelectionBox(null);
       setIsSelecting(false);
-      // Prevent the canvas click from clearing the selection
-      setJustFinishedSelecting(true);
-      setTimeout(() => setJustFinishedSelecting(false), 100);
+      // Prevent the canvas click from clearing the selection (use ref for synchronous access)
+      justFinishedSelectingRef.current = true;
+      setTimeout(() => { justFinishedSelectingRef.current = false; }, 200);
       if (selected.length === 1) {
         setSelectedNode(selected[0]);
       } else {
@@ -745,7 +749,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const handleCanvasClick = () => {
-    if (!justClickedNode && !draggedNode && !isSelecting && !justFinishedSelecting) {
+    if (!justClickedNode && !draggedNode && !isSelecting && !justFinishedSelectingRef.current) {
       setSelectedNode(null);
       setSelectedNodes([]);
     }
@@ -1740,162 +1744,164 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
       <div className="flex-1 flex overflow-hidden">
       <div className={`flex-1 relative bg-[#f0f2f5] overflow-hidden ${selectedNodeData ? '' : 'rounded-b-xl'} shadow-inner border-x border-b border-gray-200`}>
       
-      {/* Toolbar - Hidden for shared view */}
+      {/* Toolbar - Hidden for shared view - Two rows for better fit */}
       {!isReadOnly && (
-      <div className="absolute top-4 left-4 z-50 flex items-center gap-2">
-        <div className="flex items-center gap-1 bg-white rounded-lg shadow-lg border border-gray-200 p-1">
-          <button
-            onClick={() => addNode('group')}
-            className="flex items-center gap-1.5 px-3 py-2 hover:bg-gray-100 rounded text-gray-700 text-sm font-medium"
-            title="Add Campaign Group"
-          >
-            <Folder size={16} className="text-gray-500" />
-            <span>Group</span>
-          </button>
-          <div className="w-px h-6 bg-gray-200" />
-          <button
-            onClick={() => addNode('campaign')}
-            className="flex items-center gap-1.5 px-3 py-2 hover:bg-gray-100 rounded text-gray-700 text-sm font-medium"
-            title="Add Campaign"
-          >
-            <LayoutGrid size={16} className="text-orange-500" />
-            <span>Campaign</span>
-          </button>
-          <div className="w-px h-6 bg-gray-200" />
-          <button
-            onClick={() => addNode('ad')}
-            className="flex items-center gap-1.5 px-3 py-2 hover:bg-gray-100 rounded text-gray-700 text-sm font-medium"
-            title="Add Ad"
-          >
-            <FileImage size={16} className="text-green-500" />
-            <span>Ad</span>
-          </button>
-          <div className="w-px h-6 bg-gray-200" />
-          <div className="relative group">
+      <div className="absolute top-4 left-4 z-50 flex flex-col gap-2">
+        {/* Row 1: Add nodes and actions */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 bg-white rounded-lg shadow-lg border border-gray-200 p-1">
             <button
+              onClick={() => addNode('group')}
               className="flex items-center gap-1.5 px-3 py-2 hover:bg-gray-100 rounded text-gray-700 text-sm font-medium"
-              title="Add Audience"
+              title="Add Campaign Group"
             >
-              <Users size={16} className="text-purple-500" />
-              <span>Audience</span>
-              <ChevronDown size={14} className="text-gray-400" />
+              <Folder size={16} className="text-gray-500" />
+              <span>Group</span>
             </button>
-            <div className="absolute top-full left-0 mt-1 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[180px] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+            <div className="w-px h-6 bg-gray-200" />
+            <button
+              onClick={() => addNode('campaign')}
+              className="flex items-center gap-1.5 px-3 py-2 hover:bg-gray-100 rounded text-gray-700 text-sm font-medium"
+              title="Add Campaign"
+            >
+              <LayoutGrid size={16} className="text-orange-500" />
+              <span>Campaign</span>
+            </button>
+            <div className="w-px h-6 bg-gray-200" />
+            <button
+              onClick={() => addNode('ad')}
+              className="flex items-center gap-1.5 px-3 py-2 hover:bg-gray-100 rounded text-gray-700 text-sm font-medium"
+              title="Add Ad"
+            >
+              <FileImage size={16} className="text-green-500" />
+              <span>Ad</span>
+            </button>
+            <div className="w-px h-6 bg-gray-200" />
+            <div className="relative group">
               <button
-                onClick={() => addAudienceNode('remarketing')}
-                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-purple-50 text-left"
+                className="flex items-center gap-1.5 px-3 py-2 hover:bg-gray-100 rounded text-gray-700 text-sm font-medium"
+                title="Add Audience"
               >
-                <span className="w-2 h-2 rounded-full bg-purple-500" />
-                <div>
-                  <div className="text-sm font-medium text-gray-800">Remarketing</div>
-                  <div className="text-[10px] text-gray-500">Source → Target campaign</div>
-                </div>
+                <Users size={16} className="text-purple-500" />
+                <span>Audience</span>
+                <ChevronDown size={14} className="text-gray-400" />
               </button>
-              <button
-                onClick={() => addAudienceNode('bof')}
-                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-orange-50 text-left"
-              >
-                <span className="w-2 h-2 rounded-full bg-orange-500" />
-                <div>
-                  <div className="text-sm font-medium text-gray-800">BOF (Website)</div>
-                  <div className="text-[10px] text-gray-500">Target campaign only</div>
-                </div>
-              </button>
-              <button
-                onClick={() => addAudienceNode('tof')}
-                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 text-left"
-              >
-                <span className="w-2 h-2 rounded-full bg-blue-500" />
-                <div>
-                  <div className="text-sm font-medium text-gray-800">TOF</div>
-                  <div className="text-[10px] text-gray-500">Target campaign only</div>
-                </div>
-              </button>
+              <div className="absolute top-full left-0 mt-1 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[180px] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                <button
+                  onClick={() => addAudienceNode('remarketing')}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-purple-50 text-left"
+                >
+                  <span className="w-2 h-2 rounded-full bg-purple-500" />
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">Remarketing</div>
+                    <div className="text-[10px] text-gray-500">Source → Target campaign</div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => addAudienceNode('bof')}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-orange-50 text-left"
+                >
+                  <span className="w-2 h-2 rounded-full bg-orange-500" />
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">BOF (Website)</div>
+                    <div className="text-[10px] text-gray-500">Target campaign only</div>
+                  </div>
+                </button>
+                <button
+                  onClick={() => addAudienceNode('tof')}
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 text-left"
+                >
+                  <span className="w-2 h-2 rounded-full bg-blue-500" />
+                  <div>
+                    <div className="text-sm font-medium text-gray-800">TOF</div>
+                    <div className="text-[10px] text-gray-500">Target campaign only</div>
+                  </div>
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-        
-        {selectedNode && (
+          
+          {selectedNode && (
+            <button
+              onClick={() => deleteNode(selectedNode)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-red-50 hover:bg-red-100 rounded-lg text-red-600 text-sm font-medium border border-red-200"
+            >
+              <Trash2 size={16} />
+              <span>Delete</span>
+            </button>
+          )}
+          
           <button
-            onClick={() => deleteNode(selectedNode)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-red-50 hover:bg-red-100 rounded-lg text-red-600 text-sm font-medium border border-red-200"
+            onClick={resetToDefault}
+            className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-gray-100 rounded-lg text-gray-700 text-sm font-medium border border-gray-200 shadow-sm"
+            title="Reset to default funnel"
+          >
+            <Lightbulb size={16} className="text-yellow-500" />
+            <span>Default</span>
+          </button>
+          
+          <button
+            onClick={clearAll}
+            className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-red-50 rounded-lg text-gray-600 hover:text-red-600 text-sm font-medium border border-gray-200 hover:border-red-200 shadow-sm transition-colors"
+            title="Clear entire canvas"
           >
             <Trash2 size={16} />
-            <span>Delete</span>
-          </button>
-        )}
-        
-        <div className="w-px h-8 bg-gray-300 mx-1" />
-        
-        <button
-          onClick={resetToDefault}
-          className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-gray-100 rounded-lg text-gray-700 text-sm font-medium border border-gray-200 shadow-sm"
-          title="Reset to default funnel"
-        >
-          <Lightbulb size={16} className="text-yellow-500" />
-          <span>Default Funnel</span>
-        </button>
-        
-        <button
-          onClick={clearAll}
-          className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-red-50 rounded-lg text-gray-600 hover:text-red-600 text-sm font-medium border border-gray-200 hover:border-red-200 shadow-sm transition-colors"
-          title="Clear entire canvas"
-        >
-          <Trash2 size={16} />
-          <span>Clear All</span>
-        </button>
-        
-        <div className="w-px h-8 bg-gray-300 mx-1" />
-        
-        {/* Tool Mode Switcher */}
-        <div className="flex items-center gap-1 bg-white rounded-lg shadow-lg border border-gray-200 p-1">
-          <button
-            onClick={() => { setToolMode('pan'); clearSelection(); }}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium transition-colors ${
-              toolMode === 'pan' 
-                ? 'bg-blue-100 text-blue-700' 
-                : 'hover:bg-gray-100 text-gray-600'
-            }`}
-            title="Pan Mode (drag to move around)"
-          >
-            <Hand size={16} />
-            <span>Pan</span>
-          </button>
-          <button
-            onClick={() => setToolMode('select')}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium transition-colors ${
-              toolMode === 'select' 
-                ? 'bg-blue-100 text-blue-700' 
-                : 'hover:bg-gray-100 text-gray-600'
-            }`}
-            title="Select Mode (drag to select multiple items)"
-          >
-            <MousePointer2 size={16} />
-            <span>Select</span>
+            <span>Clear</span>
           </button>
         </div>
         
-        {/* Multi-Select Actions */}
-        {selectedNodes.length > 0 && (
-          <div className="flex items-center gap-2 bg-blue-50 rounded-lg px-3 py-1.5 border border-blue-200">
-            <span className="text-sm text-blue-700 font-medium">{selectedNodes.length} selected</span>
+        {/* Row 2: Tool mode and selection */}
+        <div className="flex items-center gap-2">
+          {/* Tool Mode Switcher */}
+          <div className="flex items-center gap-1 bg-white rounded-lg shadow-lg border border-gray-200 p-1">
             <button
-              onClick={deleteSelectedNodes}
-              className="flex items-center gap-1 px-2 py-1 bg-red-100 hover:bg-red-200 rounded text-red-600 text-sm font-medium"
-              title="Delete selected items"
+              onClick={() => { setToolMode('pan'); clearSelection(); }}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium transition-colors ${
+                toolMode === 'pan' 
+                  ? 'bg-blue-100 text-blue-700' 
+                  : 'hover:bg-gray-100 text-gray-600'
+              }`}
+              title="Pan Mode (drag to move around)"
             >
-              <Trash2 size={14} />
-              Delete
+              <Hand size={16} />
+              <span>Pan</span>
             </button>
             <button
-              onClick={clearSelection}
-              className="p-1 hover:bg-blue-100 rounded text-blue-600"
-              title="Clear selection"
+              onClick={() => setToolMode('select')}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium transition-colors ${
+                toolMode === 'select' 
+                  ? 'bg-blue-100 text-blue-700' 
+                  : 'hover:bg-gray-100 text-gray-600'
+              }`}
+              title="Select Mode (drag to select multiple items)"
             >
-              <X size={14} />
+              <MousePointer2 size={16} />
+              <span>Select</span>
             </button>
           </div>
-        )}
+          
+          {/* Multi-Select Actions */}
+          {selectedNodes.length > 0 && (
+            <div className="flex items-center gap-2 bg-blue-50 rounded-lg px-3 py-1.5 border border-blue-200">
+              <span className="text-sm text-blue-700 font-medium">{selectedNodes.length} selected</span>
+              <button
+                onClick={deleteSelectedNodes}
+                className="flex items-center gap-1 px-2 py-1 bg-red-100 hover:bg-red-200 rounded text-red-600 text-sm font-medium"
+                title="Delete selected items"
+              >
+                <Trash2 size={14} />
+                Delete
+              </button>
+              <button
+                onClick={clearSelection}
+                className="p-1 hover:bg-blue-100 rounded text-blue-600"
+                title="Clear selection"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
       )}
 
