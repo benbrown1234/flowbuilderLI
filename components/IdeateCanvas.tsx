@@ -191,6 +191,8 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
   const [transform, setTransform] = useState({ x: 50, y: 30, scale: 0.85 });
   const [isDragging, setIsDragging] = useState(false);
   const [draggedNode, setDraggedNode] = useState<string | null>(null);
+  const [pendingDragNode, setPendingDragNode] = useState<string | null>(null);
+  const [dragStartPos, setDragStartPos] = useState({ x: 0, y: 0 });
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
   const [showAiPanel, setShowAiPanel] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -249,7 +251,19 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
     setStartPos({ x: e.clientX - transform.x, y: e.clientY - transform.y });
   };
 
+  const DRAG_THRESHOLD = 5;
+
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (pendingDragNode && !draggedNode) {
+      const dx = e.clientX - dragStartPos.x;
+      const dy = e.clientY - dragStartPos.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance > DRAG_THRESHOLD) {
+        setDraggedNode(pendingDragNode);
+      }
+    }
+    
     if (draggedNode) {
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -272,11 +286,13 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
   const handleMouseUp = () => {
     setIsDragging(false);
     setDraggedNode(null);
+    setPendingDragNode(null);
   };
 
   const handleNodeMouseDown = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
-    setDraggedNode(nodeId);
+    setPendingDragNode(nodeId);
+    setDragStartPos({ x: e.clientX, y: e.clientY });
     setSelectedNode(nodeId);
     setJustClickedNode(true);
     setTimeout(() => setJustClickedNode(false), 100);
