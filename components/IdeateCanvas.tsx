@@ -353,7 +353,10 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
       }
     };
     initCanvas();
-    loadCanvasList();
+    // Don't load canvas list in shared/read-only mode
+    if (!shareToken) {
+      loadCanvasList();
+    }
   }, [propCanvasId, shareToken]);
 
   // Auto-save on changes (debounced)
@@ -460,7 +463,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const updateCanvasTitle = async (newTitle: string) => {
-    if (!canvasId) return;
+    if (isReadOnly || !canvasId) return;
     try {
       const response = await axios.put(`/api/canvas/${canvasId}`, { title: newTitle });
       setCanvas(response.data);
@@ -471,7 +474,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const togglePublic = async () => {
-    if (!canvasId || !canvas) return;
+    if (isReadOnly || !canvasId || !canvas) return;
     try {
       const response = await axios.put(`/api/canvas/${canvasId}`, { is_public: !canvas.is_public });
       setCanvas(response.data);
@@ -481,7 +484,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const regenerateShareLink = async () => {
-    if (!canvasId) return;
+    if (isReadOnly || !canvasId) return;
     try {
       const response = await axios.post(`/api/canvas/${canvasId}/regenerate-token`);
       setCanvas(response.data);
@@ -506,6 +509,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const resolveCommentHandler = async (commentId: number, resolved: boolean) => {
+    if (isReadOnly) return; // Only owner can resolve comments
     try {
       await axios.put(`/api/canvas/comments/${commentId}/resolve`, { resolved });
       setComments(prev => prev.map(c => c.id === commentId ? { ...c, is_resolved: resolved } : c));
@@ -537,6 +541,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const updateNode = (nodeId: string, updates: Partial<IdeateNode>) => {
+    if (isReadOnly) return; // No updates in read-only mode
     setNodes(prev => prev.map(n => n.id === nodeId ? { ...n, ...updates } : n));
   };
 
@@ -582,7 +587,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   const DRAG_THRESHOLD = 5;
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (pendingDragNode && !draggedNode) {
+    if (pendingDragNode && !draggedNode && !isReadOnly) {
       const dx = e.clientX - dragStartPos.x;
       const dy = e.clientY - dragStartPos.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
@@ -592,7 +597,8 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
       }
     }
     
-    if (draggedNode) {
+    // Don't allow node dragging in read-only mode
+    if (draggedNode && !isReadOnly) {
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
       
@@ -603,6 +609,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
         n.id === draggedNode ? { ...n, x, y } : n
       ));
     } else if (isDragging) {
+      // Canvas panning is allowed in read-only mode
       setTransform(t => ({
         ...t,
         x: e.clientX - startPos.x,
@@ -619,6 +626,11 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
 
   const handleNodeMouseDown = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
+    // In read-only mode, only allow selection (not dragging)
+    if (isReadOnly) {
+      setSelectedNode(nodeId);
+      return;
+    }
     setPendingDragNode(nodeId);
     setDragStartPos({ x: e.clientX, y: e.clientY });
     setSelectedNode(nodeId);
@@ -637,6 +649,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   const resetZoom = () => setTransform({ x: 50, y: 30, scale: 0.85 });
 
   const addNode = (type: 'group' | 'campaign' | 'ad') => {
+    if (isReadOnly) return; // No adding nodes in read-only mode
     let parentId: string | undefined;
     let x = 200 + Math.random() * 100;
     let y = 200 + Math.random() * 100;
@@ -712,6 +725,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const addAudienceNode = (category: 'remarketing' | 'bof' | 'tof' = 'remarketing') => {
+    if (isReadOnly) return; // No adding nodes in read-only mode
     const campaigns = nodes.filter(n => n.type === 'campaign');
     const categoryConfig = AUDIENCE_CATEGORIES[category];
     
@@ -774,6 +788,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const deleteNode = (nodeId: string) => {
+    if (isReadOnly) return; // No deletions in read-only mode
     const node = nodes.find(n => n.id === nodeId);
     if (!node) return;
     
@@ -786,11 +801,13 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const startEditing = (nodeId: string, currentName: string) => {
+    if (isReadOnly) return; // No editing in read-only mode
     setEditingNode(nodeId);
     setEditingName(currentName);
   };
 
   const finishEditing = () => {
+    if (isReadOnly) return; // No editing in read-only mode
     if (editingNode && editingName.trim()) {
       setNodes(prev => prev.map(n => 
         n.id === editingNode ? { ...n, name: editingName.trim() } : n
@@ -854,7 +871,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const generateFromAI = async () => {
-    if (!aiPrompt.trim()) return;
+    if (isReadOnly || !aiPrompt.trim()) return; // No AI generation in read-only mode
     
     setIsGenerating(true);
     try {
@@ -885,12 +902,14 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   };
 
   const resetToDefault = () => {
+    if (isReadOnly) return; // No resetting in read-only mode
     setNodes(createDefaultFunnel());
     setSelectedNode(null);
     resetZoom();
   };
 
   const clearAll = () => {
+    if (isReadOnly) return; // No clearing in read-only mode
     if (nodes.length === 0) return;
     if (confirm('Are you sure you want to clear the entire canvas?')) {
       setNodes([]);
@@ -1499,13 +1518,15 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
       {/* Canvas Header */}
       <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => { loadCanvasList(); setShowCanvasList(true); }}
-            className="flex items-center gap-1.5 px-2 py-1.5 hover:bg-gray-100 rounded text-gray-600 text-sm"
-            title="Open Canvas List"
-          >
-            <FolderOpen size={16} />
-          </button>
+          {!isReadOnly && (
+            <button
+              onClick={() => { loadCanvasList(); setShowCanvasList(true); }}
+              className="flex items-center gap-1.5 px-2 py-1.5 hover:bg-gray-100 rounded text-gray-600 text-sm"
+              title="Open Canvas List"
+            >
+              <FolderOpen size={16} />
+            </button>
+          )}
           
           {editingTitle ? (
             <div className="flex items-center gap-2">
@@ -1537,52 +1558,55 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
                 <X size={14} />
               </button>
             </div>
+          ) : isReadOnly ? (
+            <span className="text-sm font-medium text-gray-800">
+              {canvas?.title || 'Shared Canvas'}
+            </span>
           ) : (
             <button
               onClick={() => { setTitleInput(canvas?.title || ''); setEditingTitle(true); }}
               className="text-sm font-medium text-gray-800 hover:text-blue-600 flex items-center gap-1"
-              disabled={isReadOnly}
             >
               {canvas?.title || 'Untitled Canvas'}
-              {!isReadOnly && <Edit2 size={12} className="text-gray-400" />}
+              <Edit2 size={12} className="text-gray-400" />
             </button>
-          )}
-          
-          {isReadOnly && (
-            <span className="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">Read Only</span>
           )}
         </div>
         
         <div className="flex items-center gap-2">
-          {/* Save Status */}
-          <div className="flex items-center gap-1.5 text-xs text-gray-500">
-            {saveStatus === 'saved' && (
-              <>
-                <CheckCircle size={14} className="text-green-500" />
-                <span>Saved</span>
-              </>
-            )}
-            {saveStatus === 'saving' && (
-              <>
-                <Clock size={14} className="text-blue-500 animate-spin" />
-                <span>Saving...</span>
-              </>
-            )}
-            {saveStatus === 'unsaved' && (
-              <>
-                <Clock size={14} className="text-yellow-500" />
-                <span>Unsaved changes</span>
-              </>
-            )}
-            {saveStatus === 'error' && (
-              <>
-                <XCircle size={14} className="text-red-500" />
-                <span>Save failed</span>
-              </>
-            )}
-          </div>
-          
-          <div className="w-px h-5 bg-gray-200" />
+          {/* Save Status - Only show for owners */}
+          {!isReadOnly && (
+            <>
+              <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                {saveStatus === 'saved' && (
+                  <>
+                    <CheckCircle size={14} className="text-green-500" />
+                    <span>Saved</span>
+                  </>
+                )}
+                {saveStatus === 'saving' && (
+                  <>
+                    <Clock size={14} className="text-blue-500 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                )}
+                {saveStatus === 'unsaved' && (
+                  <>
+                    <Clock size={14} className="text-yellow-500" />
+                    <span>Unsaved changes</span>
+                  </>
+                )}
+                {saveStatus === 'error' && (
+                  <>
+                    <XCircle size={14} className="text-red-500" />
+                    <span>Save failed</span>
+                  </>
+                )}
+              </div>
+              
+              <div className="w-px h-5 bg-gray-200" />
+            </>
+          )}
           
           {/* Comments */}
           <button
@@ -1609,7 +1633,8 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
       <div className="flex-1 flex overflow-hidden">
       <div className={`flex-1 relative bg-[#f0f2f5] overflow-hidden ${selectedNodeData ? '' : 'rounded-b-xl'} shadow-inner border-x border-b border-gray-200`}>
       
-      {/* Toolbar */}
+      {/* Toolbar - Hidden for shared view */}
+      {!isReadOnly && (
       <div className="absolute top-4 left-4 z-50 flex items-center gap-2">
         <div className="flex items-center gap-1 bg-white rounded-lg shadow-lg border border-gray-200 p-1">
           <button
@@ -1713,8 +1738,10 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
           <span>Clear All</span>
         </button>
       </div>
+      )}
 
-      {/* AI Generate Button */}
+      {/* AI Generate Button - Hidden for shared view */}
+      {!isReadOnly && (
       <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
         <button
           onClick={exportAsText}
@@ -1737,9 +1764,10 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
           <span>AI Generate</span>
         </button>
       </div>
+      )}
 
       {/* AI Panel */}
-      {showAiPanel && (
+      {showAiPanel && !isReadOnly && (
         <div className="absolute top-16 right-4 z-50 w-96 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden">
           <div className="p-4 bg-gradient-to-r from-purple-500 to-indigo-600 text-white">
             <div className="flex items-center justify-between">
@@ -2136,15 +2164,17 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
                   <div key={comment.id} className={`p-3 rounded-lg ${comment.is_resolved ? 'bg-gray-50 opacity-60' : 'bg-gray-100'}`}>
                     <div className="flex items-start justify-between mb-1">
                       <span className="text-sm font-medium text-gray-800">{comment.author_name}</span>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => resolveCommentHandler(comment.id, !comment.is_resolved)}
-                          className={`p-1 rounded ${comment.is_resolved ? 'text-green-600' : 'text-gray-400 hover:text-green-600'}`}
-                          title={comment.is_resolved ? 'Unresolve' : 'Resolve'}
-                        >
-                          <CheckCircle size={14} />
-                        </button>
-                      </div>
+                      {!isReadOnly && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => resolveCommentHandler(comment.id, !comment.is_resolved)}
+                            className={`p-1 rounded ${comment.is_resolved ? 'text-green-600' : 'text-gray-400 hover:text-green-600'}`}
+                            title={comment.is_resolved ? 'Unresolve' : 'Resolve'}
+                          >
+                            <CheckCircle size={14} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                     {relatedNode && (
                       <p className="text-xs text-blue-600 mb-1">On: {relatedNode.name}</p>

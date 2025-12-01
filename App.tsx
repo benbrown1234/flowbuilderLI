@@ -244,7 +244,8 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Header */}
+      {/* Header - Hidden for shared canvas view */}
+      {!sharedCanvasToken && (
       <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -370,9 +371,10 @@ const App: React.FC = () => {
           </div>
         </div>
       </header>
+      )}
 
       {/* Main Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 overflow-hidden flex flex-col">
+      <main className={`flex-1 overflow-hidden flex flex-col ${sharedCanvasToken ? 'p-0' : 'max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8'}`}>
         {viewMode !== 'AUDIT' && viewMode !== 'IDEATE' && (
           <div className="mb-6 flex-shrink-0">
             <h2 className="text-lg font-semibold text-gray-800 mb-1">
@@ -390,15 +392,11 @@ const App: React.FC = () => {
           </div>
         )}
         
-        {viewMode === 'IDEATE' && (
+        {viewMode === 'IDEATE' && !sharedCanvasToken && (
           <div className="mb-6 flex-shrink-0">
-            <h2 className="text-lg font-semibold text-gray-800 mb-1">
-              {sharedCanvasToken ? 'Shared Campaign Canvas' : 'Campaign Ideation Canvas'}
-            </h2>
+            <h2 className="text-lg font-semibold text-gray-800 mb-1">Campaign Ideation Canvas</h2>
             <p className="text-sm text-gray-500">
-              {sharedCanvasToken 
-                ? 'Viewing a shared campaign design. Leave comments to provide feedback.'
-                : 'Plan and visualize your campaign structure. Use AI to generate ideas or manually create your funnel.'}
+              Plan and visualize your campaign structure. Use AI to generate ideas or manually create your funnel.
             </p>
           </div>
         )}
