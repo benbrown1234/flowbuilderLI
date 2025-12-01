@@ -332,6 +332,14 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
     resetZoom();
   };
 
+  const clearAll = () => {
+    if (nodes.length === 0) return;
+    if (confirm('Are you sure you want to clear the entire canvas?')) {
+      setNodes([]);
+      setSelectedNode(null);
+    }
+  };
+
   const exportAsText = () => {
     const groups = nodes.filter(n => n.type === 'group');
     let text = '# Campaign Structure\n\n';
@@ -433,6 +441,15 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
         >
           <Lightbulb size={16} className="text-yellow-500" />
           <span>Default Funnel</span>
+        </button>
+        
+        <button
+          onClick={clearAll}
+          className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-red-50 rounded-lg text-gray-600 hover:text-red-600 text-sm font-medium border border-gray-200 hover:border-red-200 shadow-sm transition-colors"
+          title="Clear entire canvas"
+        >
+          <Trash2 size={16} />
+          <span>Clear All</span>
         </button>
       </div>
 
