@@ -1606,6 +1606,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
         </div>
       </div>
       
+      <div className="flex-1 flex overflow-hidden">
       <div className={`flex-1 relative bg-[#f0f2f5] overflow-hidden ${selectedNodeData ? '' : 'rounded-b-xl'} shadow-inner border-x border-b border-gray-200`}>
       
       {/* Toolbar */}
@@ -2159,6 +2160,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
           </div>
         </div>
       )}
+      </div>
       
       {/* Canvas List Modal */}
       {showCanvasList && (
