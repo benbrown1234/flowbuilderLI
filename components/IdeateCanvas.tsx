@@ -1,5 +1,6 @@
-import React, { useState, useRef, useCallback } from 'react';
-import { Plus, Minus, Maximize, Move, Trash2, Sparkles, Download, Copy, Folder, LayoutGrid, FileImage, Lightbulb, Send, X, GripVertical, Edit2, Check, ChevronDown, ChevronRight, Target, Settings, Image, Users, Percent, ArrowRight } from 'lucide-react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { Plus, Minus, Maximize, Move, Trash2, Sparkles, Download, Copy, Folder, LayoutGrid, FileImage, Lightbulb, Send, X, GripVertical, Edit2, Check, ChevronDown, ChevronRight, Target, Settings, Image, Users, Percent, ArrowRight, Save, Share2, MessageSquare, Clock, FolderOpen, Link2, ExternalLink, CheckCircle, XCircle } from 'lucide-react';
+import axios from 'axios';
 
 export interface IdeateNode {
   id: string;
@@ -30,8 +31,32 @@ export interface IdeateNode {
   seniorities?: string[];
 }
 
+interface CanvasData {
+  id: string;
+  title: string;
+  is_public: boolean;
+  share_token: string;
+  allow_public_comments: boolean;
+  created_at: string;
+  updated_at: string;
+  version_number?: number;
+  last_saved?: string;
+}
+
+interface Comment {
+  id: number;
+  canvas_id: string;
+  node_id: string | null;
+  author_name: string;
+  content: string;
+  is_resolved: boolean;
+  created_at: string;
+}
+
 interface Props {
   onExport?: (nodes: IdeateNode[]) => void;
+  canvasId?: string;
+  shareToken?: string;
 }
 
 const AUDIENCE_CATEGORIES = {
@@ -263,7 +288,7 @@ const createDefaultFunnel = (): IdeateNode[] => {
   return nodes;
 };
 
-export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
+export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId, shareToken }) => {
   const [nodes, setNodes] = useState<IdeateNode[]>(createDefaultFunnel());
   const [transform, setTransform] = useState({ x: 50, y: 30, scale: 0.85 });
   const [isDragging, setIsDragging] = useState(false);
@@ -280,6 +305,224 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
   const [justClickedNode, setJustClickedNode] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const containerRef = useRef<HTMLDivElement>(null);
+  
+  // Canvas persistence state
+  const [canvasId, setCanvasId] = useState<string | null>(propCanvasId || null);
+  const [canvas, setCanvas] = useState<CanvasData | null>(null);
+  const [canvasList, setCanvasList] = useState<CanvasData[]>([]);
+  const [showCanvasList, setShowCanvasList] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [showCommentsPanel, setShowCommentsPanel] = useState(false);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [newComment, setNewComment] = useState('');
+  const [commenterName, setCommenterName] = useState('');
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved' | 'error'>('saved');
+  const [isReadOnly, setIsReadOnly] = useState(!!shareToken);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState('');
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSavedNodesRef = useRef<string>('');
+
+  // Load canvas or create new one
+  useEffect(() => {
+    const initCanvas = async () => {
+      try {
+        if (shareToken) {
+          const response = await axios.get(`/api/canvas/share/${shareToken}`);
+          setCanvas(response.data);
+          setNodes(response.data.nodes || createDefaultFunnel());
+          setIsReadOnly(true);
+          lastSavedNodesRef.current = JSON.stringify(response.data.nodes || []);
+          loadComments(response.data.id);
+        } else if (propCanvasId) {
+          const response = await axios.get(`/api/canvas/${propCanvasId}`);
+          setCanvas(response.data);
+          setCanvasId(response.data.id);
+          setNodes(response.data.nodes || createDefaultFunnel());
+          lastSavedNodesRef.current = JSON.stringify(response.data.nodes || []);
+          loadComments(response.data.id);
+        } else {
+          const response = await axios.post('/api/canvas', { title: 'Untitled Canvas' });
+          setCanvas(response.data);
+          setCanvasId(response.data.id);
+          lastSavedNodesRef.current = JSON.stringify(createDefaultFunnel());
+          await saveCanvas(response.data.id, createDefaultFunnel());
+        }
+      } catch (err) {
+        console.error('Failed to initialize canvas:', err);
+      }
+    };
+    initCanvas();
+    loadCanvasList();
+  }, [propCanvasId, shareToken]);
+
+  // Auto-save on changes (debounced)
+  useEffect(() => {
+    if (isReadOnly || !canvasId) return;
+    
+    const currentNodesStr = JSON.stringify(nodes);
+    if (currentNodesStr === lastSavedNodesRef.current) return;
+    
+    setSaveStatus('unsaved');
+    
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    saveTimeoutRef.current = setTimeout(() => {
+      saveCanvas(canvasId, nodes);
+    }, 2000);
+    
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [nodes, canvasId, isReadOnly]);
+
+  const loadCanvasList = async () => {
+    try {
+      const response = await axios.get('/api/canvas');
+      setCanvasList(response.data);
+    } catch (err) {
+      console.error('Failed to load canvas list:', err);
+    }
+  };
+
+  const loadComments = async (id: string) => {
+    try {
+      const response = await axios.get(`/api/canvas/${id}/comments`);
+      setComments(response.data);
+    } catch (err) {
+      console.error('Failed to load comments:', err);
+    }
+  };
+
+  const saveCanvas = async (id: string, nodesToSave: IdeateNode[]) => {
+    try {
+      setSaveStatus('saving');
+      await axios.post(`/api/canvas/${id}/save`, { 
+        nodes: nodesToSave,
+        connections: [],
+        settings: { transform }
+      });
+      lastSavedNodesRef.current = JSON.stringify(nodesToSave);
+      setSaveStatus('saved');
+      loadCanvasList();
+    } catch (err) {
+      console.error('Failed to save canvas:', err);
+      setSaveStatus('error');
+    }
+  };
+
+  const createNewCanvas = async () => {
+    try {
+      const response = await axios.post('/api/canvas', { title: 'Untitled Canvas' });
+      setCanvas(response.data);
+      setCanvasId(response.data.id);
+      setNodes(createDefaultFunnel());
+      setIsReadOnly(false);
+      lastSavedNodesRef.current = JSON.stringify(createDefaultFunnel());
+      await saveCanvas(response.data.id, createDefaultFunnel());
+      setShowCanvasList(false);
+      loadCanvasList();
+    } catch (err) {
+      console.error('Failed to create canvas:', err);
+    }
+  };
+
+  const loadCanvas = async (id: string) => {
+    try {
+      const response = await axios.get(`/api/canvas/${id}`);
+      setCanvas(response.data);
+      setCanvasId(response.data.id);
+      setNodes(response.data.nodes || createDefaultFunnel());
+      setIsReadOnly(false);
+      lastSavedNodesRef.current = JSON.stringify(response.data.nodes || []);
+      setShowCanvasList(false);
+      loadComments(id);
+    } catch (err) {
+      console.error('Failed to load canvas:', err);
+    }
+  };
+
+  const deleteCanvasItem = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this canvas?')) return;
+    try {
+      await axios.delete(`/api/canvas/${id}`);
+      loadCanvasList();
+      if (canvasId === id) {
+        createNewCanvas();
+      }
+    } catch (err) {
+      console.error('Failed to delete canvas:', err);
+    }
+  };
+
+  const updateCanvasTitle = async (newTitle: string) => {
+    if (!canvasId) return;
+    try {
+      const response = await axios.put(`/api/canvas/${canvasId}`, { title: newTitle });
+      setCanvas(response.data);
+      loadCanvasList();
+    } catch (err) {
+      console.error('Failed to update title:', err);
+    }
+  };
+
+  const togglePublic = async () => {
+    if (!canvasId || !canvas) return;
+    try {
+      const response = await axios.put(`/api/canvas/${canvasId}`, { is_public: !canvas.is_public });
+      setCanvas(response.data);
+    } catch (err) {
+      console.error('Failed to toggle public:', err);
+    }
+  };
+
+  const regenerateShareLink = async () => {
+    if (!canvasId) return;
+    try {
+      const response = await axios.post(`/api/canvas/${canvasId}/regenerate-token`);
+      setCanvas(response.data);
+    } catch (err) {
+      console.error('Failed to regenerate link:', err);
+    }
+  };
+
+  const addCommentHandler = async () => {
+    if (!canvasId || !newComment.trim()) return;
+    try {
+      const response = await axios.post(`/api/canvas/${canvasId}/comments`, {
+        content: newComment,
+        nodeId: selectedNode,
+        authorName: commenterName || 'Anonymous'
+      });
+      setComments(prev => [response.data, ...prev]);
+      setNewComment('');
+    } catch (err) {
+      console.error('Failed to add comment:', err);
+    }
+  };
+
+  const resolveCommentHandler = async (commentId: number, resolved: boolean) => {
+    try {
+      await axios.put(`/api/canvas/comments/${commentId}/resolve`, { resolved });
+      setComments(prev => prev.map(c => c.id === commentId ? { ...c, is_resolved: resolved } : c));
+    } catch (err) {
+      console.error('Failed to resolve comment:', err);
+    }
+  };
+
+  const getShareUrl = () => {
+    if (!canvas) return '';
+    const baseUrl = window.location.origin;
+    return `${baseUrl}/?share=${canvas.share_token}`;
+  };
+
+  const copyShareLink = () => {
+    navigator.clipboard.writeText(getShareUrl());
+  };
 
   const selectedNodeData = selectedNode ? nodes.find(n => n.id === selectedNode) : null;
   
@@ -1252,8 +1495,118 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
   };
 
   return (
-    <div className="w-full h-full flex">
-      <div className={`flex-1 relative bg-[#f0f2f5] overflow-hidden ${selectedNodeData ? '' : 'rounded-xl'} shadow-inner border border-gray-200`}>
+    <div className="w-full h-full flex flex-col">
+      {/* Canvas Header */}
+      <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => { loadCanvasList(); setShowCanvasList(true); }}
+            className="flex items-center gap-1.5 px-2 py-1.5 hover:bg-gray-100 rounded text-gray-600 text-sm"
+            title="Open Canvas List"
+          >
+            <FolderOpen size={16} />
+          </button>
+          
+          {editingTitle ? (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={titleInput}
+                onChange={(e) => setTitleInput(e.target.value)}
+                className="px-2 py-1 border border-gray-300 rounded text-sm font-medium"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    updateCanvasTitle(titleInput);
+                    setEditingTitle(false);
+                  } else if (e.key === 'Escape') {
+                    setEditingTitle(false);
+                  }
+                }}
+              />
+              <button
+                onClick={() => { updateCanvasTitle(titleInput); setEditingTitle(false); }}
+                className="p-1 hover:bg-green-100 rounded text-green-600"
+              >
+                <Check size={14} />
+              </button>
+              <button
+                onClick={() => setEditingTitle(false)}
+                className="p-1 hover:bg-red-100 rounded text-red-600"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => { setTitleInput(canvas?.title || ''); setEditingTitle(true); }}
+              className="text-sm font-medium text-gray-800 hover:text-blue-600 flex items-center gap-1"
+              disabled={isReadOnly}
+            >
+              {canvas?.title || 'Untitled Canvas'}
+              {!isReadOnly && <Edit2 size={12} className="text-gray-400" />}
+            </button>
+          )}
+          
+          {isReadOnly && (
+            <span className="px-2 py-0.5 text-xs bg-gray-100 text-gray-600 rounded">Read Only</span>
+          )}
+        </div>
+        
+        <div className="flex items-center gap-2">
+          {/* Save Status */}
+          <div className="flex items-center gap-1.5 text-xs text-gray-500">
+            {saveStatus === 'saved' && (
+              <>
+                <CheckCircle size={14} className="text-green-500" />
+                <span>Saved</span>
+              </>
+            )}
+            {saveStatus === 'saving' && (
+              <>
+                <Clock size={14} className="text-blue-500 animate-spin" />
+                <span>Saving...</span>
+              </>
+            )}
+            {saveStatus === 'unsaved' && (
+              <>
+                <Clock size={14} className="text-yellow-500" />
+                <span>Unsaved changes</span>
+              </>
+            )}
+            {saveStatus === 'error' && (
+              <>
+                <XCircle size={14} className="text-red-500" />
+                <span>Save failed</span>
+              </>
+            )}
+          </div>
+          
+          <div className="w-px h-5 bg-gray-200" />
+          
+          {/* Comments */}
+          <button
+            onClick={() => setShowCommentsPanel(!showCommentsPanel)}
+            className={`flex items-center gap-1.5 px-2 py-1.5 rounded text-sm ${showCommentsPanel ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100 text-gray-600'}`}
+          >
+            <MessageSquare size={16} />
+            {comments.length > 0 && <span className="text-xs">{comments.length}</span>}
+          </button>
+          
+          {/* Share */}
+          {!isReadOnly && (
+            <button
+              onClick={() => setShowShareModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm font-medium"
+            >
+              <Share2 size={14} />
+              Share
+            </button>
+          )}
+        </div>
+      </div>
+      
+      <div className={`flex-1 relative bg-[#f0f2f5] overflow-hidden ${selectedNodeData ? '' : 'rounded-b-xl'} shadow-inner border-x border-b border-gray-200`}>
       
       {/* Toolbar */}
       <div className="absolute top-4 left-4 z-50 flex items-center gap-2">
@@ -1733,6 +2086,204 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport }) => {
       </div>
       </div>
       {renderSidebar()}
+      
+      {/* Comments Panel */}
+      {showCommentsPanel && (
+        <div className="w-80 border-l border-gray-200 bg-white flex flex-col">
+          <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+            <h3 className="font-semibold text-gray-800">Comments</h3>
+            <button onClick={() => setShowCommentsPanel(false)} className="p-1 hover:bg-gray-100 rounded">
+              <X size={16} className="text-gray-500" />
+            </button>
+          </div>
+          
+          <div className="p-4 border-b border-gray-200">
+            <input
+              type="text"
+              value={commenterName}
+              onChange={(e) => setCommenterName(e.target.value)}
+              placeholder="Your name"
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg mb-2"
+            />
+            <div className="flex gap-2">
+              <textarea
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+                placeholder={selectedNode ? "Comment on selected node..." : "Add a general comment..."}
+                className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg resize-none h-16"
+              />
+              <button
+                onClick={addCommentHandler}
+                disabled={!newComment.trim()}
+                className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 rounded-lg text-white"
+              >
+                <Send size={16} />
+              </button>
+            </div>
+            {selectedNode && (
+              <p className="text-xs text-blue-600 mt-1">Commenting on: {nodes.find(n => n.id === selectedNode)?.name}</p>
+            )}
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {comments.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-8">No comments yet</p>
+            ) : (
+              comments.map(comment => {
+                const relatedNode = comment.node_id ? nodes.find(n => n.id === comment.node_id) : null;
+                return (
+                  <div key={comment.id} className={`p-3 rounded-lg ${comment.is_resolved ? 'bg-gray-50 opacity-60' : 'bg-gray-100'}`}>
+                    <div className="flex items-start justify-between mb-1">
+                      <span className="text-sm font-medium text-gray-800">{comment.author_name}</span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => resolveCommentHandler(comment.id, !comment.is_resolved)}
+                          className={`p-1 rounded ${comment.is_resolved ? 'text-green-600' : 'text-gray-400 hover:text-green-600'}`}
+                          title={comment.is_resolved ? 'Unresolve' : 'Resolve'}
+                        >
+                          <CheckCircle size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    {relatedNode && (
+                      <p className="text-xs text-blue-600 mb-1">On: {relatedNode.name}</p>
+                    )}
+                    <p className="text-sm text-gray-700">{comment.content}</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {new Date(comment.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+      
+      {/* Canvas List Modal */}
+      {showCanvasList && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]" onClick={() => setShowCanvasList(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[70vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-800">Your Canvases</h3>
+              <button onClick={() => setShowCanvasList(false)} className="p-1 hover:bg-gray-100 rounded">
+                <X size={20} className="text-gray-500" />
+              </button>
+            </div>
+            
+            <div className="p-4 border-b border-gray-200">
+              <button
+                onClick={createNewCanvas}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium"
+              >
+                <Plus size={16} />
+                New Canvas
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+              {canvasList.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-8">No saved canvases</p>
+              ) : (
+                canvasList.map(c => (
+                  <div
+                    key={c.id}
+                    className={`p-3 rounded-lg border ${c.id === canvasId ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'} cursor-pointer`}
+                    onClick={() => loadCanvas(c.id)}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h4 className="font-medium text-gray-800">{c.title}</h4>
+                        <p className="text-xs text-gray-500">
+                          {c.last_saved ? `Saved ${new Date(c.last_saved).toLocaleDateString()}` : 'No versions'}
+                          {c.is_public && <span className="ml-2 text-blue-600">Public</span>}
+                        </p>
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteCanvasItem(c.id); }}
+                        className="p-1 hover:bg-red-100 rounded text-gray-400 hover:text-red-600"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Share Modal */}
+      {showShareModal && canvas && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]" onClick={() => setShowShareModal(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-800">Share Canvas</h3>
+              <button onClick={() => setShowShareModal(false)} className="p-1 hover:bg-gray-100 rounded">
+                <X size={20} className="text-gray-500" />
+              </button>
+            </div>
+            
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-700">Make Public</span>
+                  <button
+                    onClick={togglePublic}
+                    className={`relative w-12 h-6 rounded-full transition-colors ${canvas.is_public ? 'bg-blue-600' : 'bg-gray-300'}`}
+                  >
+                    <span className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${canvas.is_public ? 'translate-x-6' : ''}`} />
+                  </button>
+                </label>
+                <p className="text-xs text-gray-500 mt-1">
+                  {canvas.is_public ? 'Anyone with the link can view this canvas' : 'Only you can access this canvas'}
+                </p>
+              </div>
+              
+              {canvas.is_public && (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Share Link</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={getShareUrl()}
+                        readOnly
+                        className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg bg-gray-50"
+                      />
+                      <button
+                        onClick={copyShareLink}
+                        className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700"
+                        title="Copy link"
+                      >
+                        <Copy size={16} />
+                      </button>
+                      <a
+                        href={getShareUrl()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700"
+                        title="Open in new tab"
+                      >
+                        <ExternalLink size={16} />
+                      </a>
+                    </div>
+                  </div>
+                  
+                  <button
+                    onClick={regenerateShareLink}
+                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                  >
+                    <Link2 size={14} />
+                    Generate new link
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

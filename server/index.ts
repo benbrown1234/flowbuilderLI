@@ -18,7 +18,22 @@ import {
   saveMetrics,
   saveRecommendations,
   getAuditData,
-  deleteAuditData 
+  deleteAuditData,
+  createCanvas,
+  getCanvas,
+  getCanvasByShareToken,
+  listCanvases,
+  updateCanvas,
+  deleteCanvas,
+  regenerateShareToken,
+  saveCanvasVersion,
+  getLatestCanvasVersion,
+  getCanvasVersions,
+  getCanvasVersion,
+  addComment,
+  getComments,
+  resolveComment,
+  deleteComment
 } from './database.js';
 import { runAuditRules, calculateAccountScore } from './auditRules.js';
 
@@ -1685,6 +1700,246 @@ Example structure:
   } catch (err: any) {
     console.error('Ideate error:', err.message);
     res.status(500).json({ error: 'Failed to generate campaign structure' });
+  }
+});
+
+// Canvas CRUD endpoints
+app.post('/api/canvas', async (req, res) => {
+  try {
+    const { title, accountId } = req.body;
+    const session = (req as any).session;
+    const ownerUserId = session?.userId || null;
+    
+    const canvas = await createCanvas(ownerUserId, accountId || null, title || 'Untitled Canvas');
+    res.json(canvas);
+  } catch (err: any) {
+    console.error('Create canvas error:', err.message);
+    res.status(500).json({ error: 'Failed to create canvas' });
+  }
+});
+
+app.get('/api/canvas', async (req, res) => {
+  try {
+    const session = (req as any).session;
+    const ownerUserId = session?.userId || null;
+    const accountId = req.query.accountId as string | undefined;
+    
+    const canvases = await listCanvases(ownerUserId, accountId || null);
+    res.json(canvases);
+  } catch (err: any) {
+    console.error('List canvases error:', err.message);
+    res.status(500).json({ error: 'Failed to list canvases' });
+  }
+});
+
+// IMPORTANT: This route must come BEFORE /api/canvas/:canvasId to avoid matching "share" as a canvasId
+app.get('/api/canvas/share/:shareToken', async (req, res) => {
+  try {
+    const { shareToken } = req.params;
+    const canvas = await getCanvasByShareToken(shareToken);
+    
+    if (!canvas) {
+      return res.status(404).json({ error: 'Canvas not found' });
+    }
+    
+    if (!canvas.is_public) {
+      return res.status(403).json({ error: 'This canvas is not publicly shared' });
+    }
+    
+    const latestVersion = await getLatestCanvasVersion(canvas.id);
+    res.json({ 
+      ...canvas, 
+      nodes: latestVersion?.nodes || [],
+      connections: latestVersion?.connections || [],
+      settings: latestVersion?.settings || {},
+      versionNumber: latestVersion?.version_number || 0,
+      isSharedView: true
+    });
+  } catch (err: any) {
+    console.error('Get shared canvas error:', err.message);
+    res.status(500).json({ error: 'Failed to get shared canvas' });
+  }
+});
+
+app.get('/api/canvas/:canvasId', async (req, res) => {
+  try {
+    const { canvasId } = req.params;
+    const canvas = await getCanvas(canvasId);
+    
+    if (!canvas) {
+      return res.status(404).json({ error: 'Canvas not found' });
+    }
+    
+    const latestVersion = await getLatestCanvasVersion(canvasId);
+    res.json({ 
+      ...canvas, 
+      nodes: latestVersion?.nodes || [],
+      connections: latestVersion?.connections || [],
+      settings: latestVersion?.settings || {},
+      versionNumber: latestVersion?.version_number || 0
+    });
+  } catch (err: any) {
+    console.error('Get canvas error:', err.message);
+    res.status(500).json({ error: 'Failed to get canvas' });
+  }
+});
+
+app.put('/api/canvas/:canvasId', async (req, res) => {
+  try {
+    const { canvasId } = req.params;
+    const { title, is_public, allow_public_comments } = req.body;
+    
+    const canvas = await updateCanvas(canvasId, { title, is_public, allow_public_comments });
+    
+    if (!canvas) {
+      return res.status(404).json({ error: 'Canvas not found' });
+    }
+    
+    res.json(canvas);
+  } catch (err: any) {
+    console.error('Update canvas error:', err.message);
+    res.status(500).json({ error: 'Failed to update canvas' });
+  }
+});
+
+app.delete('/api/canvas/:canvasId', async (req, res) => {
+  try {
+    const { canvasId } = req.params;
+    await deleteCanvas(canvasId);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Delete canvas error:', err.message);
+    res.status(500).json({ error: 'Failed to delete canvas' });
+  }
+});
+
+app.post('/api/canvas/:canvasId/regenerate-token', async (req, res) => {
+  try {
+    const { canvasId } = req.params;
+    const canvas = await regenerateShareToken(canvasId);
+    
+    if (!canvas) {
+      return res.status(404).json({ error: 'Canvas not found' });
+    }
+    
+    res.json(canvas);
+  } catch (err: any) {
+    console.error('Regenerate token error:', err.message);
+    res.status(500).json({ error: 'Failed to regenerate share token' });
+  }
+});
+
+// Canvas version endpoints
+app.post('/api/canvas/:canvasId/save', async (req, res) => {
+  try {
+    const { canvasId } = req.params;
+    const { nodes, connections, settings } = req.body;
+    const session = (req as any).session;
+    const userId = session?.userId || null;
+    
+    const version = await saveCanvasVersion(canvasId, nodes || [], connections || [], settings || {}, userId);
+    res.json(version);
+  } catch (err: any) {
+    console.error('Save canvas version error:', err.message);
+    res.status(500).json({ error: 'Failed to save canvas' });
+  }
+});
+
+app.get('/api/canvas/:canvasId/versions', async (req, res) => {
+  try {
+    const { canvasId } = req.params;
+    const limit = parseInt(req.query.limit as string) || 20;
+    
+    const versions = await getCanvasVersions(canvasId, limit);
+    res.json(versions);
+  } catch (err: any) {
+    console.error('Get canvas versions error:', err.message);
+    res.status(500).json({ error: 'Failed to get versions' });
+  }
+});
+
+app.get('/api/canvas/:canvasId/version/:versionId', async (req, res) => {
+  try {
+    const { versionId } = req.params;
+    const version = await getCanvasVersion(parseInt(versionId));
+    
+    if (!version) {
+      return res.status(404).json({ error: 'Version not found' });
+    }
+    
+    res.json(version);
+  } catch (err: any) {
+    console.error('Get canvas version error:', err.message);
+    res.status(500).json({ error: 'Failed to get version' });
+  }
+});
+
+// Canvas comment endpoints
+app.post('/api/canvas/:canvasId/comments', async (req, res) => {
+  try {
+    const { canvasId } = req.params;
+    const { content, nodeId, authorName } = req.body;
+    const session = (req as any).session;
+    const authorUserId = session?.userId || null;
+    
+    if (!content) {
+      return res.status(400).json({ error: 'Comment content is required' });
+    }
+    
+    const latestVersion = await getLatestCanvasVersion(canvasId);
+    const comment = await addComment(
+      canvasId,
+      content,
+      authorUserId,
+      authorName || 'Anonymous',
+      nodeId || null,
+      latestVersion?.id || null
+    );
+    
+    res.json(comment);
+  } catch (err: any) {
+    console.error('Add comment error:', err.message);
+    res.status(500).json({ error: 'Failed to add comment' });
+  }
+});
+
+app.get('/api/canvas/:canvasId/comments', async (req, res) => {
+  try {
+    const { canvasId } = req.params;
+    const comments = await getComments(canvasId);
+    res.json(comments);
+  } catch (err: any) {
+    console.error('Get comments error:', err.message);
+    res.status(500).json({ error: 'Failed to get comments' });
+  }
+});
+
+app.put('/api/canvas/comments/:commentId/resolve', async (req, res) => {
+  try {
+    const { commentId } = req.params;
+    const { resolved } = req.body;
+    
+    const comment = await resolveComment(parseInt(commentId), resolved !== false);
+    
+    if (!comment) {
+      return res.status(404).json({ error: 'Comment not found' });
+    }
+    
+    res.json(comment);
+  } catch (err: any) {
+    console.error('Resolve comment error:', err.message);
+    res.status(500).json({ error: 'Failed to resolve comment' });
+  }
+});
+
+app.delete('/api/canvas/comments/:commentId', async (req, res) => {
+  try {
+    const { commentId } = req.params;
+    await deleteComment(parseInt(commentId));
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Delete comment error:', err.message);
+    res.status(500).json({ error: 'Failed to delete comment' });
   }
 });
 

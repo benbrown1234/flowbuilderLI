@@ -8,6 +8,8 @@ export async function initDatabase() {
   const client = await pool.connect();
   try {
     await client.query(`
+      CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+      
       CREATE TABLE IF NOT EXISTS audit_snapshots (
         id SERIAL PRIMARY KEY,
         account_id VARCHAR(50) NOT NULL,
@@ -91,6 +93,49 @@ export async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_campaigns_snapshot ON audit_campaigns(snapshot_id);
       CREATE INDEX IF NOT EXISTS idx_metrics_snapshot ON audit_metrics(snapshot_id);
       CREATE INDEX IF NOT EXISTS idx_recommendations_snapshot ON audit_recommendations(snapshot_id);
+
+      -- Ideate Canvas tables
+      CREATE TABLE IF NOT EXISTS ideate_canvases (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        owner_user_id VARCHAR(100),
+        account_id VARCHAR(50),
+        title VARCHAR(255) NOT NULL DEFAULT 'Untitled Canvas',
+        is_public BOOLEAN DEFAULT FALSE,
+        share_token VARCHAR(64) UNIQUE,
+        allow_public_comments BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS ideate_canvas_versions (
+        id SERIAL PRIMARY KEY,
+        canvas_id UUID REFERENCES ideate_canvases(id) ON DELETE CASCADE,
+        version_number INTEGER NOT NULL DEFAULT 1,
+        nodes JSONB NOT NULL DEFAULT '[]',
+        connections JSONB NOT NULL DEFAULT '[]',
+        settings JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW(),
+        created_by VARCHAR(100)
+      );
+
+      CREATE TABLE IF NOT EXISTS ideate_canvas_comments (
+        id SERIAL PRIMARY KEY,
+        canvas_id UUID REFERENCES ideate_canvases(id) ON DELETE CASCADE,
+        version_id INTEGER REFERENCES ideate_canvas_versions(id) ON DELETE SET NULL,
+        node_id VARCHAR(100),
+        author_user_id VARCHAR(100),
+        author_name VARCHAR(255),
+        content TEXT NOT NULL,
+        is_resolved BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_canvases_owner ON ideate_canvases(owner_user_id);
+      CREATE INDEX IF NOT EXISTS idx_canvases_account ON ideate_canvases(account_id);
+      CREATE INDEX IF NOT EXISTS idx_canvases_share_token ON ideate_canvases(share_token);
+      CREATE INDEX IF NOT EXISTS idx_canvas_versions_canvas ON ideate_canvas_versions(canvas_id);
+      CREATE INDEX IF NOT EXISTS idx_canvas_comments_canvas ON ideate_canvas_comments(canvas_id);
     `);
     console.log('Database tables initialized');
   } finally {
@@ -245,6 +290,203 @@ export async function deleteAuditData(accountId: string) {
 
 export async function cleanupExpiredSnapshots() {
   await pool.query('DELETE FROM audit_snapshots WHERE expires_at < NOW()');
+}
+
+// Ideate Canvas functions
+function generateShareToken(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let token = '';
+  for (let i = 0; i < 32; i++) {
+    token += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return token;
+}
+
+export async function createCanvas(
+  ownerUserId: string | null,
+  accountId: string | null,
+  title: string = 'Untitled Canvas'
+) {
+  const result = await pool.query(
+    `INSERT INTO ideate_canvases (owner_user_id, account_id, title, share_token)
+     VALUES ($1, $2, $3, $4)
+     RETURNING *`,
+    [ownerUserId, accountId, title, generateShareToken()]
+  );
+  return result.rows[0];
+}
+
+export async function getCanvas(canvasId: string) {
+  const result = await pool.query(
+    'SELECT * FROM ideate_canvases WHERE id = $1',
+    [canvasId]
+  );
+  return result.rows[0] || null;
+}
+
+export async function getCanvasByShareToken(shareToken: string) {
+  const result = await pool.query(
+    'SELECT * FROM ideate_canvases WHERE share_token = $1',
+    [shareToken]
+  );
+  return result.rows[0] || null;
+}
+
+export async function listCanvases(ownerUserId: string | null, accountId: string | null) {
+  let query = 'SELECT c.*, v.version_number, v.created_at as last_saved FROM ideate_canvases c LEFT JOIN LATERAL (SELECT version_number, created_at FROM ideate_canvas_versions WHERE canvas_id = c.id ORDER BY version_number DESC LIMIT 1) v ON true WHERE 1=1';
+  const params: any[] = [];
+  
+  if (ownerUserId) {
+    params.push(ownerUserId);
+    query += ` AND c.owner_user_id = $${params.length}`;
+  }
+  if (accountId) {
+    params.push(accountId);
+    query += ` AND c.account_id = $${params.length}`;
+  }
+  
+  query += ' ORDER BY c.updated_at DESC';
+  
+  const result = await pool.query(query, params);
+  return result.rows;
+}
+
+export async function updateCanvas(
+  canvasId: string,
+  updates: { title?: string; is_public?: boolean; allow_public_comments?: boolean }
+) {
+  const setClauses: string[] = ['updated_at = NOW()'];
+  const params: any[] = [];
+  
+  if (updates.title !== undefined) {
+    params.push(updates.title);
+    setClauses.push(`title = $${params.length}`);
+  }
+  if (updates.is_public !== undefined) {
+    params.push(updates.is_public);
+    setClauses.push(`is_public = $${params.length}`);
+  }
+  if (updates.allow_public_comments !== undefined) {
+    params.push(updates.allow_public_comments);
+    setClauses.push(`allow_public_comments = $${params.length}`);
+  }
+  
+  params.push(canvasId);
+  const result = await pool.query(
+    `UPDATE ideate_canvases SET ${setClauses.join(', ')} WHERE id = $${params.length} RETURNING *`,
+    params
+  );
+  return result.rows[0] || null;
+}
+
+export async function deleteCanvas(canvasId: string) {
+  await pool.query('DELETE FROM ideate_canvases WHERE id = $1', [canvasId]);
+}
+
+export async function regenerateShareToken(canvasId: string) {
+  const newToken = generateShareToken();
+  const result = await pool.query(
+    'UPDATE ideate_canvases SET share_token = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+    [newToken, canvasId]
+  );
+  return result.rows[0] || null;
+}
+
+// Canvas Versions
+export async function saveCanvasVersion(
+  canvasId: string,
+  nodes: any[],
+  connections: any[],
+  settings: any = {},
+  createdBy: string | null = null
+) {
+  const versionResult = await pool.query(
+    'SELECT COALESCE(MAX(version_number), 0) + 1 as next_version FROM ideate_canvas_versions WHERE canvas_id = $1',
+    [canvasId]
+  );
+  const nextVersion = versionResult.rows[0].next_version;
+  
+  const result = await pool.query(
+    `INSERT INTO ideate_canvas_versions (canvas_id, version_number, nodes, connections, settings, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING *`,
+    [canvasId, nextVersion, JSON.stringify(nodes), JSON.stringify(connections), JSON.stringify(settings), createdBy]
+  );
+  
+  await pool.query('UPDATE ideate_canvases SET updated_at = NOW() WHERE id = $1', [canvasId]);
+  
+  return result.rows[0];
+}
+
+export async function getLatestCanvasVersion(canvasId: string) {
+  const result = await pool.query(
+    `SELECT * FROM ideate_canvas_versions 
+     WHERE canvas_id = $1 
+     ORDER BY version_number DESC 
+     LIMIT 1`,
+    [canvasId]
+  );
+  return result.rows[0] || null;
+}
+
+export async function getCanvasVersions(canvasId: string, limit: number = 20) {
+  const result = await pool.query(
+    `SELECT id, canvas_id, version_number, created_at, created_by 
+     FROM ideate_canvas_versions 
+     WHERE canvas_id = $1 
+     ORDER BY version_number DESC 
+     LIMIT $2`,
+    [canvasId, limit]
+  );
+  return result.rows;
+}
+
+export async function getCanvasVersion(versionId: number) {
+  const result = await pool.query(
+    'SELECT * FROM ideate_canvas_versions WHERE id = $1',
+    [versionId]
+  );
+  return result.rows[0] || null;
+}
+
+// Canvas Comments
+export async function addComment(
+  canvasId: string,
+  content: string,
+  authorUserId: string | null,
+  authorName: string,
+  nodeId: string | null = null,
+  versionId: number | null = null
+) {
+  const result = await pool.query(
+    `INSERT INTO ideate_canvas_comments (canvas_id, version_id, node_id, author_user_id, author_name, content)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING *`,
+    [canvasId, versionId, nodeId, authorUserId, authorName, content]
+  );
+  return result.rows[0];
+}
+
+export async function getComments(canvasId: string) {
+  const result = await pool.query(
+    `SELECT * FROM ideate_canvas_comments 
+     WHERE canvas_id = $1 
+     ORDER BY created_at DESC`,
+    [canvasId]
+  );
+  return result.rows;
+}
+
+export async function resolveComment(commentId: number, resolved: boolean = true) {
+  const result = await pool.query(
+    'UPDATE ideate_canvas_comments SET is_resolved = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+    [resolved, commentId]
+  );
+  return result.rows[0] || null;
+}
+
+export async function deleteComment(commentId: number) {
+  await pool.query('DELETE FROM ideate_canvas_comments WHERE id = $1', [commentId]);
 }
 
 export default pool;

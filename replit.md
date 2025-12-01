@@ -23,6 +23,9 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   Includes a default funnel template (Awareness → Consideration → Activation) with hierarchy enforcement (Campaign Groups → Campaigns → Ads).
     *   Offers AI-powered generation of campaign structures based on natural language prompts.
     *   Allows inline editing, export as text brief, and detailed configuration of campaign groups, campaigns, ads, and retargeting audiences via a sidebar.
+    *   **Canvas Persistence**: Auto-saves canvases to PostgreSQL with debounced 2-second saves. Supports multiple canvases per user with version history.
+    *   **Sharing**: Generate shareable links for public canvases. Toggle public/private visibility. Regenerate share tokens for security.
+    *   **Comments**: Reviewers can leave comments on the canvas or specific nodes. Comments can be marked as resolved. Comments panel slides in from the right.
     *   **Ad Format Enforcement**: All ads within a single campaign must use the same ad format type. New ads automatically inherit the format from existing ads. Changing format prompts to update all ads in the campaign.
     *   **Thought Leader Ads**: Toggle in ad sidebar marks ads as Thought Leader Ads (TLA), showing a TLA badge on the ad node.
     *   **Audience Flows**: Three categories with different connection rules:
