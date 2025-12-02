@@ -16,12 +16,20 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   **Remarketing Flow**: Illustrates campaign and audience flow through a 3-column marketing funnel (Cold Campaigns → Remarketing Audiences → Remarketing Campaigns), showing connections and audience movement.
 *   **Account Audit**:
     *   **Opt-In System**: Audit is opt-in per account. Click "Start Audit" to enable weekly tracking.
-    *   **Simplified Dashboard**: Two clear sections - "Performing Well" and "Needs Attention" for campaigns and ads.
-    *   **Performance Metrics**: Tracks CTR and dwell time month-on-month for ads, CTR for campaigns.
+    *   **3-Tier Dashboard**: Three color-coded sections - "Needs Attention" (red), "Mild Issues" (amber), and "Performing Well" (green).
+    *   **Point-Based Scoring**: Campaigns scored across ~10 criteria with automatic classification:
+        - CTR: -2 for >20% decline (4w), -1 for >15% decline (WoW), -2 for <0.3%, -1 for <0.4%
+        - CPC: -2 for >25% increase (4w), -1 for >20% increase (WoW)
+        - CPM: -2 for >25% increase (4w), -1 for >20% increase (WoW)
+        - Budget: -10 (auto flag) for <50% utilization, -1 for <80% utilization
+        - Conversions: -2 for >25% decline, -2 for CPA up >25% (if ≥5 conversions)
+        - Score thresholds: ≤-3 = needs_attention, <0 = mild_issues, ≥0 = performing_well
+    *   **4-Week Comparison**: Uses 4-week on 4-week comparison to save API bandwidth.
+    *   **Special Flags**: LAN, Expansion, and Maximize Delivery shown as colored badges.
+    *   **Scoring Filters**: Excludes paused campaigns, low volume (<1000 impressions, <$20 spend, <3 active days), and new campaigns (<7 days).
+    *   **Ad-Level Scoring**: Tracks CTR decline >20% and CVR decline >20% (if ≥3 conversions).
     *   **Direct Links**: Each campaign and ad links directly to LinkedIn Campaign Manager.
-    *   **Budget Alerts**: Flags campaigns spending less than 80% of daily budget.
     *   **LAN/Expansion Monitoring**: Campaigns with LinkedIn Audience Network or Audience Expansion enabled get daily syncs instead of weekly.
-    *   **Audience Penetration**: Alerts when budget is spread too thin across audience.
     *   **Weekly Sync**: Default sync frequency is weekly; campaigns with LAN/Expansion get daily syncs.
     *   **Manual Refresh**: "Refresh" button to pull latest data on-demand.
 *   **Ideate Canvas**:
