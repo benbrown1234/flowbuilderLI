@@ -1720,9 +1720,11 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
   await updateAuditAccountSyncStatus(accountId, 'syncing');
   
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-  const extractId = (urn: string) => {
-    const match = urn?.match(/:(\d+)$/);
-    return match ? match[1] : urn;
+  const extractId = (urn: any): string => {
+    if (urn === null || urn === undefined) return '';
+    const urnStr = String(urn);
+    const match = urnStr.match(/:(\d+)$/);
+    return match ? match[1] : urnStr;
   };
   
   try {
@@ -1746,7 +1748,15 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     
     // Fetch creatives in batches by campaign (more reliable than q=search)
     if (campaigns.length > 0) {
-      const campaignUrns = campaigns.map((c: any) => c.id || `urn:li:sponsoredCampaign:${extractId(c.id)}`);
+      // Ensure we have proper URN format for each campaign
+      const campaignUrns = campaigns.map((c: any) => {
+        const campaignId = c.id;
+        // If it's already a URN, use it; otherwise construct one
+        if (typeof campaignId === 'string' && campaignId.startsWith('urn:li:sponsoredCampaign:')) {
+          return campaignId;
+        }
+        return `urn:li:sponsoredCampaign:${extractId(campaignId)}`;
+      });
       const batchSize = 10;
       
       for (let i = 0; i < campaignUrns.length; i += batchSize) {
@@ -1922,9 +1932,11 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
   await updateAuditAccountSyncStatus(accountId, 'syncing');
   
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-  const extractId = (urn: string) => {
-    const match = urn?.match(/:(\d+)$/);
-    return match ? match[1] : urn;
+  const extractId = (urn: any): string => {
+    if (urn === null || urn === undefined) return '';
+    const urnStr = String(urn);
+    const match = urnStr.match(/:(\d+)$/);
+    return match ? match[1] : urnStr;
   };
   
   try {
@@ -1948,7 +1960,15 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     
     // Fetch creatives in batches by campaign (more reliable than q=search)
     if (campaigns.length > 0) {
-      const campaignUrns = campaigns.map((c: any) => c.id || `urn:li:sponsoredCampaign:${extractId(c.id)}`);
+      // Ensure we have proper URN format for each campaign
+      const campaignUrns = campaigns.map((c: any) => {
+        const campaignId = c.id;
+        // If it's already a URN, use it; otherwise construct one
+        if (typeof campaignId === 'string' && campaignId.startsWith('urn:li:sponsoredCampaign:')) {
+          return campaignId;
+        }
+        return `urn:li:sponsoredCampaign:${extractId(campaignId)}`;
+      });
       const batchSize = 10;
       
       for (let i = 0; i < campaignUrns.length; i += batchSize) {
