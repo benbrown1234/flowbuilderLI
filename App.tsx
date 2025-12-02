@@ -10,6 +10,7 @@ import { RemarketingFlow } from './components/RemarketingFlow';
 import { TargetingInspector } from './components/TargetingInspector';
 import AuditPage from './components/AuditPage';
 import { IdeateCanvas } from './components/IdeateCanvas';
+import LandingPage from './components/LandingPage';
 import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, ClipboardCheck, Lightbulb, Eye } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -239,6 +240,11 @@ const App: React.FC = () => {
         </div>
       </div>
     );
+  }
+
+  // Show landing page for unauthenticated users (unless viewing shared canvas)
+  if (!isAuthenticated && !sharedCanvasToken) {
+    return <LandingPage onLogin={handleLogin} />;
   }
 
   return (
