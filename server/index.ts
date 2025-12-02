@@ -339,7 +339,7 @@ async function linkedinApiRequest(sessionId: string, endpoint: string, params: R
     const response = await axios.get(url, {
       headers: {
         'Authorization': `Bearer ${session.accessToken}`,
-        'LinkedIn-Version': '202412',
+        'LinkedIn-Version': '202411',
         'X-Restli-Protocol-Version': '2.0.0',
         'User-Agent': 'LinkedIn-Audience-Visualizer/1.0',
       },
