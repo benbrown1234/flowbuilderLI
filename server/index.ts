@@ -2812,32 +2812,44 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       const prev = hasPreviousPeriod ? previousPeriodCreatives.get(c.creativeId) : null;
       const currentCtr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
       const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
-      const ctrChange = prevCtr > 0 ? pctChange(currentCtr, prevCtr) : 0;
+      const hasPreviousData = prev && prev.impressions >= 100;
+      const ctrChange = hasPreviousData && prevCtr > 0 ? pctChange(currentCtr, prevCtr) : null;
       
       // Calculate conversion rate
       const currentCvr = c.clicks > 0 ? (c.conversions / c.clicks) * 100 : 0;
       const prevCvr = prev && prev.clicks > 0 ? (prev.conversions / prev.clicks) * 100 : 0;
-      const cvrChange = prevCvr > 0 ? pctChange(currentCvr, prevCvr) : 0;
+      const prevConversions = prev?.conversions || 0;
+      const hasPrevConversions = prevConversions >= 3;
+      const cvrChange = hasPrevConversions && prevCvr > 0 ? pctChange(currentCvr, prevCvr) : null;
       
-      // Determine issues based on scoring criteria
+      // Determine scoring status and issues
       const issues: string[] = [];
+      let scoringStatus: 'needs_attention' | 'performing_well' | 'insufficient_data' = 'performing_well';
       
-      // Low volume filter for ads
+      // Low volume filter - not enough data to score
       if (c.impressions < 500 || c.clicks < 10) {
-        // Skip scoring for low volume ads
-      } else {
+        scoringStatus = 'insufficient_data';
+      } 
+      // No previous data to compare against
+      else if (!hasPreviousData) {
+        scoringStatus = 'insufficient_data';
+      }
+      else {
         // CTR decline > 20%
-        if (ctrChange < -20) {
+        if (ctrChange !== null && ctrChange < -20) {
           issues.push(`CTR down ${Math.abs(ctrChange).toFixed(0)}%`);
         }
         
-        // Conversion rate decline > 20% (if ≥3 conversions)
-        if (c.conversions >= 3 && cvrChange < -20) {
+        // Conversion rate decline > 20% (if ≥3 conversions in both periods)
+        if (c.conversions >= 3 && hasPrevConversions && cvrChange !== null && cvrChange < -20) {
           issues.push(`CVR down ${Math.abs(cvrChange).toFixed(0)}%`);
         }
+        
+        // Set status based on issues
+        scoringStatus = issues.length > 0 ? 'needs_attention' : 'performing_well';
       }
       
-      const isPerformingWell = issues.length === 0 && c.impressions >= 500;
+      const isPerformingWell = scoringStatus === 'performing_well';
       
       return {
         id: c.creativeId,
@@ -2846,11 +2858,19 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         campaignName: campaignNameLookup.get(c.campaignId) || `Campaign ${c.campaignId}`,
         ctr: currentCtr,
         ctrChange,
+        prevCtr: hasPreviousData ? prevCtr : null,
         conversions: c.conversions,
+        prevConversions: prev?.conversions || 0,
         cvr: currentCvr,
         cvrChange,
+        prevCvr: hasPrevConversions ? prevCvr : null,
         impressions: c.impressions,
+        prevImpressions: prev?.impressions || 0,
         clicks: c.clicks,
+        prevClicks: prev?.clicks || 0,
+        spend: c.spend,
+        prevSpend: prev?.spend || 0,
+        scoringStatus,
         isPerformingWell,
         issues
       };

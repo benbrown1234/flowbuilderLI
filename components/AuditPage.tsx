@@ -19,7 +19,13 @@ import {
   Target,
   Info,
   Calendar,
-  ChevronDown
+  ChevronDown,
+  X,
+  MousePointer,
+  Eye,
+  Percent,
+  ArrowUpRight,
+  ArrowDownRight
 } from 'lucide-react';
 
 type ComparisonMode = 'rolling28' | 'fullMonth';
@@ -77,18 +83,28 @@ interface CampaignItem {
   flags?: string[];
 }
 
+type AdScoringStatus = 'needs_attention' | 'performing_well' | 'insufficient_data';
+
 interface AdItem {
   id: string;
   name: string;
   campaignId: string;
   campaignName: string;
   ctr: number;
-  ctrChange: number;
+  ctrChange: number | null;
+  prevCtr?: number | null;
   conversions?: number;
+  prevConversions?: number;
   cvr?: number;
-  cvrChange?: number;
+  cvrChange?: number | null;
+  prevCvr?: number | null;
   impressions: number;
+  prevImpressions?: number;
   clicks: number;
+  prevClicks?: number;
+  spend?: number;
+  prevSpend?: number;
+  scoringStatus?: AdScoringStatus;
   isPerformingWell: boolean;
   issues: string[];
 }
@@ -140,7 +156,11 @@ function getLinkedInAdUrl(accountId: string, campaignId: string, adId: string): 
   return `https://www.linkedin.com/campaignmanager/accounts/${accountId}/campaigns/${campaignId}/creatives/${adId}`;
 }
 
-function PerformanceIndicator({ change, isPositive }: { change: number; isPositive: boolean }) {
+function PerformanceIndicator({ change, isPositive }: { change: number | null; isPositive: boolean }) {
+  if (change === null) {
+    return <span className="text-gray-400 text-sm">No prior data</span>;
+  }
+  
   if (Math.abs(change) < 0.5) {
     return <span className="text-gray-500 text-sm">No change</span>;
   }
@@ -153,7 +173,7 @@ function PerformanceIndicator({ change, isPositive }: { change: number; isPositi
   );
 }
 
-function CampaignCard({ campaign, accountId, showIssues }: { campaign: CampaignItem; accountId: string; showIssues: boolean }) {
+function CampaignCard({ campaign, accountId, showIssues, onClick }: { campaign: CampaignItem; accountId: string; showIssues: boolean; onClick?: () => void }) {
   const linkedInUrl = getLinkedInCampaignUrl(accountId, campaign.id);
   
   const getBorderColor = () => {
@@ -175,7 +195,10 @@ function CampaignCard({ campaign, accountId, showIssues }: { campaign: CampaignI
   };
   
   return (
-    <div className={`bg-white rounded-lg border ${getBorderColor()} p-4`}>
+    <div 
+      className={`bg-white rounded-lg border ${getBorderColor()} p-4 ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}
+      onClick={onClick}
+    >
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
           <a 
@@ -243,11 +266,20 @@ function CampaignCard({ campaign, accountId, showIssues }: { campaign: CampaignI
   );
 }
 
-function AdCard({ ad, accountId, showIssues }: { ad: AdItem; accountId: string; showIssues: boolean }) {
+function AdCard({ ad, accountId, showIssues, onClick }: { ad: AdItem; accountId: string; showIssues: boolean; onClick?: () => void }) {
   const linkedInUrl = getLinkedInAdUrl(accountId, ad.campaignId, ad.id);
   
+  const getBorderColor = () => {
+    if (ad.scoringStatus === 'needs_attention') return 'border-red-200';
+    if (ad.scoringStatus === 'insufficient_data') return 'border-gray-200';
+    return 'border-green-200';
+  };
+  
   return (
-    <div className={`bg-white rounded-lg border ${showIssues ? 'border-red-200' : 'border-green-200'} p-4`}>
+    <div 
+      className={`bg-white rounded-lg border ${getBorderColor()} p-4 ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}
+      onClick={onClick}
+    >
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
           <a 
@@ -322,6 +354,367 @@ function AlertCard({ alert, accountId }: { alert: AuditData['alerts'][0]; accoun
               <ExternalLink className="w-3 h-3" />
             </a>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MetricRow({ label, current, previous, change, isPositive, format = 'number' }: { 
+  label: string; 
+  current: number | undefined; 
+  previous: number | undefined | null; 
+  change: number | undefined | null;
+  isPositive: boolean;
+  format?: 'number' | 'percent' | 'currency';
+}) {
+  const formatValue = (val: number | undefined | null) => {
+    if (val === undefined || val === null) return '-';
+    if (format === 'percent') return `${val.toFixed(2)}%`;
+    if (format === 'currency') return `$${val.toFixed(2)}`;
+    return formatNumber(val);
+  };
+  
+  const getChangeColor = () => {
+    if (change === undefined || change === null || Math.abs(change) < 0.5) return 'text-gray-500';
+    return isPositive ? 'text-green-600' : 'text-red-600';
+  };
+  
+  const ChangeIcon = change !== undefined && change !== null && change > 0 ? ArrowUpRight : ArrowDownRight;
+  
+  return (
+    <div className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
+      <span className="text-sm text-gray-600">{label}</span>
+      <div className="text-right">
+        <span className="text-sm font-medium text-gray-900">{formatValue(current)}</span>
+        {previous !== undefined && previous !== null && (
+          <span className="text-xs text-gray-500 ml-2">vs {formatValue(previous)}</span>
+        )}
+        {change !== undefined && change !== null && Math.abs(change) >= 0.5 && (
+          <span className={`inline-flex items-center ml-2 text-xs ${getChangeColor()}`}>
+            <ChangeIcon className="w-3 h-3" />
+            {change > 0 ? '+' : ''}{change.toFixed(1)}%
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CampaignDetailSidebar({ campaign, accountId, onClose }: { 
+  campaign: CampaignItem; 
+  accountId: string;
+  onClose: () => void;
+}) {
+  const linkedInUrl = getLinkedInCampaignUrl(accountId, campaign.id);
+  
+  const getStatusBadge = () => {
+    if (campaign.scoringStatus === 'needs_attention') {
+      return <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium"><XCircle className="w-3 h-3" /> Needs Attention</span>;
+    }
+    if (campaign.scoringStatus === 'mild_issues') {
+      return <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-700 rounded text-xs font-medium"><AlertTriangle className="w-3 h-3" /> Mild Issues</span>;
+    }
+    return <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-medium"><CheckCircle2 className="w-3 h-3" /> Performing Well</span>;
+  };
+  
+  return (
+    <div className="fixed inset-y-0 right-0 w-96 bg-white shadow-xl z-50 overflow-y-auto">
+      <div className="sticky top-0 bg-white border-b border-gray-200 p-4 flex items-center justify-between">
+        <h3 className="font-semibold text-gray-900">Campaign Details</h3>
+        <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded">
+          <X className="w-5 h-5 text-gray-500" />
+        </button>
+      </div>
+      
+      <div className="p-4 space-y-6">
+        <div>
+          <h4 className="text-lg font-medium text-gray-900 mb-2">{campaign.name}</h4>
+          <div className="flex items-center gap-2 flex-wrap">
+            {getStatusBadge()}
+            {campaign.score !== undefined && (
+              <span className="text-xs text-gray-500">Score: {campaign.score}</span>
+            )}
+          </div>
+          <a 
+            href={linkedInUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline mt-2"
+          >
+            View in LinkedIn <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
+        
+        {campaign.issues.length > 0 && (
+          <div className="bg-red-50 rounded-lg p-4 border border-red-100">
+            <h5 className="font-medium text-red-800 mb-2 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" /> Issues Detected
+            </h5>
+            <ul className="space-y-1">
+              {campaign.issues.map((issue, idx) => (
+                <li key={idx} className="text-sm text-red-700 flex items-start gap-2">
+                  <span className="text-red-400 mt-1">•</span> {issue}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        
+        {(campaign.hasLan || campaign.hasExpansion || campaign.hasMaximizeDelivery) && (
+          <div className="flex gap-2 flex-wrap">
+            {campaign.hasLan && (
+              <span className="inline-flex items-center gap-1 text-blue-600 text-xs bg-blue-50 rounded px-2 py-1">
+                <Zap className="w-3 h-3" /> LinkedIn Audience Network
+              </span>
+            )}
+            {campaign.hasExpansion && (
+              <span className="inline-flex items-center gap-1 text-purple-600 text-xs bg-purple-50 rounded px-2 py-1">
+                <Users className="w-3 h-3" /> Audience Expansion
+              </span>
+            )}
+            {campaign.hasMaximizeDelivery && (
+              <span className="inline-flex items-center gap-1 text-orange-600 text-xs bg-orange-50 rounded px-2 py-1">
+                <Zap className="w-3 h-3" /> Maximize Delivery
+              </span>
+            )}
+          </div>
+        )}
+        
+        <div>
+          <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+            <BarChart3 className="w-4 h-4" /> Performance Metrics
+          </h5>
+          <div className="bg-gray-50 rounded-lg p-3">
+            <MetricRow 
+              label="CTR" 
+              current={campaign.ctr} 
+              previous={undefined}
+              change={campaign.ctrChange} 
+              isPositive={campaign.ctrChange > 0}
+              format="percent"
+            />
+            <MetricRow 
+              label="CPC" 
+              current={campaign.cpc} 
+              previous={undefined}
+              change={campaign.cpcChange} 
+              isPositive={(campaign.cpcChange || 0) < 0}
+              format="currency"
+            />
+            <MetricRow 
+              label="CPM" 
+              current={campaign.cpm} 
+              previous={undefined}
+              change={campaign.cpmChange} 
+              isPositive={(campaign.cpmChange || 0) < 0}
+              format="currency"
+            />
+            <MetricRow 
+              label="Conversions" 
+              current={campaign.conversions} 
+              previous={undefined}
+              change={campaign.conversionsChange} 
+              isPositive={(campaign.conversionsChange || 0) > 0}
+            />
+            <MetricRow 
+              label="CPA" 
+              current={campaign.cpa} 
+              previous={undefined}
+              change={campaign.cpaChange} 
+              isPositive={(campaign.cpaChange || 0) < 0}
+              format="currency"
+            />
+          </div>
+        </div>
+        
+        <div>
+          <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+            <Eye className="w-4 h-4" /> Volume Metrics
+          </h5>
+          <div className="bg-gray-50 rounded-lg p-3">
+            <MetricRow 
+              label="Impressions" 
+              current={campaign.impressions} 
+              previous={undefined}
+              change={undefined} 
+              isPositive={true}
+            />
+            <MetricRow 
+              label="Clicks" 
+              current={campaign.clicks} 
+              previous={undefined}
+              change={undefined} 
+              isPositive={true}
+            />
+            <MetricRow 
+              label="Spend" 
+              current={campaign.spend} 
+              previous={undefined}
+              change={undefined} 
+              isPositive={true}
+              format="currency"
+            />
+          </div>
+        </div>
+        
+        {campaign.budgetUtilization !== undefined && (
+          <div>
+            <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+              <DollarSign className="w-4 h-4" /> Budget
+            </h5>
+            <div className="bg-gray-50 rounded-lg p-3">
+              <div className="flex justify-between text-sm mb-2">
+                <span className="text-gray-600">Daily Budget</span>
+                <span className="font-medium">${campaign.dailyBudget?.toFixed(2) || '-'}</span>
+              </div>
+              <div className="flex justify-between text-sm mb-2">
+                <span className="text-gray-600">Avg Daily Spend</span>
+                <span className="font-medium">${campaign.avgDailySpend?.toFixed(2) || '-'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Utilization</span>
+                <span className={`font-medium ${
+                  campaign.budgetUtilization < 50 ? 'text-red-600' :
+                  campaign.budgetUtilization < 80 ? 'text-amber-600' : 'text-green-600'
+                }`}>
+                  {campaign.budgetUtilization.toFixed(0)}%
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AdDetailSidebar({ ad, accountId, onClose }: { 
+  ad: AdItem; 
+  accountId: string;
+  onClose: () => void;
+}) {
+  const linkedInUrl = getLinkedInAdUrl(accountId, ad.campaignId, ad.id);
+  
+  const getStatusBadge = () => {
+    if (ad.scoringStatus === 'needs_attention') {
+      return <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium"><XCircle className="w-3 h-3" /> Needs Attention</span>;
+    }
+    if (ad.scoringStatus === 'insufficient_data') {
+      return <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium"><Info className="w-3 h-3" /> Insufficient Data</span>;
+    }
+    return <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-medium"><CheckCircle2 className="w-3 h-3" /> Performing Well</span>;
+  };
+  
+  return (
+    <div className="fixed inset-y-0 right-0 w-96 bg-white shadow-xl z-50 overflow-y-auto">
+      <div className="sticky top-0 bg-white border-b border-gray-200 p-4 flex items-center justify-between">
+        <h3 className="font-semibold text-gray-900">Ad Details</h3>
+        <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded">
+          <X className="w-5 h-5 text-gray-500" />
+        </button>
+      </div>
+      
+      <div className="p-4 space-y-6">
+        <div>
+          <h4 className="text-lg font-medium text-gray-900 mb-1">{ad.name}</h4>
+          <p className="text-sm text-gray-500 mb-2">{ad.campaignName}</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            {getStatusBadge()}
+          </div>
+          <a 
+            href={linkedInUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline mt-2"
+          >
+            View in LinkedIn <ExternalLink className="w-3 h-3" />
+          </a>
+        </div>
+        
+        {ad.issues.length > 0 && (
+          <div className="bg-red-50 rounded-lg p-4 border border-red-100">
+            <h5 className="font-medium text-red-800 mb-2 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" /> Issues Detected
+            </h5>
+            <ul className="space-y-1">
+              {ad.issues.map((issue, idx) => (
+                <li key={idx} className="text-sm text-red-700 flex items-start gap-2">
+                  <span className="text-red-400 mt-1">•</span> {issue}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        
+        {ad.scoringStatus === 'insufficient_data' && (
+          <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <h5 className="font-medium text-gray-700 mb-2 flex items-center gap-2">
+              <Info className="w-4 h-4" /> Why Insufficient Data?
+            </h5>
+            <p className="text-sm text-gray-600">
+              {(ad.impressions < 500 || ad.clicks < 10) 
+                ? `This ad has low volume (${ad.impressions} impressions, ${ad.clicks} clicks). We need at least 500 impressions and 10 clicks to reliably score performance.`
+                : `No previous period data available for comparison. We need data from both the current and previous 4-week periods to calculate trends.`
+              }
+            </p>
+          </div>
+        )}
+        
+        <div>
+          <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+            <BarChart3 className="w-4 h-4" /> Current Period (4 weeks)
+          </h5>
+          <div className="bg-gray-50 rounded-lg p-3">
+            <MetricRow 
+              label="CTR" 
+              current={ad.ctr} 
+              previous={ad.prevCtr}
+              change={ad.ctrChange} 
+              isPositive={(ad.ctrChange || 0) > 0}
+              format="percent"
+            />
+            <MetricRow 
+              label="Impressions" 
+              current={ad.impressions} 
+              previous={ad.prevImpressions}
+              change={undefined} 
+              isPositive={true}
+            />
+            <MetricRow 
+              label="Clicks" 
+              current={ad.clicks} 
+              previous={ad.prevClicks}
+              change={undefined} 
+              isPositive={true}
+            />
+            <MetricRow 
+              label="Conversions" 
+              current={ad.conversions} 
+              previous={ad.prevConversions}
+              change={undefined} 
+              isPositive={true}
+            />
+            {ad.cvr !== undefined && (
+              <MetricRow 
+                label="Conversion Rate" 
+                current={ad.cvr} 
+                previous={ad.prevCvr}
+                change={ad.cvrChange} 
+                isPositive={(ad.cvrChange || 0) > 0}
+                format="percent"
+              />
+            )}
+          </div>
+        </div>
+        
+        <div className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3">
+          <p className="font-medium mb-1">Scoring Criteria:</p>
+          <ul className="space-y-1">
+            <li>• CTR decline &gt;20% from previous 4 weeks</li>
+            <li>• Conversion rate decline &gt;20% (if 3+ conversions)</li>
+            <li>• Minimum 500 impressions and 10 clicks required</li>
+          </ul>
         </div>
       </div>
     </div>
@@ -455,6 +848,8 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
   const [error, setError] = useState<string | null>(null);
   const [comparisonMode, setComparisonMode] = useState<ComparisonMode>('rolling28');
   const [showModeDropdown, setShowModeDropdown] = useState(false);
+  const [selectedCampaign, setSelectedCampaign] = useState<CampaignItem | null>(null);
+  const [selectedAd, setSelectedAd] = useState<AdItem | null>(null);
 
   const checkAuditStatus = useCallback(async () => {
     if (!accountId) return;
@@ -670,8 +1065,9 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
   const mildIssuesCampaigns = data.campaigns.filter(c => c.scoringStatus === 'mild_issues');
   const needsAttentionCampaigns = data.campaigns.filter(c => c.scoringStatus === 'needs_attention');
   const otherCampaigns = data.campaigns.filter(c => ['paused', 'low_volume', 'new_campaign'].includes(c.scoringStatus || ''));
-  const performingWellAds = data.ads.filter(a => a.isPerformingWell);
-  const needsAttentionAds = data.ads.filter(a => !a.isPerformingWell);
+  const performingWellAds = data.ads.filter(a => a.scoringStatus === 'performing_well');
+  const needsAttentionAds = data.ads.filter(a => a.scoringStatus === 'needs_attention');
+  const insufficientDataAds = data.ads.filter(a => a.scoringStatus === 'insufficient_data');
 
   return (
     <div className="h-full overflow-auto p-6">
@@ -752,7 +1148,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
             {needsAttentionCampaigns.length > 0 ? (
               <div className="space-y-3">
                 {needsAttentionCampaigns.map(campaign => (
-                  <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={true} />
+                  <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={true} onClick={() => setSelectedCampaign(campaign)} />
                 ))}
               </div>
             ) : (
@@ -773,7 +1169,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
             {mildIssuesCampaigns.length > 0 ? (
               <div className="space-y-3">
                 {mildIssuesCampaigns.map(campaign => (
-                  <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={true} />
+                  <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={true} onClick={() => setSelectedCampaign(campaign)} />
                 ))}
               </div>
             ) : (
@@ -794,7 +1190,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
             {performingWellCampaigns.length > 0 ? (
               <div className="space-y-3">
                 {performingWellCampaigns.slice(0, 5).map(campaign => (
-                  <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={false} />
+                  <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={false} onClick={() => setSelectedCampaign(campaign)} />
                 ))}
                 {performingWellCampaigns.length > 5 && (
                   <p className="text-sm text-gray-500 text-center">+{performingWellCampaigns.length - 5} more</p>
@@ -819,7 +1215,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
                   </h4>
                   <div className="space-y-3">
                     {needsAttentionAds.slice(0, 5).map(ad => (
-                      <AdCard key={ad.id} ad={ad} accountId={accountId} showIssues={true} />
+                      <AdCard key={ad.id} ad={ad} accountId={accountId} showIssues={true} onClick={() => setSelectedAd(ad)} />
                     ))}
                   </div>
                 </div>
@@ -833,7 +1229,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
                   </h4>
                   <div className="space-y-3">
                     {performingWellAds.slice(0, 5).map(ad => (
-                      <AdCard key={ad.id} ad={ad} accountId={accountId} showIssues={false} />
+                      <AdCard key={ad.id} ad={ad} accountId={accountId} showIssues={false} onClick={() => setSelectedAd(ad)} />
                     ))}
                   </div>
                 </div>
@@ -871,6 +1267,28 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
           </div>
         )}
       </div>
+      
+      {selectedCampaign && (
+        <>
+          <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setSelectedCampaign(null)} />
+          <CampaignDetailSidebar 
+            campaign={selectedCampaign} 
+            accountId={accountId} 
+            onClose={() => setSelectedCampaign(null)} 
+          />
+        </>
+      )}
+      
+      {selectedAd && (
+        <>
+          <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setSelectedAd(null)} />
+          <AdDetailSidebar 
+            ad={selectedAd} 
+            accountId={accountId} 
+            onClose={() => setSelectedAd(null)} 
+          />
+        </>
+      )}
     </div>
   );
 }
