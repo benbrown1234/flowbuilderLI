@@ -335,17 +335,22 @@ async function linkedinApiRequest(sessionId: string, endpoint: string, params: R
     url += `?${rawQueryString}`;
   }
   
-  const response = await axios.get(url, {
-    headers: {
-      'Authorization': `Bearer ${session.accessToken}`,
-      'LinkedIn-Version': '202511',
-      'X-Restli-Protocol-Version': '2.0.0',
-      'User-Agent': 'LinkedIn-Audience-Visualizer/1.0',
-    },
-    params: rawQueryString ? undefined : params,
-  });
-  
-  return response.data;
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        'Authorization': `Bearer ${session.accessToken}`,
+        'LinkedIn-Version': '202412',
+        'X-Restli-Protocol-Version': '2.0.0',
+        'User-Agent': 'LinkedIn-Audience-Visualizer/1.0',
+      },
+      params: rawQueryString ? undefined : params,
+    });
+    
+    return response.data;
+  } catch (error: any) {
+    console.error(`LinkedIn API error for ${endpoint}:`, error.response?.status, error.response?.data || error.message);
+    throw error;
+  }
 }
 
 async function linkedinApiRequestPaginated(sessionId: string, endpoint: string, params: Record<string, any> = {}, rawQueryString?: string): Promise<any[]> {
