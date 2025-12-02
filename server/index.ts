@@ -1885,54 +1885,72 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
 
 // Start audit (opt-in and sync)
 app.post('/api/audit/start/:accountId', requireAuth, async (req, res) => {
+  const sessionId = (req as any).sessionId;
+  const { accountId } = req.params;
+  const { accountName } = req.body;
+  
   try {
-    const sessionId = (req as any).sessionId;
-    const { accountId } = req.params;
-    const { accountName } = req.body;
-    
     console.log(`[Audit] Start request for account ${accountId} (${accountName})`);
     
     // Opt in the account
     await optInAuditAccount(accountId, accountName || `Account ${accountId}`);
     console.log(`[Audit] Account ${accountId} opted in successfully`);
     
+    // Send response immediately
     res.json({ status: 'started', message: 'Audit sync started' });
     
-    // Run sync in background - use setImmediate to ensure it runs after response
-    console.log(`[Audit] Starting background sync for account ${accountId}...`);
-    setImmediate(() => {
-      runAuditSync(sessionId, accountId, accountName || `Account ${accountId}`)
-        .then(() => console.log(`[Audit] Background sync completed for ${accountId}`))
-        .catch(err => console.error(`[Audit] Background sync error for ${accountId}:`, err.message));
-    });
-      
   } catch (err: any) {
     console.error('[Audit] Start error:', err.message);
-    res.status(500).json({ error: 'Failed to start audit' });
+    return res.status(500).json({ error: 'Failed to start audit' });
   }
+  
+  // Run sync after response - use process.nextTick to ensure it runs
+  console.log(`[Audit] Queuing background sync for account ${accountId}...`);
+  process.nextTick(async () => {
+    try {
+      console.log(`[Audit] Background sync starting for ${accountId}...`);
+      await runAuditSync(sessionId, accountId, accountName || `Account ${accountId}`);
+      console.log(`[Audit] Background sync completed for ${accountId}`);
+    } catch (err: any) {
+      console.error(`[Audit] Background sync error for ${accountId}:`, err.message);
+    }
+  });
 });
 
 // Refresh/resync audit data
 app.post('/api/audit/refresh/:accountId', requireAuth, async (req, res) => {
+  const sessionId = (req as any).sessionId;
+  const { accountId } = req.params;
+  
+  let accountName = '';
   try {
-    const sessionId = (req as any).sessionId;
-    const { accountId } = req.params;
-    
     const auditAccount = await getAuditAccount(accountId);
     if (!auditAccount) {
       return res.status(400).json({ error: 'Account not opted into audit' });
     }
+    accountName = auditAccount.account_name;
+    
+    // Update status to syncing
+    await updateAuditAccountSyncStatus(accountId, 'syncing');
     
     res.json({ status: 'started', message: 'Audit refresh started' });
-    
-    // Run sync in background
-    runAuditSync(sessionId, accountId, auditAccount.account_name)
-      .catch(err => console.error('Background refresh error:', err.message));
       
   } catch (err: any) {
-    console.error('Audit refresh error:', err.message);
-    res.status(500).json({ error: 'Failed to refresh audit' });
+    console.error('[Audit] Refresh error:', err.message);
+    return res.status(500).json({ error: 'Failed to refresh audit' });
   }
+  
+  // Run sync after response
+  console.log(`[Audit] Queuing refresh sync for account ${accountId}...`);
+  process.nextTick(async () => {
+    try {
+      console.log(`[Audit] Refresh sync starting for ${accountId}...`);
+      await runAuditSync(sessionId, accountId, accountName);
+      console.log(`[Audit] Refresh sync completed for ${accountId}`);
+    } catch (err: any) {
+      console.error(`[Audit] Refresh sync error for ${accountId}:`, err.message);
+    }
+  });
 });
 
 // Get stored audit analytics data
