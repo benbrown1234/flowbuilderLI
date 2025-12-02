@@ -76,6 +76,30 @@ export const getCampaignAnalytics = async (accountId: string): Promise<AccountMe
   return response.data;
 };
 
+export interface BudgetPricing {
+  bidLimits?: {
+    min?: { amount: string; currencyCode: string };
+    max?: { amount: string; currencyCode: string };
+  };
+  suggestedBid?: {
+    default?: { amount: string; currencyCode: string };
+    min?: { amount: string; currencyCode: string };
+    max?: { amount: string; currencyCode: string };
+  };
+  dailyBudgetLimits?: {
+    min?: { amount: string; currencyCode: string };
+    max?: { amount: string; currencyCode: string };
+    default?: { amount: string; currencyCode: string };
+  };
+  currency?: string;
+  error?: string;
+}
+
+export const getCampaignBudgetPricing = async (accountId: string, campaignId: string): Promise<BudgetPricing> => {
+  const response = await api.get(`/linkedin/account/${accountId}/campaign/${campaignId}/budget-pricing`);
+  return response.data;
+};
+
 const FACET_CATEGORY_MAPPING: Record<string, { category: string; field: string }> = {
   'urn:li:adTargetingFacet:locations': { category: 'geos', field: '' },
   'urn:li:adTargetingFacet:geoLocations': { category: 'geos', field: '' },

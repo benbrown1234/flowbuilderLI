@@ -1166,6 +1166,105 @@ app.get('/api/linkedin/account/:accountId/ad-preview/:creativeId', requireAuth, 
   }
 });
 
+// Ad Budget Pricing endpoint - fetches bid limits and suggested bids
+app.get('/api/linkedin/account/:accountId/campaign/:campaignId/budget-pricing', requireAuth, async (req, res) => {
+  try {
+    const sessionId = (req as any).sessionId;
+    const { accountId, campaignId } = req.params;
+    
+    console.log(`Fetching budget pricing for campaign ${campaignId} in account ${accountId}`);
+    
+    // First, get the campaign details to extract targeting criteria and other parameters
+    const campaignUrn = `urn:li:sponsoredCampaign:${campaignId}`;
+    const encodedCampaignUrn = encodeURIComponent(campaignUrn);
+    
+    const campaignResponse = await linkedinApiRequest(
+      sessionId,
+      `/adAccounts/${accountId}/adCampaigns/${encodedCampaignUrn}`,
+      {}
+    );
+    
+    if (!campaignResponse) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    console.log(`Campaign details: costType=${campaignResponse.costType}, objectiveType=${campaignResponse.objectiveType}`);
+    
+    // Map costType to bidType
+    const bidTypeMap: Record<string, string> = {
+      'CPM': 'CPM',
+      'CPC': 'CPC',
+      'CPV': 'CPV',
+    };
+    const bidType = bidTypeMap[campaignResponse.costType] || 'CPM';
+    
+    // Map campaign type
+    let campaignType = 'SPONSORED_UPDATES'; // Default for most campaigns
+    if (campaignResponse.type === 'TEXT_AD') {
+      campaignType = 'TEXT_AD';
+    } else if (campaignResponse.type === 'SPONSORED_INMAILS' || campaignResponse.offsiteDeliveryEnabled) {
+      campaignType = 'SPONSORED_INMAILS';
+    }
+    
+    // Build the budget pricing request
+    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+    const objectiveType = campaignResponse.objectiveType || 'BRAND_AWARENESS';
+    const optimizationTargetType = campaignResponse.optimizationTargetType || 'NONE';
+    
+    // Build targeting criteria query parameter
+    let targetingParam = '';
+    if (campaignResponse.targetingCriteria) {
+      // Encode the targeting criteria for the query
+      const tc = campaignResponse.targetingCriteria;
+      if (tc.include && tc.include.and) {
+        // Build the RESTLI 2.0 format targeting criteria
+        const andList = tc.include.and.map((orGroup: any) => {
+          const orEntries = Object.entries(orGroup.or || {}).map(([facet, values]: [string, any]) => {
+            const encodedFacet = encodeURIComponent(facet);
+            const encodedValues = (values as string[]).map(v => encodeURIComponent(v)).join(',');
+            return `(${encodedFacet}:List(${encodedValues}))`;
+          }).join(',');
+          return `(or:(${orEntries}))`;
+        }).join(',');
+        targetingParam = `&targetingCriteria=(include:(and:List(${andList})))`;
+      }
+    }
+    
+    // Make the budget pricing API call
+    try {
+      const pricingResponse = await linkedinApiRequest(
+        sessionId,
+        '/adBudgetPricing',
+        {},
+        `q=criteriaV2&account=${accountUrn}&bidType=${bidType}&campaignType=${campaignType}&objectiveType=${objectiveType}&optimizationTargetType=${optimizationTargetType}&matchType=EXACT${targetingParam}`
+      );
+      
+      console.log(`Budget pricing response:`, JSON.stringify(pricingResponse, null, 2).substring(0, 1000));
+      
+      if (pricingResponse.elements && pricingResponse.elements.length > 0) {
+        const pricing = pricingResponse.elements[0];
+        res.json({
+          bidLimits: pricing.bidLimits,
+          suggestedBid: pricing.suggestedBid,
+          dailyBudgetLimits: pricing.dailyBudgetLimits,
+          currency: pricing.bidLimits?.max?.currencyCode || 'USD'
+        });
+      } else {
+        res.json({ error: 'No pricing data available' });
+      }
+    } catch (pricingErr: any) {
+      console.error('Budget pricing API error:', pricingErr.response?.data || pricingErr.message);
+      // Return empty result rather than error - pricing may not be available for all campaigns
+      res.json({ error: 'Pricing data not available for this campaign' });
+    }
+  } catch (err: any) {
+    console.error('Budget pricing error:', err.response?.data || err.message);
+    res.status(err.response?.status || 500).json({ 
+      error: err.response?.data || err.message 
+    });
+  }
+});
+
 app.get('/api/linkedin/account/:accountId/creative/:creativeId', requireAuth, async (req, res) => {
   try {
     const sessionId = (req as any).sessionId;

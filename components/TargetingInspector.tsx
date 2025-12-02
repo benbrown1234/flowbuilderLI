@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { TargetingSummary, NodeType, CreativeNode, CreativeContent, CampaignMetrics, MonthlyMetrics } from '../types';
-import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin, Building2, ExternalLink, MousePointer, FileText, Link2, Loader2, Maximize2, X, GraduationCap, User, Heart, Zap, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, BarChart3, Eye, MousePointerClick, Video } from 'lucide-react';
-import { getAdPreview, getCreativeDetails, getCampaignAnalytics } from '../services/linkedinApi';
+import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin, Building2, ExternalLink, MousePointer, FileText, Link2, Loader2, Maximize2, X, GraduationCap, User, Heart, Zap, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, BarChart3, Eye, MousePointerClick, Video, Gavel } from 'lucide-react';
+import { getAdPreview, getCreativeDetails, getCampaignAnalytics, getCampaignBudgetPricing, BudgetPricing } from '../services/linkedinApi';
 import { AdPreviewCard } from './AdPreviewCard';
 
 const isThoughtLeaderAd = (name: string): boolean => {
@@ -231,6 +231,130 @@ const PerformanceSection: React.FC<PerformanceSectionProps> = ({ campaignId, acc
             previous={metrics.previousMonth.videoViews}
             format="number"
           />
+        )}
+      </div>
+    </div>
+  );
+};
+
+interface BiddingSectionProps {
+  campaignId: string;
+  accountId: string;
+  isLiveData: boolean;
+}
+
+const BiddingSection: React.FC<BiddingSectionProps> = ({ campaignId, accountId, isLiveData }) => {
+  const [pricing, setPricing] = useState<BudgetPricing | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  useEffect(() => {
+    if (!isLiveData || !accountId || !campaignId) return;
+    
+    setLoading(true);
+    setError(null);
+    setPricing(null);
+    
+    getCampaignBudgetPricing(accountId, campaignId)
+      .then(data => {
+        if (data.error) {
+          setError(data.error);
+        } else {
+          setPricing(data);
+        }
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('Failed to fetch budget pricing:', err);
+        setError('Unable to load bidding data');
+        setLoading(false);
+      });
+  }, [campaignId, accountId, isLiveData]);
+  
+  const formatAmount = (moneyAmount?: { amount: string; currencyCode: string }) => {
+    if (!moneyAmount) return '-';
+    const amount = parseFloat(moneyAmount.amount);
+    const currency = moneyAmount.currencyCode;
+    const symbol = currency === 'GBP' ? '£' : currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency;
+    return `${symbol}${amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+  
+  if (!isLiveData) {
+    return (
+      <div className="mb-6">
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center">
+          <Gavel className="w-3.5 h-3.5 mr-1.5" /> Bidding
+        </h3>
+        <div className="bg-gray-50 rounded-lg p-4 border border-gray-100 text-center">
+          <p className="text-sm text-gray-500">Connect LinkedIn to see bidding data</p>
+        </div>
+      </div>
+    );
+  }
+  
+  if (loading) {
+    return (
+      <div className="mb-6">
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center">
+          <Gavel className="w-3.5 h-3.5 mr-1.5" /> Bidding
+        </h3>
+        <div className="bg-gray-50 rounded-lg p-4 border border-gray-100 flex items-center justify-center">
+          <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+        </div>
+      </div>
+    );
+  }
+  
+  if (error || !pricing) {
+    return (
+      <div className="mb-6">
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center">
+          <Gavel className="w-3.5 h-3.5 mr-1.5" /> Bidding
+        </h3>
+        <div className="bg-gray-50 rounded-lg p-4 border border-gray-100 text-center">
+          <p className="text-sm text-gray-500">{error || 'No bidding data available'}</p>
+        </div>
+      </div>
+    );
+  }
+  
+  return (
+    <div className="mb-6">
+      <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center">
+        <Gavel className="w-3.5 h-3.5 mr-1.5" /> Bidding
+      </h3>
+      <div className="bg-gray-50 rounded-lg p-4 border border-gray-100 space-y-3">
+        {pricing.suggestedBid?.default && (
+          <div className="flex justify-between items-center border-b border-gray-100 pb-2">
+            <div className="flex items-center text-xs text-gray-500">
+              <Target className="w-3.5 h-3.5 mr-2" /> Suggested Bid
+            </div>
+            <div className="text-sm font-semibold text-green-600">
+              {formatAmount(pricing.suggestedBid.default)}
+            </div>
+          </div>
+        )}
+        
+        {pricing.bidLimits?.min && (
+          <div className="flex justify-between items-center border-b border-gray-100 pb-2">
+            <div className="flex items-center text-xs text-gray-500">
+              <TrendingDown className="w-3.5 h-3.5 mr-2" /> Minimum Bid
+            </div>
+            <div className="text-sm font-semibold text-gray-900">
+              {formatAmount(pricing.bidLimits.min)}
+            </div>
+          </div>
+        )}
+        
+        {pricing.bidLimits?.max && (
+          <div className="flex justify-between items-center">
+            <div className="flex items-center text-xs text-gray-500">
+              <TrendingUp className="w-3.5 h-3.5 mr-2" /> Maximum Bid
+            </div>
+            <div className="text-sm font-semibold text-gray-900">
+              {formatAmount(pricing.bidLimits.max)}
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -662,6 +786,14 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
           <>
             {accountId && node.campaignId && (
               <PerformanceSection 
+                campaignId={node.campaignId} 
+                accountId={accountId} 
+                isLiveData={isLiveData || false}
+              />
+            )}
+            
+            {accountId && node.campaignId && (
+              <BiddingSection 
                 campaignId={node.campaignId} 
                 accountId={accountId} 
                 isLiveData={isLiveData || false}
