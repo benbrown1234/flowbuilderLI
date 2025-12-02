@@ -429,98 +429,12 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
       const response = await axios.get(`/api/audit/data/${accountId}`);
       const rawData = response.data;
       
-      const campaigns: CampaignItem[] = (rawData.campaigns || []).map((c: any) => {
-        const issues: string[] = [];
-        const isPerformingWell = c.ctrChange >= 0 && c.ctr >= 0.4;
-        
-        if (c.ctrChange < -10) issues.push(`CTR dropped ${Math.abs(c.ctrChange).toFixed(0)}% vs last month`);
-        if (c.ctr < 0.3) issues.push('CTR below 0.3%');
-        if (c.budgetUtilization !== undefined && c.budgetUtilization < 80) {
-          issues.push(`Only using ${c.budgetUtilization.toFixed(0)}% of budget`);
-        }
-        
-        return {
-          id: c.campaignId,
-          name: c.campaignName || `Campaign ${c.campaignId}`,
-          ctr: c.ctr || 0,
-          ctrChange: c.ctrChange || 0,
-          impressions: c.impressions || 0,
-          clicks: c.clicks || 0,
-          spend: c.spend || 0,
-          dailyBudget: c.dailyBudget,
-          budgetUtilization: c.budgetUtilization,
-          hasLan: c.hasLan,
-          hasExpansion: c.hasExpansion,
-          audiencePenetration: c.audiencePenetration,
-          isPerformingWell,
-          issues
-        };
-      });
-      
-      const ads: AdItem[] = (rawData.creatives || []).map((a: any) => {
-        const issues: string[] = [];
-        const isPerformingWell = a.ctrChange >= 0 && a.ctr >= 0.4 && 
-                                  (a.dwellTimeChange === undefined || a.dwellTimeChange >= 0);
-        
-        if (a.ctrChange < -10) issues.push(`CTR dropped ${Math.abs(a.ctrChange).toFixed(0)}%`);
-        if (a.ctr < 0.3) issues.push('Low CTR');
-        if (a.dwellTimeChange !== undefined && a.dwellTimeChange < -15) {
-          issues.push(`Dwell time dropped ${Math.abs(a.dwellTimeChange).toFixed(0)}%`);
-        }
-        
-        return {
-          id: a.creativeId,
-          name: a.creativeName || `Ad ${a.creativeId}`,
-          campaignId: a.campaignId,
-          campaignName: a.campaignName || `Campaign ${a.campaignId}`,
-          ctr: a.ctr || 0,
-          ctrChange: a.ctrChange || 0,
-          dwellTime: a.dwellTime,
-          dwellTimeChange: a.dwellTimeChange,
-          impressions: a.impressions || 0,
-          clicks: a.clicks || 0,
-          isPerformingWell,
-          issues
-        };
-      });
-      
-      const alerts: AuditData['alerts'] = [];
-      
-      campaigns.forEach(c => {
-        if (c.budgetUtilization !== undefined && c.budgetUtilization < 80) {
-          alerts.push({
-            type: 'budget',
-            message: `${c.name} is only using ${c.budgetUtilization.toFixed(0)}% of daily budget`,
-            campaignId: c.id,
-            campaignName: c.name
-          });
-        }
-        if (c.audiencePenetration !== undefined && c.audiencePenetration < 20) {
-          alerts.push({
-            type: 'penetration',
-            message: `Low audience penetration (${c.audiencePenetration.toFixed(0)}%) - consider allocating more budget`,
-            campaignId: c.id,
-            campaignName: c.name
-          });
-        }
-        if (c.hasLan || c.hasExpansion) {
-          alerts.push({
-            type: 'lan_expansion',
-            message: `${c.hasLan ? 'LinkedIn Audience Network' : 'Audience Expansion'} enabled - monitored daily`,
-            campaignId: c.id,
-            campaignName: c.name
-          });
-        }
-      });
-      
-      const hasLanOrExpansion = campaigns.some(c => c.hasLan || c.hasExpansion);
-      
       setData({
-        campaigns,
-        ads,
-        alerts,
-        lastSyncAt: rawData.account?.lastSyncAt,
-        syncFrequency: hasLanOrExpansion ? 'daily' : 'weekly'
+        campaigns: rawData.campaigns || [],
+        ads: rawData.ads || [],
+        alerts: rawData.alerts || [],
+        lastSyncAt: rawData.lastSyncAt,
+        syncFrequency: rawData.syncFrequency || 'weekly'
       });
       
     } catch (err: any) {
