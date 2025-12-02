@@ -1890,17 +1890,24 @@ app.post('/api/audit/start/:accountId', requireAuth, async (req, res) => {
     const { accountId } = req.params;
     const { accountName } = req.body;
     
+    console.log(`[Audit] Start request for account ${accountId} (${accountName})`);
+    
     // Opt in the account
     await optInAuditAccount(accountId, accountName || `Account ${accountId}`);
+    console.log(`[Audit] Account ${accountId} opted in successfully`);
     
     res.json({ status: 'started', message: 'Audit sync started' });
     
-    // Run sync in background
-    runAuditSync(sessionId, accountId, accountName || `Account ${accountId}`)
-      .catch(err => console.error('Background sync error:', err.message));
+    // Run sync in background - use setImmediate to ensure it runs after response
+    console.log(`[Audit] Starting background sync for account ${accountId}...`);
+    setImmediate(() => {
+      runAuditSync(sessionId, accountId, accountName || `Account ${accountId}`)
+        .then(() => console.log(`[Audit] Background sync completed for ${accountId}`))
+        .catch(err => console.error(`[Audit] Background sync error for ${accountId}:`, err.message));
+    });
       
   } catch (err: any) {
-    console.error('Audit start error:', err.message);
+    console.error('[Audit] Start error:', err.message);
     res.status(500).json({ error: 'Failed to start audit' });
   }
 });
