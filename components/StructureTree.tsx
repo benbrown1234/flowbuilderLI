@@ -209,6 +209,22 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeat
             <div
               key={node.id}
               onClick={() => node.type !== NodeType.ACCOUNT && handleNodeClick(node)}
+              onMouseEnter={(e) => {
+                if (node.type === NodeType.CREATIVE) {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  setHoveredAdId((node.data as CreativeNode).id);
+                  setHoverPosition({
+                    x: rect.right + 8,
+                    y: rect.top - 40
+                  });
+                }
+              }}
+              onMouseLeave={() => {
+                if (node.type === NodeType.CREATIVE) {
+                  setHoveredAdId(null);
+                  setHoverPosition(null);
+                }
+              }}
               className={`
                 absolute transition-all duration-200 hover:z-20 shadow-sm hover:shadow-xl
                 rounded-lg border flex flex-col justify-center z-10
@@ -247,36 +263,17 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeat
                 </span>
               </div>
               
-              {/* Thumbnail for Creative nodes with hover preview */}
+              {/* Thumbnail for Creative nodes */}
               {node.type === NodeType.CREATIVE && (node.data as CreativeNode).content?.imageUrl && (
-                <div 
-                  className="w-full h-16 mb-1 rounded overflow-hidden bg-gray-100 relative cursor-pointer group"
-                  onMouseEnter={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    setHoveredAdId((node.data as CreativeNode).id);
-                    setHoverPosition({
-                      x: rect.right + 8,
-                      y: rect.top - 40
-                    });
-                  }}
-                  onMouseLeave={() => {
-                    setHoveredAdId(null);
-                    setHoverPosition(null);
-                  }}
-                >
+                <div className="w-full h-16 mb-1 rounded overflow-hidden bg-gray-100 relative">
                   <img 
                     src={(node.data as CreativeNode).content?.imageUrl} 
                     alt="Ad preview"
-                    className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                    className="w-full h-full object-cover"
                     onError={(e) => {
                       (e.target as HTMLImageElement).style.display = 'none';
                     }}
                   />
-                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-                    <span className="text-[8px] font-medium text-white bg-black/50 px-1.5 py-0.5 rounded">
-                      Hover for preview
-                    </span>
-                  </div>
                 </div>
               )}
               
