@@ -326,6 +326,15 @@ async function linkedinApiRequest(sessionId: string, endpoint: string, params: R
     throw new Error('Token expired');
   }
   
+  return linkedinApiRequestWithToken(session.accessToken, endpoint, params, rawQueryString);
+}
+
+// Direct token-based API request (for background tasks where session may be gone)
+async function linkedinApiRequestWithToken(accessToken: string, endpoint: string, params: Record<string, any> = {}, rawQueryString?: string) {
+  if (!accessToken) {
+    throw new Error('Not authenticated');
+  }
+  
   // Apply throttling before each request
   await throttledDelay();
   
@@ -338,7 +347,7 @@ async function linkedinApiRequest(sessionId: string, endpoint: string, params: R
   try {
     const response = await axios.get(url, {
       headers: {
-        'Authorization': `Bearer ${session.accessToken}`,
+        'Authorization': `Bearer ${accessToken}`,
         'LinkedIn-Version': '202411',
         'X-Restli-Protocol-Version': '2.0.0',
         'User-Agent': 'LinkedIn-Audience-Visualizer/1.0',
@@ -1729,16 +1738,34 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     const campaigns = campaignsResponse.elements || [];
     console.log(`Found ${campaigns.length} campaigns`);
     
-    // Step 2: Fetch creatives (with delay)
+    // Step 2: Fetch creatives (with delay) - using q=criteria approach for reliability
     console.log('Fetching creatives...');
     await delay(300);
-    const creativesResponse = await linkedinApiRequest(
-      sessionId, 
-      `/adAccounts/${accountId}/creatives`, 
-      {}, 
-      'q=search'
-    );
-    const creatives = creativesResponse.elements || [];
+    
+    let creatives: any[] = [];
+    
+    // Fetch creatives in batches by campaign (more reliable than q=search)
+    if (campaigns.length > 0) {
+      const campaignUrns = campaigns.map((c: any) => c.id || `urn:li:sponsoredCampaign:${extractId(c.id)}`);
+      const batchSize = 10;
+      
+      for (let i = 0; i < campaignUrns.length; i += batchSize) {
+        const batch = campaignUrns.slice(i, i + batchSize);
+        const campaignListEncoded = batch.map((urn: string) => encodeURIComponent(urn)).join(',');
+        const rawQuery = `q=criteria&campaigns=List(${campaignListEncoded})&pageSize=100`;
+        
+        try {
+          await delay(200);
+          const response = await linkedinApiRequest(sessionId, `/adAccounts/${accountId}/creatives`, {}, rawQuery);
+          if (response.elements && Array.isArray(response.elements)) {
+            creatives.push(...response.elements);
+          }
+        } catch (err: any) {
+          console.warn(`Creatives batch ${i}-${i + batchSize} fetch error:`, err.message);
+        }
+      }
+    }
+    
     console.log(`Found ${creatives.length} creatives`);
     
     // Step 3: Fetch analytics for the last 90 days (with delay)
@@ -1888,11 +1915,221 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
   }
 }
 
+// Token-based version for background sync (session may be gone after response is sent)
+async function runAuditSyncWithToken(accessToken: string, accountId: string, accountName: string) {
+  console.log(`\n=== Starting audit sync for account ${accountId} (${accountName}) ===`);
+  
+  await updateAuditAccountSyncStatus(accountId, 'syncing');
+  
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  const extractId = (urn: string) => {
+    const match = urn?.match(/:(\d+)$/);
+    return match ? match[1] : urn;
+  };
+  
+  try {
+    // Step 1: Fetch campaigns (with delay before)
+    console.log('Fetching campaigns...');
+    await delay(200);
+    const campaignsResponse = await linkedinApiRequestWithToken(
+      accessToken, 
+      `/adAccounts/${accountId}/adCampaigns`, 
+      {}, 
+      'q=search&search=(status:(values:List(ACTIVE,PAUSED,ARCHIVED,CANCELED,DRAFT)))'
+    );
+    const campaigns = campaignsResponse.elements || [];
+    console.log(`Found ${campaigns.length} campaigns`);
+    
+    // Step 2: Fetch creatives (with delay) - using q=criteria approach for reliability
+    console.log('Fetching creatives...');
+    await delay(300);
+    
+    let creatives: any[] = [];
+    
+    // Fetch creatives in batches by campaign (more reliable than q=search)
+    if (campaigns.length > 0) {
+      const campaignUrns = campaigns.map((c: any) => c.id || `urn:li:sponsoredCampaign:${extractId(c.id)}`);
+      const batchSize = 10;
+      
+      for (let i = 0; i < campaignUrns.length; i += batchSize) {
+        const batch = campaignUrns.slice(i, i + batchSize);
+        const campaignListEncoded = batch.map((urn: string) => encodeURIComponent(urn)).join(',');
+        const rawQuery = `q=criteria&campaigns=List(${campaignListEncoded})&pageSize=100`;
+        
+        try {
+          await delay(200);
+          const response = await linkedinApiRequestWithToken(accessToken, `/adAccounts/${accountId}/creatives`, {}, rawQuery);
+          if (response.elements && Array.isArray(response.elements)) {
+            creatives.push(...response.elements);
+          }
+        } catch (err: any) {
+          console.warn(`Creatives batch ${i}-${i + batchSize} fetch error:`, err.message);
+        }
+      }
+    }
+    
+    console.log(`Found ${creatives.length} creatives`);
+    
+    // Step 3: Fetch analytics for the last 90 days (with delay)
+    console.log('Fetching analytics...');
+    await delay(300);
+    
+    const now = new Date();
+    const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    
+    const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
+    const encodedAccountUrn = encodeURIComponent(accountUrn);
+    
+    // Fetch campaign-level analytics with daily granularity
+    const campaignAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,dateRange,pivotValues`;
+    
+    let campaignAnalytics: any = { elements: [] };
+    try {
+      campaignAnalytics = await linkedinApiRequestWithToken(accessToken, '/adAnalytics', {}, campaignAnalyticsQuery);
+      console.log(`Got ${campaignAnalytics.elements?.length || 0} campaign analytics rows`);
+    } catch (err: any) {
+      console.warn('Campaign analytics fetch error:', err.message);
+    }
+    
+    // Step 4: Fetch creative-level analytics (with delay)
+    await delay(300);
+    const creativeAnalyticsQuery = `q=analytics&pivot=CREATIVE&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,dateRange,pivotValues`;
+    
+    let creativeAnalytics: any = { elements: [] };
+    try {
+      creativeAnalytics = await linkedinApiRequestWithToken(accessToken, '/adAnalytics', {}, creativeAnalyticsQuery);
+      console.log(`Got ${creativeAnalytics.elements?.length || 0} creative analytics rows`);
+    } catch (err: any) {
+      console.warn('Creative analytics fetch error:', err.message);
+    }
+    
+    // Build campaign lookup map with settings
+    const campaignMap = new Map<string, any>();
+    for (const c of campaigns) {
+      const id = extractId(c.id);
+      const dailyBudget = c.dailyBudget?.amount ? parseFloat(c.dailyBudget.amount) / 100 : null;
+      campaignMap.set(id, {
+        name: c.name || `Campaign ${id}`,
+        groupId: extractId(c.campaignGroup),
+        status: c.status,
+        dailyBudget,
+        hasLan: c.audienceExpansionEnabled === true || c.offsiteDeliveryEnabled === true,
+        hasExpansion: c.audienceExpansionEnabled === true
+      });
+    }
+    
+    // Build creative lookup map
+    const creativeMap = new Map<string, any>();
+    for (const c of creatives) {
+      const id = extractId(c.id);
+      creativeMap.set(id, {
+        name: c.name || `Creative ${id}`,
+        campaignId: extractId(c.campaign),
+        status: c.status,
+        type: c.type || 'SPONSORED_UPDATE'
+      });
+    }
+    
+    // Process and save campaign daily metrics
+    const campaignMetrics: any[] = [];
+    for (const elem of (campaignAnalytics.elements || [])) {
+      const campaignId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
+      if (!campaignId) continue;
+      
+      const dateRange = elem.dateRange?.start;
+      if (!dateRange) continue;
+      
+      const metricDate = new Date(dateRange.year, dateRange.month - 1, dateRange.day);
+      const campaignInfo = campaignMap.get(campaignId) || {};
+      
+      campaignMetrics.push({
+        campaignId,
+        campaignName: campaignInfo.name,
+        campaignGroupId: campaignInfo.groupId,
+        campaignStatus: campaignInfo.status,
+        metricDate,
+        impressions: elem.impressions || 0,
+        clicks: elem.clicks || 0,
+        spend: parseFloat(elem.costInLocalCurrency || '0'),
+        conversions: elem.externalWebsiteConversions || 0,
+        videoViews: elem.videoViews || 0,
+        leads: elem.oneClickLeads || 0
+      });
+    }
+    
+    if (campaignMetrics.length > 0) {
+      console.log(`Saving ${campaignMetrics.length} campaign daily metrics...`);
+      await saveCampaignDailyMetrics(accountId, campaignMetrics);
+    }
+    
+    // Process and save creative daily metrics
+    const creativeMetrics: any[] = [];
+    for (const elem of (creativeAnalytics.elements || [])) {
+      const creativeId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
+      if (!creativeId) continue;
+      
+      const dateRange = elem.dateRange?.start;
+      if (!dateRange) continue;
+      
+      const metricDate = new Date(dateRange.year, dateRange.month - 1, dateRange.day);
+      const creativeInfo = creativeMap.get(creativeId) || {};
+      
+      creativeMetrics.push({
+        creativeId,
+        creativeName: creativeInfo.name,
+        campaignId: creativeInfo.campaignId,
+        creativeStatus: creativeInfo.status,
+        creativeType: creativeInfo.type,
+        metricDate,
+        impressions: elem.impressions || 0,
+        clicks: elem.clicks || 0,
+        spend: parseFloat(elem.costInLocalCurrency || '0'),
+        conversions: elem.externalWebsiteConversions || 0,
+        videoViews: elem.videoViews || 0,
+        leads: elem.oneClickLeads || 0
+      });
+    }
+    
+    if (creativeMetrics.length > 0) {
+      console.log(`Saving ${creativeMetrics.length} creative daily metrics...`);
+      await saveCreativeDailyMetrics(accountId, creativeMetrics);
+    }
+    
+    await updateAuditAccountSyncStatus(accountId, 'completed');
+    console.log(`=== Audit sync completed for account ${accountId} ===\n`);
+    
+    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length };
+    
+  } catch (err: any) {
+    console.error(`Audit sync error for account ${accountId}:`, err.message);
+    
+    let errorMessage = err.message;
+    if (err.message?.includes('Not authenticated') || err.message?.includes('401') || err.response?.status === 401) {
+      errorMessage = 'LinkedIn connection expired - please reconnect your account';
+    } else if (err.message?.includes('429') || err.response?.status === 429) {
+      errorMessage = 'LinkedIn rate limit reached - please try again later';
+    } else if (err.message?.includes('403') || err.response?.status === 403) {
+      errorMessage = 'Access denied - check account permissions';
+    }
+    
+    await updateAuditAccountSyncStatus(accountId, 'error', errorMessage);
+    throw err;
+  }
+}
+
 // Start audit (opt-in and sync)
 app.post('/api/audit/start/:accountId', requireAuth, async (req, res) => {
   const sessionId = (req as any).sessionId;
   const { accountId } = req.params;
   const { accountName } = req.body;
+  
+  // Capture access token BEFORE sending response (session may be cleaned up after response)
+  const session = getSession(sessionId);
+  const accessToken = session.accessToken;
+  
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
   
   try {
     console.log(`[Audit] Start request for account ${accountId} (${accountName})`);
@@ -1909,12 +2146,12 @@ app.post('/api/audit/start/:accountId', requireAuth, async (req, res) => {
     return res.status(500).json({ error: 'Failed to start audit' });
   }
   
-  // Run sync after response - use process.nextTick to ensure it runs
+  // Run sync after response - use captured accessToken
   console.log(`[Audit] Queuing background sync for account ${accountId}...`);
   process.nextTick(async () => {
     try {
       console.log(`[Audit] Background sync starting for ${accountId}...`);
-      await runAuditSync(sessionId, accountId, accountName || `Account ${accountId}`);
+      await runAuditSyncWithToken(accessToken, accountId, accountName || `Account ${accountId}`);
       console.log(`[Audit] Background sync completed for ${accountId}`);
     } catch (err: any) {
       console.error(`[Audit] Background sync error for ${accountId}:`, err.message);
@@ -1926,6 +2163,14 @@ app.post('/api/audit/start/:accountId', requireAuth, async (req, res) => {
 app.post('/api/audit/refresh/:accountId', requireAuth, async (req, res) => {
   const sessionId = (req as any).sessionId;
   const { accountId } = req.params;
+  
+  // Capture access token BEFORE sending response
+  const session = getSession(sessionId);
+  const accessToken = session.accessToken;
+  
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
   
   let accountName = '';
   try {
@@ -1945,12 +2190,12 @@ app.post('/api/audit/refresh/:accountId', requireAuth, async (req, res) => {
     return res.status(500).json({ error: 'Failed to refresh audit' });
   }
   
-  // Run sync after response
+  // Run sync after response - use captured accessToken
   console.log(`[Audit] Queuing refresh sync for account ${accountId}...`);
   process.nextTick(async () => {
     try {
       console.log(`[Audit] Refresh sync starting for ${accountId}...`);
-      await runAuditSync(sessionId, accountId, accountName);
+      await runAuditSyncWithToken(accessToken, accountId, accountName);
       console.log(`[Audit] Refresh sync completed for ${accountId}`);
     } catch (err: any) {
       console.error(`[Audit] Refresh sync error for ${accountId}:`, err.message);
