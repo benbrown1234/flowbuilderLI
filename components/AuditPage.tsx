@@ -539,6 +539,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
   }
 
   const isSyncing = auditStatus.syncStatus === 'syncing' || auditStatus.syncStatus === 'pending';
+  const hasErrorStatus = auditStatus.syncStatus === 'error';
 
   if (isSyncing && (!data || data.campaigns.length === 0)) {
     return (
@@ -549,6 +550,26 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
           <p className="text-gray-500 mb-2">
             Fetching campaigns, ads, and performance metrics...
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (hasErrorStatus && (!data || data.campaigns.length === 0)) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Sync Failed</h3>
+          <p className="text-gray-500 mb-4">{auditStatus.syncError || 'The sync was interrupted. Please try again.'}</p>
+          <button 
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            {isRefreshing ? 'Syncing...' : 'Retry Sync'}
+          </button>
         </div>
       </div>
     );
