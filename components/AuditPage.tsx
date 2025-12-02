@@ -41,11 +41,21 @@ interface AuditAccountStatus {
   autoSyncEnabled?: boolean;
 }
 
+type ScoringStatus = 'needs_attention' | 'mild_issues' | 'performing_well' | 'paused' | 'low_volume' | 'new_campaign';
+
 interface CampaignItem {
   id: string;
   name: string;
   ctr: number;
   ctrChange: number;
+  cpc?: number;
+  cpcChange?: number;
+  cpm?: number;
+  cpmChange?: number;
+  conversions?: number;
+  conversionsChange?: number;
+  cpa?: number;
+  cpaChange?: number;
   impressions: number;
   clicks: number;
   spend: number;
@@ -59,9 +69,12 @@ interface CampaignItem {
   spendChange?: number;
   hasLan?: boolean;
   hasExpansion?: boolean;
-  audiencePenetration?: number;
+  hasMaximizeDelivery?: boolean;
+  score?: number;
+  scoringStatus?: ScoringStatus;
   isPerformingWell: boolean;
   issues: string[];
+  flags?: string[];
 }
 
 interface AdItem {
@@ -71,8 +84,9 @@ interface AdItem {
   campaignName: string;
   ctr: number;
   ctrChange: number;
-  dwellTime?: number;
-  dwellTimeChange?: number;
+  conversions?: number;
+  cvr?: number;
+  cvrChange?: number;
   impressions: number;
   clicks: number;
   isPerformingWell: boolean;
@@ -142,8 +156,26 @@ function PerformanceIndicator({ change, isPositive }: { change: number; isPositi
 function CampaignCard({ campaign, accountId, showIssues }: { campaign: CampaignItem; accountId: string; showIssues: boolean }) {
   const linkedInUrl = getLinkedInCampaignUrl(accountId, campaign.id);
   
+  const getBorderColor = () => {
+    if (campaign.scoringStatus === 'needs_attention') return 'border-red-200';
+    if (campaign.scoringStatus === 'mild_issues') return 'border-amber-200';
+    return 'border-green-200';
+  };
+  
+  const getIssueBorderColor = () => {
+    if (campaign.scoringStatus === 'needs_attention') return 'border-red-100';
+    if (campaign.scoringStatus === 'mild_issues') return 'border-amber-100';
+    return 'border-green-100';
+  };
+  
+  const getIssueTextColor = () => {
+    if (campaign.scoringStatus === 'needs_attention') return 'text-red-600';
+    if (campaign.scoringStatus === 'mild_issues') return 'text-amber-600';
+    return 'text-green-600';
+  };
+  
   return (
-    <div className={`bg-white rounded-lg border ${showIssues ? 'border-red-200' : 'border-green-200'} p-4`}>
+    <div className={`bg-white rounded-lg border ${getBorderColor()} p-4`}>
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
           <a 
@@ -174,17 +206,33 @@ function CampaignCard({ campaign, accountId, showIssues }: { campaign: CampaignI
         </div>
       </div>
       
-      {(campaign.hasLan || campaign.hasExpansion) && (
-        <div className="flex items-center gap-2 text-blue-600 text-xs bg-blue-50 rounded px-2 py-1 mb-2">
-          <Zap className="w-3 h-3" />
-          <span>{campaign.hasLan ? 'LAN' : ''}{campaign.hasLan && campaign.hasExpansion ? ' + ' : ''}{campaign.hasExpansion ? 'Expansion' : ''} enabled</span>
+      {(campaign.hasLan || campaign.hasExpansion || campaign.hasMaximizeDelivery) && (
+        <div className="flex items-center gap-2 flex-wrap mb-2">
+          {campaign.hasLan && (
+            <span className="inline-flex items-center gap-1 text-blue-600 text-xs bg-blue-50 rounded px-2 py-1">
+              <Zap className="w-3 h-3" />
+              LAN
+            </span>
+          )}
+          {campaign.hasExpansion && (
+            <span className="inline-flex items-center gap-1 text-purple-600 text-xs bg-purple-50 rounded px-2 py-1">
+              <Users className="w-3 h-3" />
+              Expansion
+            </span>
+          )}
+          {campaign.hasMaximizeDelivery && (
+            <span className="inline-flex items-center gap-1 text-orange-600 text-xs bg-orange-50 rounded px-2 py-1">
+              <Zap className="w-3 h-3" />
+              Max Delivery
+            </span>
+          )}
         </div>
       )}
       
       {showIssues && campaign.issues.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-red-100 space-y-1">
+        <div className={`mt-2 pt-2 border-t ${getIssueBorderColor()} space-y-1`}>
           {campaign.issues.map((issue, idx) => (
-            <div key={idx} className="flex items-center gap-2 text-red-600 text-xs">
+            <div key={idx} className={`flex items-center gap-2 ${getIssueTextColor()} text-xs`}>
               <AlertTriangle className="w-3 h-3 flex-shrink-0" />
               <span>{issue}</span>
             </div>
@@ -222,21 +270,14 @@ function AdCard({ ad, accountId, showIssues }: { ad: AdItem; accountId: string; 
           <p className="text-xs text-gray-500">CTR</p>
         </div>
         <div>
-          <p className="text-lg font-semibold text-gray-900">{ad.dwellTime ? `${ad.dwellTime.toFixed(1)}s` : '-'}</p>
-          <p className="text-xs text-gray-500">Dwell Time</p>
+          <p className="text-lg font-semibold text-gray-900">{ad.conversions || 0}</p>
+          <p className="text-xs text-gray-500">Conversions</p>
         </div>
         <div>
           <p className="text-lg font-semibold text-gray-900">{formatNumber(ad.clicks)}</p>
           <p className="text-xs text-gray-500">Clicks</p>
         </div>
       </div>
-      
-      {ad.dwellTimeChange !== undefined && Math.abs(ad.dwellTimeChange) > 0.5 && (
-        <div className={`flex items-center gap-2 text-xs rounded px-2 py-1 mb-2 ${ad.dwellTimeChange > 0 ? 'text-green-600 bg-green-50' : 'text-amber-600 bg-amber-50'}`}>
-          <Clock className="w-3 h-3" />
-          <span>Dwell time {ad.dwellTimeChange > 0 ? 'up' : 'down'} {formatChange(ad.dwellTimeChange)}</span>
-        </div>
-      )}
       
       {showIssues && ad.issues.length > 0 && (
         <div className="mt-2 pt-2 border-t border-red-100">
@@ -625,8 +666,10 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
     return null;
   }
 
-  const performingWellCampaigns = data.campaigns.filter(c => c.isPerformingWell);
-  const needsAttentionCampaigns = data.campaigns.filter(c => !c.isPerformingWell);
+  const performingWellCampaigns = data.campaigns.filter(c => c.scoringStatus === 'performing_well');
+  const mildIssuesCampaigns = data.campaigns.filter(c => c.scoringStatus === 'mild_issues');
+  const needsAttentionCampaigns = data.campaigns.filter(c => c.scoringStatus === 'needs_attention');
+  const otherCampaigns = data.campaigns.filter(c => ['paused', 'low_volume', 'new_campaign'].includes(c.scoringStatus || ''));
   const performingWellAds = data.ads.filter(a => a.isPerformingWell);
   const needsAttentionAds = data.ads.filter(a => !a.isPerformingWell);
 
@@ -695,79 +738,138 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Needs Attention - Red */}
+          <div className="bg-red-50 rounded-lg p-4 border border-red-100">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <XCircle className="w-5 h-5 text-red-500" />
+              Needs Attention
+              <span className="text-sm font-normal text-gray-500">
+                ({needsAttentionCampaigns.length})
+              </span>
+            </h3>
+            
+            {needsAttentionCampaigns.length > 0 ? (
+              <div className="space-y-3">
+                {needsAttentionCampaigns.map(campaign => (
+                  <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={true} />
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-sm">No campaigns need urgent attention.</p>
+            )}
+          </div>
+
+          {/* Mild Issues - Amber */}
+          <div className="bg-amber-50 rounded-lg p-4 border border-amber-100">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-500" />
+              Mild Issues
+              <span className="text-sm font-normal text-gray-500">
+                ({mildIssuesCampaigns.length})
+              </span>
+            </h3>
+            
+            {mildIssuesCampaigns.length > 0 ? (
+              <div className="space-y-3">
+                {mildIssuesCampaigns.map(campaign => (
+                  <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={true} />
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-sm">No campaigns with mild issues.</p>
+            )}
+          </div>
+
+          {/* Performing Well - Green */}
+          <div className="bg-green-50 rounded-lg p-4 border border-green-100">
             <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5 text-green-500" />
               Performing Well
               <span className="text-sm font-normal text-gray-500">
-                ({performingWellCampaigns.length} campaigns, {performingWellAds.length} ads)
+                ({performingWellCampaigns.length})
               </span>
             </h3>
             
-            {performingWellCampaigns.length > 0 && (
-              <div className="mb-4">
-                <h4 className="text-sm font-medium text-gray-700 mb-2">Campaigns</h4>
-                <div className="space-y-3">
-                  {performingWellCampaigns.slice(0, 5).map(campaign => (
-                    <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={false} />
-                  ))}
-                </div>
+            {performingWellCampaigns.length > 0 ? (
+              <div className="space-y-3">
+                {performingWellCampaigns.slice(0, 5).map(campaign => (
+                  <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={false} />
+                ))}
+                {performingWellCampaigns.length > 5 && (
+                  <p className="text-sm text-gray-500 text-center">+{performingWellCampaigns.length - 5} more</p>
+                )}
               </div>
-            )}
-            
-            {performingWellAds.length > 0 && (
-              <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-2">Ads</h4>
-                <div className="space-y-3">
-                  {performingWellAds.slice(0, 5).map(ad => (
-                    <AdCard key={ad.id} ad={ad} accountId={accountId} showIssues={false} />
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {performingWellCampaigns.length === 0 && performingWellAds.length === 0 && (
-              <p className="text-gray-500 text-sm">No campaigns or ads performing well this period.</p>
-            )}
-          </div>
-
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-red-500" />
-              Needs Attention
-              <span className="text-sm font-normal text-gray-500">
-                ({needsAttentionCampaigns.length} campaigns, {needsAttentionAds.length} ads)
-              </span>
-            </h3>
-            
-            {needsAttentionCampaigns.length > 0 && (
-              <div className="mb-4">
-                <h4 className="text-sm font-medium text-gray-700 mb-2">Campaigns</h4>
-                <div className="space-y-3">
-                  {needsAttentionCampaigns.map(campaign => (
-                    <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={true} />
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {needsAttentionAds.length > 0 && (
-              <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-2">Ads</h4>
-                <div className="space-y-3">
-                  {needsAttentionAds.map(ad => (
-                    <AdCard key={ad.id} ad={ad} accountId={accountId} showIssues={true} />
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {needsAttentionCampaigns.length === 0 && needsAttentionAds.length === 0 && (
-              <p className="text-gray-500 text-sm">All campaigns and ads are performing well!</p>
+            ) : (
+              <p className="text-gray-500 text-sm">No campaigns performing well yet.</p>
             )}
           </div>
         </div>
+
+        {/* Ads Section */}
+        {(needsAttentionAds.length > 0 || performingWellAds.length > 0) && (
+          <div className="mt-8">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Ad Performance</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {needsAttentionAds.length > 0 && (
+                <div className="bg-red-50 rounded-lg p-4 border border-red-100">
+                  <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                    <XCircle className="w-4 h-4 text-red-500" />
+                    Ads Needing Attention ({needsAttentionAds.length})
+                  </h4>
+                  <div className="space-y-3">
+                    {needsAttentionAds.slice(0, 5).map(ad => (
+                      <AdCard key={ad.id} ad={ad} accountId={accountId} showIssues={true} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {performingWellAds.length > 0 && (
+                <div className="bg-green-50 rounded-lg p-4 border border-green-100">
+                  <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                    Ads Performing Well ({performingWellAds.length})
+                  </h4>
+                  <div className="space-y-3">
+                    {performingWellAds.slice(0, 5).map(ad => (
+                      <AdCard key={ad.id} ad={ad} accountId={accountId} showIssues={false} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Other Campaigns (Paused, Low Volume, New) */}
+        {otherCampaigns.length > 0 && (
+          <div className="mt-8">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <Info className="w-5 h-5 text-gray-400" />
+              Not Scored
+              <span className="text-sm font-normal text-gray-500">
+                ({otherCampaigns.length} campaigns)
+              </span>
+            </h3>
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+              <div className="space-y-2">
+                {otherCampaigns.slice(0, 5).map(campaign => (
+                  <div key={campaign.id} className="flex items-center justify-between text-sm">
+                    <span className="text-gray-700">{campaign.name}</span>
+                    <span className="text-gray-500 capitalize">
+                      {campaign.scoringStatus === 'low_volume' ? 'Low volume' : 
+                       campaign.scoringStatus === 'new_campaign' ? 'New campaign' : 'Paused'}
+                    </span>
+                  </div>
+                ))}
+                {otherCampaigns.length > 5 && (
+                  <p className="text-sm text-gray-500 text-center">+{otherCampaigns.length - 5} more</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

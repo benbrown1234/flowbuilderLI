@@ -1,0 +1,69 @@
+def pct_change(new, old):
+    if old == 0: return 0
+    return (new - old) / old
+
+def evaluate_campaign(c, group_penetration=None):
+    
+    # ==== FILTERS ====
+    if c.is_paused:
+        return "paused", []
+
+    if c.impressions_week < 1000 or c.spend_week < 20 or c.active_days_week < 3:
+        return "low_volume", ["Low volume — trends unreliable"]
+
+    if c.days_since_start < 7:
+        return "new_campaign", ["Not enough data yet"]
+
+    score = 0
+    issues = []
+
+    # ==== CTR ====
+    if pct_change(c.ctr_m2, c.ctr_m1) < -0.20:
+        score -= 2; issues.append("CTR down MoM")
+    if pct_change(c.ctr_w2, c.ctr_w1) < -0.15:
+        score -= 1; issues.append("CTR down WoW")
+    if c.ctr_m2 < 0.004:
+        score -= 2; issues.append("Low CTR (<0.4%)")
+
+    # ==== CPC ====
+    if pct_change(c.cpc_m2, c.cpc_m1) > 0.25:
+        score -= 2; issues.append("CPC rising MoM")
+    if pct_change(c.cpc_w2, c.cpc_w1) > 0.20:
+        score -= 1; issues.append("CPC rising WoW")
+
+    # ==== CPM ====
+    if pct_change(c.cpm_m2, c.cpm_m1) > 0.25:
+        score -= 2; issues.append("CPM rising MoM")
+    if pct_change(c.cpm_w2, c.cpm_w1) > 0.20:
+        score -= 1; issues.append("CPM rising WoW")
+
+    # ==== Spend ====
+    if c.avg_daily_spend < 0.8 * c.daily_budget:
+        score -= 1; issues.append("Under budget (<80%)")
+
+    # ==== Conversions ====
+    if c.conversions_m2 >= 5:
+        if pct_change(c.conversions_m2, c.conversions_m1) < -0.25:
+            score -= 2; issues.append("Conversions down MoM")
+        if pct_change(c.cvr_m2, c.cvr_m1) < -0.20:
+            score -= 2; issues.append("Conversion rate down MoM")
+        if pct_change(c.cpa_m2, c.cpa_m1) > 0.25:
+            score -= 2; issues.append("CPA rising MoM")
+    else:
+        issues.append("Not enough conversion data")
+
+    # ==== Audience Penetration ====
+    if c.penetration < 0.15:
+        score -= 1; issues.append("Low audience penetration")
+    if c.penetration > 0.30 and pct_change(c.ctr_m2, c.ctr_m1) < -0.15:
+        score -= 2; issues.append("Audience saturation (CTR down)")
+    if group_penetration and group_penetration > 0.35 and pct_change(c.cpm_m2, c.cpm_m1) > 0:
+        score -= 2; issues.append("Group audience saturation")
+
+    # ==== RESULT ====
+    if score <= -3:
+        return "needs_attention", issues
+    elif score < 0:
+        return "mild_issues", issues
+    else:
+        return "performing_well", issues

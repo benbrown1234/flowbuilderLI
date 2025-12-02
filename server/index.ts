@@ -2435,37 +2435,59 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
     const windowEnd = latestMetricDate.getTime() > 0 ? latestMetricDate : new Date();
     const currentWeekStart = new Date(windowEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
     const previousWeekStart = new Date(windowEnd.getTime() - 14 * 24 * 60 * 60 * 1000);
-    const currentWeekSpendByCampaign = new Map<string, number>();
-    const previousWeekSpendByCampaign = new Map<string, number>();
-    // Track number of active days per campaign (to avoid false positives for paused campaigns)
-    const currentWeekDaysByCampaign = new Map<string, Set<string>>();
-    const previousWeekDaysByCampaign = new Map<string, Set<string>>();
+    // WoW metrics by campaign
+    const currentWeekByCampaign = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number; days: Set<string> }>();
+    const previousWeekByCampaign = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number; days: Set<string> }>();
+    
+    const initWeekMetrics = () => ({ spend: 0, impressions: 0, clicks: 0, conversions: 0, days: new Set<string>() });
     
     for (const m of campaignMetrics) {
       const metricDate = new Date(m.metric_date);
+      const dateKey = metricDate.toISOString().split('T')[0];
       const spend = parseFloat(m.spend) || 0;
-      const dateKey = metricDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      const impressions = parseInt(m.impressions) || 0;
+      const clicks = parseInt(m.clicks) || 0;
+      const conversions = parseInt(m.conversions) || 0;
       
       // Current week (last 7 days)
       if (metricDate >= currentWeekStart && metricDate <= windowEnd) {
-        const currentSpend = currentWeekSpendByCampaign.get(m.campaign_id) || 0;
-        currentWeekSpendByCampaign.set(m.campaign_id, currentSpend + spend);
-        // Track unique days with metrics
-        if (!currentWeekDaysByCampaign.has(m.campaign_id)) {
-          currentWeekDaysByCampaign.set(m.campaign_id, new Set());
+        if (!currentWeekByCampaign.has(m.campaign_id)) {
+          currentWeekByCampaign.set(m.campaign_id, initWeekMetrics());
         }
-        currentWeekDaysByCampaign.get(m.campaign_id)!.add(dateKey);
+        const curr = currentWeekByCampaign.get(m.campaign_id)!;
+        curr.spend += spend;
+        curr.impressions += impressions;
+        curr.clicks += clicks;
+        curr.conversions += conversions;
+        curr.days.add(dateKey);
       }
       // Previous week (8-14 days ago)
       if (metricDate >= previousWeekStart && metricDate < currentWeekStart) {
-        const prevSpend = previousWeekSpendByCampaign.get(m.campaign_id) || 0;
-        previousWeekSpendByCampaign.set(m.campaign_id, prevSpend + spend);
-        // Track unique days with metrics
-        if (!previousWeekDaysByCampaign.has(m.campaign_id)) {
-          previousWeekDaysByCampaign.set(m.campaign_id, new Set());
+        if (!previousWeekByCampaign.has(m.campaign_id)) {
+          previousWeekByCampaign.set(m.campaign_id, initWeekMetrics());
         }
-        previousWeekDaysByCampaign.get(m.campaign_id)!.add(dateKey);
+        const prev = previousWeekByCampaign.get(m.campaign_id)!;
+        prev.spend += spend;
+        prev.impressions += impressions;
+        prev.clicks += clicks;
+        prev.conversions += conversions;
+        prev.days.add(dateKey);
       }
+    }
+    
+    // For backward compatibility
+    const currentWeekSpendByCampaign = new Map<string, number>();
+    const previousWeekSpendByCampaign = new Map<string, number>();
+    const currentWeekDaysByCampaign = new Map<string, Set<string>>();
+    const previousWeekDaysByCampaign = new Map<string, Set<string>>();
+    
+    for (const [cid, data] of currentWeekByCampaign) {
+      currentWeekSpendByCampaign.set(cid, data.spend);
+      currentWeekDaysByCampaign.set(cid, data.days);
+    }
+    for (const [cid, data] of previousWeekByCampaign) {
+      previousWeekSpendByCampaign.set(cid, data.spend);
+      previousWeekDaysByCampaign.set(cid, data.days);
     }
     
     // Keep old variable for backward compatibility
@@ -2486,7 +2508,10 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         liveCampaignSettings.set(id, {
           dailyBudget,
           hasLan: c.offsiteDeliveryEnabled === true,
-          hasExpansion: c.audienceExpansionEnabled === true
+          hasExpansion: c.audienceExpansionEnabled === true,
+          hasMaximizeDelivery: c.pacingStrategy === 'ACCELERATED',
+          status: c.status,
+          runSchedule: c.runSchedule
         });
       }
     } catch (err: any) {
@@ -2593,96 +2618,192 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
     // Determine if any campaigns have LAN/Expansion (affects sync frequency)
     let hasLanOrExpansion = false;
     
+    // Scoring function
+    const pctChange = (newVal: number, oldVal: number): number => {
+      if (oldVal === 0) return 0;
+      return ((newVal - oldVal) / oldVal) * 100;
+    };
+    
     // Build campaigns in the expected format (CampaignItem)
     const campaigns = hasCurrentPeriod ? Array.from(currentPeriodCampaigns.values()).map(c => {
       const prev = hasPreviousPeriod ? previousPeriodCampaigns.get(c.campaignId) : null;
-      const currentCtr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
-      const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
-      const ctrChange = prevCtr > 0 ? ((currentCtr - prevCtr) / prevCtr) * 100 : 0;
+      
+      // 4-week metrics
+      const ctr4w = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
+      const prevCtr4w = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
+      const cpc4w = c.clicks > 0 ? c.spend / c.clicks : 0;
+      const prevCpc4w = prev && prev.clicks > 0 ? prev.spend / prev.clicks : 0;
+      const cpm4w = c.impressions > 0 ? (c.spend / c.impressions) * 1000 : 0;
+      const prevCpm4w = prev && prev.impressions > 0 ? (prev.spend / prev.impressions) * 1000 : 0;
+      const cpa4w = c.conversions > 0 ? c.spend / c.conversions : 0;
+      const prevCpa4w = prev && prev.conversions > 0 ? prev.spend / prev.conversions : 0;
       
       // Get live settings
       const liveSettings = liveCampaignSettings.get(c.campaignId) || {};
       const dailyBudget = liveSettings.dailyBudget;
+      const campaignStatus = liveSettings.status || c.campaignStatus;
       
-      // Get active days count for this campaign
-      const currentWeekDays = currentWeekDaysByCampaign.get(c.campaignId)?.size || 0;
-      const previousWeekDays = previousWeekDaysByCampaign.get(c.campaignId)?.size || 0;
+      // Get WoW metrics
+      const currWeek = currentWeekByCampaign.get(c.campaignId) || initWeekMetrics();
+      const prevWeek = previousWeekByCampaign.get(c.campaignId) || initWeekMetrics();
+      const currentWeekDays = currWeek.days.size;
+      const previousWeekDays = prevWeek.days.size;
       
-      // Get spend data
-      const currentWeekSpend = currentWeekSpendByCampaign.get(c.campaignId) || 0;
-      const previousWeekSpend = previousWeekSpendByCampaign.get(c.campaignId) || 0;
+      // WoW derived metrics
+      const ctrWoWCurr = currWeek.impressions > 0 ? (currWeek.clicks / currWeek.impressions) * 100 : 0;
+      const ctrWoWPrev = prevWeek.impressions > 0 ? (prevWeek.clicks / prevWeek.impressions) * 100 : 0;
+      const cpcWoWCurr = currWeek.clicks > 0 ? currWeek.spend / currWeek.clicks : 0;
+      const cpcWoWPrev = prevWeek.clicks > 0 ? prevWeek.spend / prevWeek.clicks : 0;
+      const cpmWoWCurr = currWeek.impressions > 0 ? (currWeek.spend / currWeek.impressions) * 1000 : 0;
+      const cpmWoWPrev = prevWeek.impressions > 0 ? (prevWeek.spend / prevWeek.impressions) * 1000 : 0;
       
-      // Calculate average daily spend (only if campaign ran)
-      const avgDailySpend = currentWeekDays > 0 ? currentWeekSpend / currentWeekDays : 0;
-      const prevAvgDailySpend = previousWeekDays > 0 ? previousWeekSpend / previousWeekDays : 0;
+      // Calculate average daily spend
+      const avgDailySpend = currentWeekDays > 0 ? currWeek.spend / currentWeekDays : 0;
+      const prevAvgDailySpend = previousWeekDays > 0 ? prevWeek.spend / previousWeekDays : 0;
       
-      // Budget utilization: compare average daily spend to daily budget
-      // Only valid if campaign ran every day (7 days) to avoid false positives for paused campaigns
+      // Budget utilization (only if campaign ran 7 days)
       const budgetUtilization = dailyBudget && dailyBudget > 0 && currentWeekDays === 7 
         ? (avgDailySpend / dailyBudget) * 100 
         : undefined;
       
-      // Calculate week-over-week spend change (only if both weeks had activity)
-      // Compare average daily spend to normalize for different run days
-      let spendChange = 0;
-      if (prevAvgDailySpend > 0 && currentWeekDays >= 5 && previousWeekDays >= 5) {
-        // Only compare if both weeks had at least 5 days of activity
-        spendChange = ((avgDailySpend - prevAvgDailySpend) / prevAvgDailySpend) * 100;
-      }
-      
       const hasLan = liveSettings.hasLan || false;
       const hasExpansion = liveSettings.hasExpansion || false;
+      const hasMaximizeDelivery = liveSettings.hasMaximizeDelivery || false;
       
       if (hasLan || hasExpansion) hasLanOrExpansion = true;
       
-      // Determine issues
+      // ===== SCORING LOGIC =====
+      let score = 0;
       const issues: string[] = [];
-      if (ctrChange < -20) issues.push('CTR declined significantly');
+      const flags: string[] = [];
+      let scoringStatus: 'needs_attention' | 'mild_issues' | 'performing_well' | 'paused' | 'low_volume' | 'new_campaign' = 'performing_well';
       
-      // Flag campaigns spending less than 80% of daily budget (only if ran all 7 days)
-      if (budgetUtilization !== undefined && budgetUtilization < 80) {
-        const avgSpendFormatted = avgDailySpend.toFixed(2);
-        const budgetFormatted = dailyBudget!.toFixed(2);
-        issues.push(`Avg daily spend $${avgSpendFormatted} vs $${budgetFormatted} budget (${budgetUtilization.toFixed(0)}%)`);
-        alerts.push({ type: 'budget', message: `${c.campaignName} avg daily spend $${avgSpendFormatted} vs $${budgetFormatted} daily budget (${budgetUtilization.toFixed(0)}% utilized)`, campaignId: c.campaignId, campaignName: c.campaignName });
+      // Check if paused
+      if (campaignStatus === 'PAUSED') {
+        scoringStatus = 'paused';
+      }
+      // Check for low volume
+      else if (c.impressions < 1000 || c.spend < 20 || currentWeekDays < 3) {
+        scoringStatus = 'low_volume';
+        issues.push('Low volume — trends unreliable');
+      }
+      else {
+        // === CTR ===
+        if (pctChange(ctr4w, prevCtr4w) < -20) {
+          score -= 2;
+          issues.push(`CTR down ${Math.abs(pctChange(ctr4w, prevCtr4w)).toFixed(0)}% (4w)`);
+        }
+        if (currentWeekDays >= 3 && previousWeekDays >= 3 && pctChange(ctrWoWCurr, ctrWoWPrev) < -15) {
+          score -= 1;
+          issues.push(`CTR down ${Math.abs(pctChange(ctrWoWCurr, ctrWoWPrev)).toFixed(0)}% (WoW)`);
+        }
+        if (ctr4w < 0.3) {
+          score -= 2;
+          issues.push(`CTR ${ctr4w.toFixed(2)}% (below 0.3%)`);
+        } else if (ctr4w < 0.4) {
+          score -= 1;
+          issues.push(`CTR ${ctr4w.toFixed(2)}% (below 0.4%)`);
+        }
+        
+        // === CPC ===
+        if (prevCpc4w > 0 && pctChange(cpc4w, prevCpc4w) > 25) {
+          score -= 2;
+          issues.push(`CPC up ${pctChange(cpc4w, prevCpc4w).toFixed(0)}% (4w)`);
+        }
+        if (currentWeekDays >= 3 && previousWeekDays >= 3 && cpcWoWPrev > 0 && pctChange(cpcWoWCurr, cpcWoWPrev) > 20) {
+          score -= 1;
+          issues.push(`CPC up ${pctChange(cpcWoWCurr, cpcWoWPrev).toFixed(0)}% (WoW)`);
+        }
+        
+        // === CPM ===
+        if (prevCpm4w > 0 && pctChange(cpm4w, prevCpm4w) > 25) {
+          score -= 2;
+          issues.push(`CPM up ${pctChange(cpm4w, prevCpm4w).toFixed(0)}% (4w)`);
+        }
+        if (currentWeekDays >= 3 && previousWeekDays >= 3 && cpmWoWPrev > 0 && pctChange(cpmWoWCurr, cpmWoWPrev) > 20) {
+          score -= 1;
+          issues.push(`CPM up ${pctChange(cpmWoWCurr, cpmWoWPrev).toFixed(0)}% (WoW)`);
+        }
+        
+        // === Budget ===
+        // Severely under budget (auto needs_attention)
+        if (budgetUtilization !== undefined && budgetUtilization < 50) {
+          score -= 10; // Auto flag
+          issues.push(`Severely under budget ($${avgDailySpend.toFixed(0)} vs $${dailyBudget!.toFixed(0)}) - check bidding`);
+          alerts.push({ type: 'budget', message: `${c.campaignName} severely under budget ($${avgDailySpend.toFixed(0)} vs $${dailyBudget!.toFixed(0)} daily) - check bidding`, campaignId: c.campaignId, campaignName: c.campaignName });
+        } else if (budgetUtilization !== undefined && budgetUtilization < 80) {
+          score -= 1;
+          issues.push(`Under budget ($${avgDailySpend.toFixed(0)} vs $${dailyBudget!.toFixed(0)})`);
+          alerts.push({ type: 'budget', message: `${c.campaignName} under budget ($${avgDailySpend.toFixed(0)} vs $${dailyBudget!.toFixed(0)} daily, ${budgetUtilization.toFixed(0)}%)`, campaignId: c.campaignId, campaignName: c.campaignName });
+        }
+        
+        // === Conversions (only if enough data) ===
+        if (c.conversions >= 5) {
+          if (prev && prev.conversions > 0 && pctChange(c.conversions, prev.conversions) < -25) {
+            score -= 2;
+            issues.push(`Conversions down ${Math.abs(pctChange(c.conversions, prev.conversions)).toFixed(0)}%`);
+          }
+          if (prevCpa4w > 0 && pctChange(cpa4w, prevCpa4w) > 25) {
+            score -= 2;
+            issues.push(`CPA up ${pctChange(cpa4w, prevCpa4w).toFixed(0)}%`);
+          }
+        }
+        
+        // Determine result tier
+        if (score <= -3) {
+          scoringStatus = 'needs_attention';
+        } else if (score < 0) {
+          scoringStatus = 'mild_issues';
+        } else {
+          scoringStatus = 'performing_well';
+        }
       }
       
-      // Flag if average daily spend declining more than 20% week-over-week
-      // Only fire if both weeks had sufficient activity (5+ days) - the spendChange is already 0 if not
-      if (spendChange < -20 && currentWeekDays >= 5 && previousWeekDays >= 5) {
-        const currAvgFormatted = avgDailySpend.toFixed(2);
-        const prevAvgFormatted = prevAvgDailySpend.toFixed(2);
-        issues.push(`Avg daily spend $${currAvgFormatted} vs $${prevAvgFormatted} last week (${Math.abs(spendChange).toFixed(0)}% down)`);
-        alerts.push({ type: 'budget', message: `${c.campaignName} avg daily spend $${currAvgFormatted} vs $${prevAvgFormatted} last week (${Math.abs(spendChange).toFixed(0)}% decline, ${currentWeekDays} days this week)`, campaignId: c.campaignId, campaignName: c.campaignName });
-      }
+      // === Special flags (always shown as warnings) ===
+      if (hasLan) flags.push('LAN enabled');
+      if (hasExpansion) flags.push('Expansion enabled');
+      if (hasMaximizeDelivery) flags.push('Maximize Delivery enabled');
       
-      if (hasLan || hasExpansion) {
-        alerts.push({ type: 'lan_expansion', message: `${c.campaignName} has ${hasLan ? 'LAN' : ''}${hasLan && hasExpansion ? ' and ' : ''}${hasExpansion ? 'Expansion' : ''} enabled`, campaignId: c.campaignId, campaignName: c.campaignName });
+      if (hasLan || hasExpansion || hasMaximizeDelivery) {
+        alerts.push({ 
+          type: 'lan_expansion', 
+          message: `${c.campaignName} has ${[hasLan && 'LAN', hasExpansion && 'Expansion', hasMaximizeDelivery && 'Maximize Delivery'].filter(Boolean).join(', ')} enabled`, 
+          campaignId: c.campaignId, 
+          campaignName: c.campaignName 
+        });
       }
-      
-      // Is performing well if CTR improved or stable with no major issues
-      const isPerformingWell = ctrChange >= 0 && issues.length === 0;
       
       return {
         id: c.campaignId,
         name: c.campaignName,
-        ctr: currentCtr,
-        ctrChange,
+        ctr: ctr4w,
+        ctrChange: pctChange(ctr4w, prevCtr4w),
+        cpc: cpc4w,
+        cpcChange: pctChange(cpc4w, prevCpc4w),
+        cpm: cpm4w,
+        cpmChange: pctChange(cpm4w, prevCpm4w),
+        conversions: c.conversions,
+        conversionsChange: prev ? pctChange(c.conversions, prev.conversions) : 0,
+        cpa: cpa4w,
+        cpaChange: pctChange(cpa4w, prevCpa4w),
         impressions: c.impressions,
         clicks: c.clicks,
         spend: c.spend,
         dailyBudget,
         avgDailySpend,
         budgetUtilization,
-        currentWeekSpend,
-        previousWeekSpend,
+        currentWeekSpend: currWeek.spend,
+        previousWeekSpend: prevWeek.spend,
         currentWeekDays,
         previousWeekDays,
-        spendChange,
         hasLan,
         hasExpansion,
-        isPerformingWell,
-        issues
+        hasMaximizeDelivery,
+        score,
+        scoringStatus,
+        isPerformingWell: scoringStatus === 'performing_well',
+        issues,
+        flags
       };
     }) : [];
     
@@ -2691,14 +2812,32 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       const prev = hasPreviousPeriod ? previousPeriodCreatives.get(c.creativeId) : null;
       const currentCtr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
       const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
-      const ctrChange = prevCtr > 0 ? ((currentCtr - prevCtr) / prevCtr) * 100 : 0;
+      const ctrChange = prevCtr > 0 ? pctChange(currentCtr, prevCtr) : 0;
       
-      // Determine issues
+      // Calculate conversion rate
+      const currentCvr = c.clicks > 0 ? (c.conversions / c.clicks) * 100 : 0;
+      const prevCvr = prev && prev.clicks > 0 ? (prev.conversions / prev.clicks) * 100 : 0;
+      const cvrChange = prevCvr > 0 ? pctChange(currentCvr, prevCvr) : 0;
+      
+      // Determine issues based on scoring criteria
       const issues: string[] = [];
-      if (currentCtr < 0.4) issues.push('CTR below 0.4%');
-      if (ctrChange < -20) issues.push('CTR declined significantly');
       
-      const isPerformingWell = ctrChange >= 0 && currentCtr >= 0.4;
+      // Low volume filter for ads
+      if (c.impressions < 500 || c.clicks < 10) {
+        // Skip scoring for low volume ads
+      } else {
+        // CTR decline > 20%
+        if (ctrChange < -20) {
+          issues.push(`CTR down ${Math.abs(ctrChange).toFixed(0)}%`);
+        }
+        
+        // Conversion rate decline > 20% (if ≥3 conversions)
+        if (c.conversions >= 3 && cvrChange < -20) {
+          issues.push(`CVR down ${Math.abs(cvrChange).toFixed(0)}%`);
+        }
+      }
+      
+      const isPerformingWell = issues.length === 0 && c.impressions >= 500;
       
       return {
         id: c.creativeId,
@@ -2707,6 +2846,9 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         campaignName: campaignNameLookup.get(c.campaignId) || `Campaign ${c.campaignId}`,
         ctr: currentCtr,
         ctrChange,
+        conversions: c.conversions,
+        cvr: currentCvr,
+        cvrChange,
         impressions: c.impressions,
         clicks: c.clicks,
         isPerformingWell,
