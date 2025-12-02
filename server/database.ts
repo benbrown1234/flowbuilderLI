@@ -566,13 +566,13 @@ export async function getAuditAccount(accountId: string) {
 export async function optInAuditAccount(accountId: string, accountName: string) {
   const result = await pool.query(
     `INSERT INTO audit_accounts (account_id, account_name, sync_status)
-     VALUES ($1, $2, 'pending')
+     VALUES ($1::text, $2::text, 'pending')
      ON CONFLICT (account_id) DO UPDATE SET
        account_name = EXCLUDED.account_name,
        sync_status = 'pending',
        sync_error = NULL
      RETURNING *`,
-    [accountId, accountName]
+    [String(accountId), String(accountName)]
   );
   return result.rows[0];
 }
@@ -584,12 +584,12 @@ export async function updateAuditAccountSyncStatus(
 ) {
   const result = await pool.query(
     `UPDATE audit_accounts 
-     SET sync_status = $1, 
-         sync_error = $2,
-         last_sync_at = CASE WHEN $1 = 'completed' THEN NOW() ELSE last_sync_at END
-     WHERE account_id = $3
+     SET sync_status = $1::text, 
+         sync_error = $2::text,
+         last_sync_at = CASE WHEN $1::text = 'completed' THEN NOW() ELSE last_sync_at END
+     WHERE account_id = $3::text
      RETURNING *`,
-    [status, error || null, accountId]
+    [String(status), error || null, String(accountId)]
   );
   return result.rows[0] || null;
 }
@@ -651,10 +651,12 @@ export async function saveCampaignDailyMetrics(
     const cpc = m.clicks > 0 ? m.spend / m.clicks : 0;
     const cpm = m.impressions > 0 ? (m.spend / m.impressions) * 1000 : 0;
     
+    const dateStr = m.metricDate.toISOString().split('T')[0];
+    
     await pool.query(
       `INSERT INTO analytics_campaign_daily 
        (account_id, campaign_id, campaign_name, campaign_group_id, campaign_status, metric_date, impressions, clicks, spend, conversions, video_views, leads, ctr, cpc, cpm)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+       VALUES ($1::text, $2::text, $3::text, $4::text, $5::text, $6::date, $7::bigint, $8::bigint, $9::numeric, $10::integer, $11::bigint, $12::integer, $13::numeric, $14::numeric, $15::numeric)
        ON CONFLICT (account_id, campaign_id, metric_date) DO UPDATE SET
          campaign_name = EXCLUDED.campaign_name,
          campaign_group_id = EXCLUDED.campaign_group_id,
@@ -674,7 +676,7 @@ export async function saveCampaignDailyMetrics(
         m.campaignName || null,
         m.campaignGroupId ? String(m.campaignGroupId) : null,
         m.campaignStatus || null,
-        m.metricDate,
+        dateStr,
         m.impressions || 0,
         m.clicks || 0,
         m.spend || 0,
@@ -714,10 +716,12 @@ export async function saveCreativeDailyMetrics(
     const cpc = m.clicks > 0 ? m.spend / m.clicks : 0;
     const cpm = m.impressions > 0 ? (m.spend / m.impressions) * 1000 : 0;
     
+    const dateStr = m.metricDate.toISOString().split('T')[0];
+    
     await pool.query(
       `INSERT INTO analytics_creative_daily 
        (account_id, creative_id, creative_name, campaign_id, creative_status, creative_type, preview_url, metric_date, impressions, clicks, spend, conversions, video_views, leads, ctr, cpc, cpm)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+       VALUES ($1::text, $2::text, $3::text, $4::text, $5::text, $6::text, $7::text, $8::date, $9::bigint, $10::bigint, $11::numeric, $12::integer, $13::bigint, $14::integer, $15::numeric, $16::numeric, $17::numeric)
        ON CONFLICT (account_id, creative_id, metric_date) DO UPDATE SET
          creative_name = EXCLUDED.creative_name,
          campaign_id = EXCLUDED.campaign_id,
@@ -741,7 +745,7 @@ export async function saveCreativeDailyMetrics(
         m.creativeStatus || null,
         m.creativeType || null,
         m.previewUrl || null,
-        m.metricDate,
+        dateStr,
         m.impressions || 0,
         m.clicks || 0,
         m.spend || 0,
