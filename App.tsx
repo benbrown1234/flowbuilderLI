@@ -21,7 +21,7 @@ const App: React.FC = () => {
   });
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [activeOnly, setActiveOnly] = useState<boolean>(false);
+  const [activeOnly, setActiveOnly] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [sharedCanvasToken, setSharedCanvasToken] = useState<string | null>(null);
   const [importedCanvasId, setImportedCanvasId] = useState<string | null>(null);
