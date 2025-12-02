@@ -46,9 +46,12 @@ interface CampaignItem {
   clicks: number;
   spend: number;
   dailyBudget?: number;
+  avgDailySpend?: number;
   budgetUtilization?: number;
   currentWeekSpend?: number;
   previousWeekSpend?: number;
+  currentWeekDays?: number;
+  previousWeekDays?: number;
   spendChange?: number;
   hasLan?: boolean;
   hasExpansion?: boolean;
