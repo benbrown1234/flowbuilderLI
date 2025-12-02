@@ -212,7 +212,9 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeat
               onMouseEnter={(e) => {
                 if (node.type === NodeType.CREATIVE) {
                   const rect = e.currentTarget.getBoundingClientRect();
-                  setHoveredAdId((node.data as CreativeNode).id);
+                  const creativeId = (node.data as CreativeNode).id;
+                  console.log('Hover on creative:', creativeId, 'at position:', rect.right, rect.top);
+                  setHoveredAdId(creativeId);
                   setHoverPosition({
                     x: rect.right + 8,
                     y: rect.top - 40
@@ -317,11 +319,14 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeat
 
       {/* Ad Preview Card Popup - Rendered outside zoomed container for proper screen-space positioning */}
       {hoveredAdId && hoverPosition && (() => {
+        console.log('Rendering popup for:', hoveredAdId, 'at position:', hoverPosition);
         const hoveredNode = graph.nodes.find(n => 
-          n.type === NodeType.CREATIVE && (n.data as CreativeNode).id === hoveredAdId
+          n.type === NodeType.CREATIVE && n.id === hoveredAdId
         );
+        console.log('Found node:', hoveredNode ? 'yes' : 'no', hoveredNode?.id);
         if (!hoveredNode) return null;
         const creative = hoveredNode.data as CreativeNode;
+        console.log('Creative data:', creative);
         
         return (
           <div 
