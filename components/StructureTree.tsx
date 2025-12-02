@@ -3,7 +3,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { AccountStructure, NodeType, TargetingSummary, CreativeNode, CampaignNode, GroupNode } from '../types';
 import { getTreeGraph, TreeNode } from '../services/linkedinLogic';
 import { Folder, LayoutGrid, FileImage, FileVideo, Globe, Briefcase, Plus, Minus, Maximize, Move, Lightbulb, Loader2 } from 'lucide-react';
-import { AdPreviewCard } from './AdPreviewCard';
 
 interface Props {
   data: AccountStructure;
@@ -17,8 +16,6 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeat
   const [isDragging, setIsDragging] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
   const [isImporting, setIsImporting] = useState(false);
-  const [hoveredAdId, setHoveredAdId] = useState<string | null>(null);
-  const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
   const handleImportToIdeate = async () => {
@@ -209,24 +206,6 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeat
             <div
               key={node.id}
               onClick={() => node.type !== NodeType.ACCOUNT && handleNodeClick(node)}
-              onMouseEnter={(e) => {
-                if (node.type === NodeType.CREATIVE) {
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const creativeId = (node.data as CreativeNode).id;
-                  console.log('Hover on creative:', creativeId, 'at position:', rect.right, rect.top);
-                  setHoveredAdId(creativeId);
-                  setHoverPosition({
-                    x: rect.right + 8,
-                    y: rect.top - 40
-                  });
-                }
-              }}
-              onMouseLeave={() => {
-                if (node.type === NodeType.CREATIVE) {
-                  setHoveredAdId(null);
-                  setHoverPosition(null);
-                }
-              }}
               className={`
                 absolute transition-all duration-200 hover:z-20 shadow-sm hover:shadow-xl
                 rounded-lg border flex flex-col justify-center z-10
@@ -316,41 +295,6 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeat
           })}
         </div>
       </div>
-
-      {/* Ad Preview Card Popup - Rendered outside zoomed container for proper screen-space positioning */}
-      {hoveredAdId && hoverPosition && (() => {
-        console.log('Rendering popup for:', hoveredAdId, 'at position:', hoverPosition);
-        const hoveredNode = graph.nodes.find(n => 
-          n.type === NodeType.CREATIVE && n.id === hoveredAdId
-        );
-        console.log('Found node:', hoveredNode ? 'yes' : 'no', hoveredNode?.id);
-        if (!hoveredNode) return null;
-        const creative = hoveredNode.data as CreativeNode;
-        console.log('Creative data:', creative);
-        
-        return (
-          <div 
-            className="fixed z-50 pointer-events-none"
-            style={{
-              left: Math.min(hoverPosition.x, window.innerWidth - 310),
-              top: Math.max(10, Math.min(hoverPosition.y, window.innerHeight - 420)),
-              transition: 'opacity 0.15s ease-in-out',
-            }}
-          >
-            <AdPreviewCard
-              imageUrl={creative.content?.imageUrl}
-              videoUrl={creative.content?.videoUrl}
-              headline={creative.content?.headline}
-              description={creative.content?.description}
-              callToAction={creative.content?.callToAction}
-              destinationUrl={creative.content?.destinationUrl || creative.content?.landingPageUrl}
-              mediaType={creative.content?.mediaType}
-              isThoughtLeader={creative.content?.isThoughtLeader}
-              authorName={creative.name}
-            />
-          </div>
-        );
-      })()}
     </div>
   );
 };

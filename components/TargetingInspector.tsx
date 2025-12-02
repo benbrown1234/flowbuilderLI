@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { TargetingSummary, NodeType, CreativeNode, CreativeContent, CampaignMetrics, MonthlyMetrics } from '../types';
 import { Globe, Users, Briefcase, UserX, Target, FileVideo, FileImage, Layers, Play, DollarSign, Crosshair, Settings, MapPin, Building2, ExternalLink, MousePointer, FileText, Link2, Loader2, Maximize2, X, GraduationCap, User, Heart, Zap, ChevronDown, ChevronUp, TrendingUp, TrendingDown, Minus, BarChart3, Eye, MousePointerClick, Video } from 'lucide-react';
 import { getAdPreview, getCreativeDetails, getCampaignAnalytics } from '../services/linkedinApi';
+import { AdPreviewCard } from './AdPreviewCard';
 
 const isThoughtLeaderAd = (name: string): boolean => {
   return /^Creative\s*\d+$/i.test(name.trim());
@@ -636,6 +637,24 @@ export const TargetingInspector: React.FC<InspectorProps> = ({ node, onClose, ac
               accountId={accountId}
               isLiveData={isLiveData}
             />
+            
+            {/* Static Ad Preview Card */}
+            <div className="mt-6 pt-6 border-t border-gray-100">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center">
+                <Eye className="w-3.5 h-3.5 mr-1.5" /> Ad Preview
+              </h3>
+              <AdPreviewCard
+                imageUrl={node.singleCreative.content?.imageUrl}
+                videoUrl={node.singleCreative.content?.videoUrl}
+                headline={node.singleCreative.content?.headline}
+                description={node.singleCreative.content?.description}
+                callToAction={node.singleCreative.content?.callToAction}
+                destinationUrl={node.singleCreative.content?.destinationUrl || node.singleCreative.content?.landingPageUrl}
+                mediaType={node.singleCreative.content?.mediaType}
+                isThoughtLeader={node.singleCreative.content?.isThoughtLeader}
+                authorName={node.singleCreative.name}
+              />
+            </div>
           </div>
         )}
 
