@@ -1,7 +1,7 @@
 # LinkedIn Audience Visualizer
 
 ## Overview
-This project is a React-based visualization tool for LinkedIn advertising account structures, designed to offer comprehensive insights into campaign hierarchies, targeting strategies, and remarketing flows. It uses LinkedIn Marketing API data via OAuth 2.0 (requires login). Key features include an AI-powered chatbot for campaign insights, a CTR performance audit system with ad previews, and a visual campaign planning canvas. The tool aims to streamline the analysis and optimization of LinkedIn ad campaigns, providing a clear overview of complex account structures and aiding in strategic decision-making.
+This project is a React-based visualization tool for LinkedIn advertising account structures, designed to offer comprehensive insights into campaign hierarchies, targeting strategies, and remarketing flows. It uses LinkedIn Marketing API data via OAuth 2.0 (requires login). Key features include a CTR performance audit system with ad previews and a visual campaign planning canvas. The tool aims to streamline the analysis and optimization of LinkedIn ad campaigns, providing a clear overview of complex account structures and aiding in strategic decision-making.
 
 ## User Preferences
 N/A
@@ -44,9 +44,6 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   **Campaign Objectives**: Full LinkedIn objective list organized by category (Awareness: Brand Awareness; Consideration: Website Visits, Engagement, Video Views; Conversions: Lead Generation, Talent Leads, Website Conversions, Job Applicants) with recommendations based on funnel stage.
     *   **Campaign Settings**: TOF audience association, bidding type (Manual/Maximize Delivery), Enhanced Audience checkbox, LinkedIn Audience Network checkbox
     *   **Naming Conventions**: Sidebar displays naming format hints - Groups: `[Objective] – [Audience] – [Industry] – [Location]`, Campaigns: `[Group Acronym] – [Objective] – [Creative Format] – [Subsegment]`, Ads: `[Creative Type] – [Angle/Message] – [Version]`.
-*   **AI Auditor**:
-    *   A chatbot for natural language queries about campaigns, targeting, and performance.
-    *   Supports entity tagging (Campaign Groups, Campaigns, Ads, Audiences) with autocomplete for context-aware responses.
 *   **Ad Previews**: Provides rich creative previews with live LinkedIn ad preview iframes, displaying ad type, headline, description, call-to-action, destination URL, and lead form information.
 *   **Dynamic Layouts**: Ensures proper spacing and non-overlapping elements for complex visualizations, with campaign/group names wrapping and ads arranged in a 2-column grid.
 *   **Targeting Rules Panel**: Displays detailed targeting criteria for selected campaigns, organized by categories like geos, audiences, company lists, demographics, and job experience.
@@ -54,7 +51,6 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
 
 ## External Dependencies
 *   **LinkedIn Marketing API**: Used for fetching real campaign, ad, targeting, and performance data. Requires OAuth 2.0 authentication with `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` secrets and `r_ads_reporting` scope.
-*   **OpenAI**: Integrated via Replit AI Integrations for the AI Auditor chatbot and AI generation features in the Ideate Canvas.
-*   **PostgreSQL (Neon)**: Serves as the database for storing audit data and recommendations.
+*   **PostgreSQL (Neon)**: Serves as the database for storing audit data and canvas persistence.
 *   **Tailwind CSS**: Utilized via CDN for styling the user interface.
 *   **Lucide React**: Provides icons for the application UI.

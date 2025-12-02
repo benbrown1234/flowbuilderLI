@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
 import { AccountStructure, NodeType, TargetingSummary, CreativeNode, AccountSummary } from './types';
 import { getAuthStatus, getAuthUrl, logout, getAvailableAccountsFromApi, buildAccountHierarchyFromApi } from './services/linkedinApi';
@@ -8,17 +8,15 @@ import { StructureTree } from './components/StructureTree';
 import { AudienceFlow } from './components/AudienceFlow';
 import { RemarketingFlow } from './components/RemarketingFlow';
 import { TargetingInspector } from './components/TargetingInspector';
-import { AIAuditor } from './components/AIAuditor';
 import AuditPage from './components/AuditPage';
 import { IdeateCanvas } from './components/IdeateCanvas';
-import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, ClipboardCheck, Lightbulb } from 'lucide-react';
+import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, ClipboardCheck, Lightbulb, Eye } from 'lucide-react';
 
 const App: React.FC = () => {
   const [data, setData] = useState<AccountStructure | null>(null);
   const [viewMode, setViewMode] = useState<'TREE' | 'FLOW' | 'REMARKETING' | 'AUDIT' | 'IDEATE'>('TREE');
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(() => {
-    // Load saved account from localStorage
     return localStorage.getItem('selectedAccountId') || '';
   });
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -27,6 +25,18 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [sharedCanvasToken, setSharedCanvasToken] = useState<string | null>(null);
   const [importedCanvasId, setImportedCanvasId] = useState<string | null>(null);
+  const [visualizeDropdownOpen, setVisualizeDropdownOpen] = useState(false);
+  const visualizeDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (visualizeDropdownRef.current && !visualizeDropdownRef.current.contains(event.target as Node)) {
+        setVisualizeDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
   
   // State to hold the details of the currently selected node for the inspector
   const [selectedNode, setSelectedNode] = useState<{
@@ -314,27 +324,50 @@ const App: React.FC = () => {
              
              {/* View Toggle */}
              <div className="bg-gray-100 p-1 rounded-lg flex items-center">
-                <button 
-                  onClick={() => { setViewMode('TREE'); setImportedCanvasId(null); }}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'TREE' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  <ListTree size={16} />
-                  Structure
-                </button>
-                <button 
-                  onClick={() => setViewMode('FLOW')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'FLOW' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  <Network size={16} />
-                  Targeting Flow
-                </button>
-                <button 
-                  onClick={() => setViewMode('REMARKETING')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'REMARKETING' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  <RefreshCw size={16} />
-                  Remarketing
-                </button>
+                {/* Visualize Dropdown */}
+                <div className="relative" ref={visualizeDropdownRef}>
+                  <button 
+                    onClick={() => setVisualizeDropdownOpen(!visualizeDropdownOpen)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                      ['TREE', 'FLOW', 'REMARKETING'].includes(viewMode) 
+                        ? 'bg-white shadow-sm text-gray-900' 
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <Eye size={16} />
+                    {viewMode === 'TREE' ? 'Structure' : 
+                     viewMode === 'FLOW' ? 'Targeting Flow' : 
+                     viewMode === 'REMARKETING' ? 'Remarketing' : 'Visualize'}
+                    <ChevronDown size={14} className={`transition-transform ${visualizeDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  
+                  {visualizeDropdownOpen && (
+                    <div className="absolute top-full left-0 mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[160px] z-50">
+                      <button 
+                        onClick={() => { setViewMode('TREE'); setImportedCanvasId(null); setVisualizeDropdownOpen(false); }}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50 ${viewMode === 'TREE' ? 'text-blue-600 bg-blue-50' : 'text-gray-700'}`}
+                      >
+                        <ListTree size={16} />
+                        Structure
+                      </button>
+                      <button 
+                        onClick={() => { setViewMode('FLOW'); setVisualizeDropdownOpen(false); }}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50 ${viewMode === 'FLOW' ? 'text-blue-600 bg-blue-50' : 'text-gray-700'}`}
+                      >
+                        <Network size={16} />
+                        Targeting Flow
+                      </button>
+                      <button 
+                        onClick={() => { setViewMode('REMARKETING'); setVisualizeDropdownOpen(false); }}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50 ${viewMode === 'REMARKETING' ? 'text-blue-600 bg-blue-50' : 'text-gray-700'}`}
+                      >
+                        <RefreshCw size={16} />
+                        Remarketing
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 <button 
                   onClick={() => setViewMode('AUDIT')}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'AUDIT' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
@@ -400,9 +433,6 @@ const App: React.FC = () => {
               accountId={selectedAccountId}
               accountName={accounts.find(a => a.id === selectedAccountId)?.name || `Account ${selectedAccountId}`}
               isLiveData={isAuthenticated}
-              onNavigateToCampaign={(campaignId) => {
-                setViewMode('TREE');
-              }}
             />
           ) : !data ? (
             <div className="flex items-center justify-center h-full text-gray-500">
@@ -462,13 +492,6 @@ const App: React.FC = () => {
           onClick={handleCloseInspector}
         />
       )}
-
-      {/* AI Auditor Chat Widget */}
-      <AIAuditor
-        data={data}
-        accountId={selectedAccountId}
-        isLiveData={isAuthenticated}
-      />
     </div>
   );
 };
