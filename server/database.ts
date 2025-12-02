@@ -644,6 +644,8 @@ export async function saveCampaignDailyMetrics(
     leads?: number;
   }>
 ) {
+  const accId = String(accountId);
+  
   for (const m of metrics) {
     const ctr = m.impressions > 0 ? (m.clicks / m.impressions) * 100 : 0;
     const cpc = m.clicks > 0 ? m.spend / m.clicks : 0;
@@ -667,10 +669,10 @@ export async function saveCampaignDailyMetrics(
          cpc = EXCLUDED.cpc,
          cpm = EXCLUDED.cpm`,
       [
-        accountId,
-        m.campaignId,
+        accId,
+        String(m.campaignId),
         m.campaignName || null,
-        m.campaignGroupId || null,
+        m.campaignGroupId ? String(m.campaignGroupId) : null,
         m.campaignStatus || null,
         m.metricDate,
         m.impressions || 0,
@@ -705,6 +707,8 @@ export async function saveCreativeDailyMetrics(
     leads?: number;
   }>
 ) {
+  const accId = String(accountId);
+  
   for (const m of metrics) {
     const ctr = m.impressions > 0 ? (m.clicks / m.impressions) * 100 : 0;
     const cpc = m.clicks > 0 ? m.spend / m.clicks : 0;
@@ -730,10 +734,10 @@ export async function saveCreativeDailyMetrics(
          cpc = EXCLUDED.cpc,
          cpm = EXCLUDED.cpm`,
       [
-        accountId,
-        m.creativeId,
+        accId,
+        String(m.creativeId),
         m.creativeName || null,
-        m.campaignId || null,
+        m.campaignId ? String(m.campaignId) : null,
         m.creativeStatus || null,
         m.creativeType || null,
         m.previewUrl || null,
