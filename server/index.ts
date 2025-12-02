@@ -2044,30 +2044,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
     const currentMonth = months[0];
     const previousMonth = months[1];
     
-    const campaigns = currentMonth ? Array.from(campaignsByMonth.get(currentMonth)!.values()).map(c => {
-      const prev = previousMonth ? campaignsByMonth.get(previousMonth)?.get(c.campaignId) : null;
-      const currentCtr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
-      const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
-      
-      // Get live settings
-      const liveSettings = liveCampaignSettings.get(c.campaignId) || {};
-      const dailyBudget = liveSettings.dailyBudget;
-      const budgetUtilization = dailyBudget && dailyBudget > 0 ? (c.spend / (dailyBudget * 30)) * 100 : undefined;
-      
-      return {
-        ...c,
-        ctr: currentCtr,
-        previousMonth: prev || { impressions: 0, clicks: 0, spend: 0, conversions: 0, videoViews: 0, leads: 0 },
-        previousCtr: prevCtr,
-        ctrChange: prevCtr > 0 ? ((currentCtr - prevCtr) / prevCtr) * 100 : 0,
-        dailyBudget,
-        budgetUtilization,
-        hasLan: liveSettings.hasLan,
-        hasExpansion: liveSettings.hasExpansion
-      };
-    }) : [];
-    
-    // Build campaign name lookup from the aggregated data
+    // Build campaign name lookup
     const campaignNameLookup = new Map<string, string>();
     if (currentMonth) {
       for (const [campId, campData] of campaignsByMonth.get(currentMonth)!) {
@@ -2075,31 +2052,96 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       }
     }
     
-    const creatives = currentMonth ? Array.from(creativesByMonth.get(currentMonth)!.values()).map(c => {
-      const prev = previousMonth ? creativesByMonth.get(previousMonth)?.get(c.creativeId) : null;
+    // Build alerts array
+    const alerts: { type: 'budget' | 'penetration' | 'lan_expansion'; message: string; campaignId?: string; campaignName?: string; }[] = [];
+    
+    // Determine if any campaigns have LAN/Expansion (affects sync frequency)
+    let hasLanOrExpansion = false;
+    
+    // Build campaigns in the expected format (CampaignItem)
+    const campaigns = currentMonth ? Array.from(campaignsByMonth.get(currentMonth)!.values()).map(c => {
+      const prev = previousMonth ? campaignsByMonth.get(previousMonth)?.get(c.campaignId) : null;
       const currentCtr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
       const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
+      const ctrChange = prevCtr > 0 ? ((currentCtr - prevCtr) / prevCtr) * 100 : 0;
+      
+      // Get live settings
+      const liveSettings = liveCampaignSettings.get(c.campaignId) || {};
+      const dailyBudget = liveSettings.dailyBudget;
+      const budgetUtilization = dailyBudget && dailyBudget > 0 ? (c.spend / (dailyBudget * 30)) * 100 : undefined;
+      const hasLan = liveSettings.hasLan || false;
+      const hasExpansion = liveSettings.hasExpansion || false;
+      
+      if (hasLan || hasExpansion) hasLanOrExpansion = true;
+      
+      // Determine issues
+      const issues: string[] = [];
+      if (ctrChange < -20) issues.push('CTR declined significantly');
+      if (budgetUtilization !== undefined && budgetUtilization < 80) {
+        issues.push(`Only ${budgetUtilization.toFixed(0)}% of budget spent`);
+        alerts.push({ type: 'budget', message: `${c.campaignName} is under-spending budget`, campaignId: c.campaignId, campaignName: c.campaignName });
+      }
+      if (hasLan || hasExpansion) {
+        alerts.push({ type: 'lan_expansion', message: `${c.campaignName} has ${hasLan ? 'LAN' : ''}${hasLan && hasExpansion ? ' and ' : ''}${hasExpansion ? 'Expansion' : ''} enabled`, campaignId: c.campaignId, campaignName: c.campaignName });
+      }
+      
+      // Is performing well if CTR improved or stable with no major issues
+      const isPerformingWell = ctrChange >= 0 && issues.length === 0;
       
       return {
-        ...c,
-        campaignName: campaignNameLookup.get(c.campaignId) || `Campaign ${c.campaignId}`,
+        id: c.campaignId,
+        name: c.campaignName,
         ctr: currentCtr,
-        previousMonth: prev || { impressions: 0, clicks: 0, spend: 0, conversions: 0, videoViews: 0, leads: 0 },
-        previousCtr: prevCtr,
-        ctrChange: prevCtr > 0 ? ((currentCtr - prevCtr) / prevCtr) * 100 : 0
+        ctrChange,
+        impressions: c.impressions,
+        clicks: c.clicks,
+        spend: c.spend,
+        dailyBudget,
+        budgetUtilization,
+        hasLan,
+        hasExpansion,
+        isPerformingWell,
+        issues
       };
     }) : [];
     
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    // Build ads in the expected format (AdItem)
+    const ads = currentMonth ? Array.from(creativesByMonth.get(currentMonth)!.values()).map(c => {
+      const prev = previousMonth ? creativesByMonth.get(previousMonth)?.get(c.creativeId) : null;
+      const currentCtr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
+      const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
+      const ctrChange = prevCtr > 0 ? ((currentCtr - prevCtr) / prevCtr) * 100 : 0;
+      
+      // Determine issues
+      const issues: string[] = [];
+      if (currentCtr < 0.4) issues.push('CTR below 0.4%');
+      if (ctrChange < -20) issues.push('CTR declined significantly');
+      
+      const isPerformingWell = ctrChange >= 0 && currentCtr >= 0.4;
+      
+      return {
+        id: c.creativeId,
+        name: c.creativeName || `Ad ${c.creativeId}`,
+        campaignId: c.campaignId,
+        campaignName: campaignNameLookup.get(c.campaignId) || `Campaign ${c.campaignId}`,
+        ctr: currentCtr,
+        ctrChange,
+        impressions: c.impressions,
+        clicks: c.clicks,
+        isPerformingWell,
+        issues
+      };
+    }) : [];
+    
+    // Determine sync frequency based on LAN/Expansion
+    const syncFrequency = hasLanOrExpansion ? 'daily' : 'weekly';
     
     res.json({
-      account: auditAccount,
-      currentMonthLabel: currentMonth ? `${monthNames[parseInt(currentMonth.split('-')[1]) - 1]} ${currentMonth.split('-')[0]}` : '',
-      previousMonthLabel: previousMonth ? `${monthNames[parseInt(previousMonth.split('-')[1]) - 1]} ${previousMonth.split('-')[0]}` : '',
       campaigns,
-      creatives,
-      rawCampaignMetrics: campaignMetrics,
-      rawCreativeMetrics: creativeMetrics
+      ads,
+      alerts,
+      lastSyncAt: auditAccount.last_sync_at,
+      syncFrequency
     });
     
   } catch (err: any) {
