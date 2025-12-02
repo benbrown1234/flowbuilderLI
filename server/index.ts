@@ -2497,10 +2497,10 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       // Determine issues
       const issues: string[] = [];
       if (ctrChange < -20) issues.push('CTR declined significantly');
-      // Flag campaigns spending less than 20% of daily budget (bid too low, audience too small, or low relevancy)
-      if (budgetUtilization !== undefined && budgetUtilization < 20) {
-        issues.push(`Low spend (${budgetUtilization.toFixed(0)}% of budget) - bid may be too low, audience too small, or low relevancy`);
-        alerts.push({ type: 'budget', message: `${c.campaignName} spending only ${budgetUtilization.toFixed(0)}% of budget - may need bid, audience, or relevancy adjustment`, campaignId: c.campaignId, campaignName: c.campaignName });
+      // Flag campaigns spending less than 80% of daily budget (not within 20% of target)
+      if (budgetUtilization !== undefined && budgetUtilization < 80) {
+        issues.push(`Low budget utilization (${budgetUtilization.toFixed(0)}% of budget) - bid may be too low, audience too small, or low relevancy`);
+        alerts.push({ type: 'budget', message: `${c.campaignName} spending only ${budgetUtilization.toFixed(0)}% of budget - not reaching daily budget target`, campaignId: c.campaignId, campaignName: c.campaignName });
       }
       if (hasLan || hasExpansion) {
         alerts.push({ type: 'lan_expansion', message: `${c.campaignName} has ${hasLan ? 'LAN' : ''}${hasLan && hasExpansion ? ' and ' : ''}${hasExpansion ? 'Expansion' : ''} enabled`, campaignId: c.campaignId, campaignName: c.campaignName });

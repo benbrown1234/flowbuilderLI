@@ -164,10 +164,10 @@ function CampaignCard({ campaign, accountId, showIssues }: { campaign: CampaignI
         </div>
       </div>
       
-      {campaign.budgetUtilization !== undefined && campaign.budgetUtilization < 20 && (
+      {campaign.budgetUtilization !== undefined && campaign.budgetUtilization < 80 && (
         <div className="flex items-center gap-2 text-amber-600 text-xs bg-amber-50 rounded px-2 py-1 mb-2">
           <DollarSign className="w-3 h-3" />
-          <span>Low spend ({campaign.budgetUtilization.toFixed(0)}% of budget) - bid may be too low, audience too small, or low relevancy</span>
+          <span>Low budget utilization ({campaign.budgetUtilization.toFixed(0)}% of daily budget) - not reaching target spend</span>
         </div>
       )}
       
@@ -618,7 +618,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
         <Info className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
         <p className="text-xs text-gray-600">
           Note: LinkedIn Audience Network (LAN) and Audience Expansion settings are not available via the LinkedIn API. 
-          Budget alerts are based on previous week's spend compared to daily budget.
+          Budget alerts flag campaigns spending less than 80% of their daily budget over the previous week.
         </p>
       </div>
       
