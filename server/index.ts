@@ -2343,7 +2343,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       getCreativeDailyMetrics(accountId, start, end)
     ]);
     
-    // Calculate previous week's spend for each campaign (last 7 days based on latest metric date)
+    // Calculate current and previous week's spend for each campaign
     // Find the latest metric date in the dataset to anchor the 7-day window
     let latestMetricDate = new Date(0);
     for (const m of campaignMetrics) {
@@ -2355,16 +2355,29 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
     
     // Use latest metric date as end of window (or today if no metrics)
     const windowEnd = latestMetricDate.getTime() > 0 ? latestMetricDate : new Date();
-    const windowStart = new Date(windowEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const weeklySpendByCampaign = new Map<string, number>();
+    const currentWeekStart = new Date(windowEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const previousWeekStart = new Date(windowEnd.getTime() - 14 * 24 * 60 * 60 * 1000);
+    const currentWeekSpendByCampaign = new Map<string, number>();
+    const previousWeekSpendByCampaign = new Map<string, number>();
     
     for (const m of campaignMetrics) {
       const metricDate = new Date(m.metric_date);
-      if (metricDate >= windowStart && metricDate <= windowEnd) {
-        const currentSpend = weeklySpendByCampaign.get(m.campaign_id) || 0;
-        weeklySpendByCampaign.set(m.campaign_id, currentSpend + (parseFloat(m.spend) || 0));
+      const spend = parseFloat(m.spend) || 0;
+      
+      // Current week (last 7 days)
+      if (metricDate >= currentWeekStart && metricDate <= windowEnd) {
+        const currentSpend = currentWeekSpendByCampaign.get(m.campaign_id) || 0;
+        currentWeekSpendByCampaign.set(m.campaign_id, currentSpend + spend);
+      }
+      // Previous week (8-14 days ago)
+      if (metricDate >= previousWeekStart && metricDate < currentWeekStart) {
+        const prevSpend = previousWeekSpendByCampaign.get(m.campaign_id) || 0;
+        previousWeekSpendByCampaign.set(m.campaign_id, prevSpend + spend);
       }
     }
+    
+    // Keep old variable for backward compatibility
+    const weeklySpendByCampaign = currentWeekSpendByCampaign;
     
     // Fetch live campaign settings for LAN/Expansion flags and budget
     let liveCampaignSettings = new Map<string, any>();
@@ -2485,10 +2498,23 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       // Get live settings
       const liveSettings = liveCampaignSettings.get(c.campaignId) || {};
       const dailyBudget = liveSettings.dailyBudget;
-      // Calculate budget utilization: actual previous week's spend vs daily budget × 7
+      // Calculate budget utilization: actual week's spend vs daily budget × 7
       const weeklyBudget = dailyBudget && dailyBudget > 0 ? dailyBudget * 7 : 0;
-      const actualWeeklySpend = weeklySpendByCampaign.get(c.campaignId) || 0;
-      const budgetUtilization = weeklyBudget > 0 ? (actualWeeklySpend / weeklyBudget) * 100 : undefined;
+      const currentWeekSpend = currentWeekSpendByCampaign.get(c.campaignId) || 0;
+      const previousWeekSpend = previousWeekSpendByCampaign.get(c.campaignId) || 0;
+      const budgetUtilization = weeklyBudget > 0 ? (currentWeekSpend / weeklyBudget) * 100 : undefined;
+      
+      // Calculate week-over-week spend change
+      // If previous week had spend, calculate % change; if previous was 0 but current has spend, that's improvement (0)
+      // If previous had spend but current is 0, that's -100% decline
+      let spendChange = 0;
+      if (previousWeekSpend > 0) {
+        spendChange = ((currentWeekSpend - previousWeekSpend) / previousWeekSpend) * 100;
+      } else if (currentWeekSpend > 0 && previousWeekSpend === 0) {
+        // New spending this week, no decline
+        spendChange = 0;
+      }
+      
       const hasLan = liveSettings.hasLan || false;
       const hasExpansion = liveSettings.hasExpansion || false;
       
@@ -2497,11 +2523,19 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       // Determine issues
       const issues: string[] = [];
       if (ctrChange < -20) issues.push('CTR declined significantly');
-      // Flag campaigns spending less than 80% of daily budget (not within 20% of target)
+      
+      // Flag campaigns spending less than 80% of daily budget
       if (budgetUtilization !== undefined && budgetUtilization < 80) {
-        issues.push(`Low budget utilization (${budgetUtilization.toFixed(0)}% of budget) - bid may be too low, audience too small, or low relevancy`);
+        issues.push(`Daily budget not getting close (${budgetUtilization.toFixed(0)}% utilized)`);
         alerts.push({ type: 'budget', message: `${c.campaignName} spending only ${budgetUtilization.toFixed(0)}% of budget - not reaching daily budget target`, campaignId: c.campaignId, campaignName: c.campaignName });
       }
+      
+      // Flag if spend declining more than 20% week-over-week
+      if (spendChange < -20 && previousWeekSpend > 0) {
+        issues.push(`Spend declining ${Math.abs(spendChange).toFixed(0)}% week-over-week`);
+        alerts.push({ type: 'budget', message: `${c.campaignName} spend down ${Math.abs(spendChange).toFixed(0)}% from previous week`, campaignId: c.campaignId, campaignName: c.campaignName });
+      }
+      
       if (hasLan || hasExpansion) {
         alerts.push({ type: 'lan_expansion', message: `${c.campaignName} has ${hasLan ? 'LAN' : ''}${hasLan && hasExpansion ? ' and ' : ''}${hasExpansion ? 'Expansion' : ''} enabled`, campaignId: c.campaignId, campaignName: c.campaignName });
       }
@@ -2519,6 +2553,9 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         spend: c.spend,
         dailyBudget,
         budgetUtilization,
+        currentWeekSpend,
+        previousWeekSpend,
+        spendChange,
         hasLan,
         hasExpansion,
         isPerformingWell,

@@ -47,6 +47,9 @@ interface CampaignItem {
   spend: number;
   dailyBudget?: number;
   budgetUtilization?: number;
+  currentWeekSpend?: number;
+  previousWeekSpend?: number;
+  spendChange?: number;
   hasLan?: boolean;
   hasExpansion?: boolean;
   audiencePenetration?: number;
@@ -164,13 +167,6 @@ function CampaignCard({ campaign, accountId, showIssues }: { campaign: CampaignI
         </div>
       </div>
       
-      {campaign.budgetUtilization !== undefined && campaign.budgetUtilization < 80 && (
-        <div className="flex items-center gap-2 text-amber-600 text-xs bg-amber-50 rounded px-2 py-1 mb-2">
-          <DollarSign className="w-3 h-3" />
-          <span>Low budget utilization ({campaign.budgetUtilization.toFixed(0)}% of daily budget) - not reaching target spend</span>
-        </div>
-      )}
-      
       {(campaign.hasLan || campaign.hasExpansion) && (
         <div className="flex items-center gap-2 text-blue-600 text-xs bg-blue-50 rounded px-2 py-1 mb-2">
           <Zap className="w-3 h-3" />
@@ -179,7 +175,7 @@ function CampaignCard({ campaign, accountId, showIssues }: { campaign: CampaignI
       )}
       
       {showIssues && campaign.issues.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-red-100">
+        <div className="mt-2 pt-2 border-t border-red-100 space-y-1">
           {campaign.issues.map((issue, idx) => (
             <div key={idx} className="flex items-center gap-2 text-red-600 text-xs">
               <AlertTriangle className="w-3 h-3 flex-shrink-0" />
