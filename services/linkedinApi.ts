@@ -71,8 +71,10 @@ export const getCreativeDetails = async (accountId: string, creativeId: string):
   return response.data;
 };
 
-export const getCampaignAnalytics = async (accountId: string): Promise<AccountMetrics> => {
-  const response = await api.get(`/linkedin/account/${accountId}/analytics`);
+export const getCampaignAnalytics = async (accountId: string, comparisonMode: 'rolling28' | 'fullMonth' = 'rolling28'): Promise<AccountMetrics> => {
+  const response = await api.get(`/linkedin/account/${accountId}/analytics`, {
+    params: { comparisonMode }
+  });
   return response.data;
 };
 

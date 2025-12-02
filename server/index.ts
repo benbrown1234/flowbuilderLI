@@ -525,31 +525,49 @@ app.get('/api/linkedin/account/:accountId/engagement-rules', requireAuth, async 
 app.get('/api/linkedin/account/:accountId/analytics', requireAuth, async (req, res) => {
   try {
     const { accountId } = req.params;
+    const { comparisonMode } = req.query;
     const sessionId = (req as any).sessionId;
+    const mode = (comparisonMode as string) || 'rolling28';
     
     const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1;
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     
-    const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const prevYear = prevDate.getFullYear();
-    const prevMonth = prevDate.getMonth() + 1;
+    let currentPeriodLabel: string;
+    let previousPeriodLabel: string;
+    let startDate: Date;
+    let endDate: Date;
+    let useDaily = false;
     
-    const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-    const startYear = threeMonthsAgo.getFullYear();
-    const startMonth = threeMonthsAgo.getMonth() + 1;
+    if (mode === 'fullMonth') {
+      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const twoMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      currentPeriodLabel = `${monthNames[lastMonth.getMonth()]} ${lastMonth.getFullYear()}`;
+      previousPeriodLabel = `${monthNames[twoMonthsAgo.getMonth()]} ${twoMonthsAgo.getFullYear()}`;
+      startDate = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+      endDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    } else {
+      currentPeriodLabel = 'Last 28 days';
+      previousPeriodLabel = 'Previous 28 days';
+      startDate = new Date(now.getTime() - 56 * 24 * 60 * 60 * 1000);
+      endDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      useDaily = true;
+    }
     
-    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    const endYear = nextMonth.getFullYear();
-    const endMonth = nextMonth.getMonth() + 1;
+    const startYear = startDate.getFullYear();
+    const startMonth = startDate.getMonth() + 1;
+    const startDay = startDate.getDate();
+    const endYear = endDate.getFullYear();
+    const endMonth = endDate.getMonth() + 1;
+    const endDay = endDate.getDate();
     
     const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
     const encodedAccountUrn = encodeURIComponent(accountUrn);
     
-    const dateRangeQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${startYear},month:${startMonth},day:1),end:(year:${endYear},month:${endMonth},day:1))&timeGranularity=MONTHLY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,pivotValues,dateRange`;
+    const timeGranularity = useDaily ? 'DAILY' : 'MONTHLY';
+    const dateRangeQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${startYear},month:${startMonth},day:${startDay}),end:(year:${endYear},month:${endMonth},day:${endDay}))&timeGranularity=${timeGranularity}&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,pivotValues,dateRange`;
     
-    console.log(`\n=== Fetching analytics for account ${accountId} ===`);
-    console.log(`Date range: ${startMonth}/${startYear} to ${endMonth}/${endYear}`);
+    console.log(`\n=== Fetching analytics for account ${accountId} (mode: ${mode}) ===`);
+    console.log(`Date range: ${startMonth}/${startDay}/${startYear} to ${endMonth}/${endDay}/${endYear}`);
     console.log(`Account URN: ${accountUrn}`);
     console.log(`Query string length: ${dateRangeQuery.length} chars`);
     
@@ -595,32 +613,69 @@ app.get('/api/linkedin/account/:accountId/analytics', requireAuth, async (req, r
       return '';
     };
     
-    const getElementMonth = (element: any): number => {
-      if (element.dateRange?.start?.month) {
-        return element.dateRange.start.month;
+    const getElementDate = (element: any): Date | null => {
+      if (element.dateRange?.start) {
+        const { year, month, day } = element.dateRange.start;
+        return new Date(year, month - 1, day || 1);
       }
-      return 0;
+      return null;
     };
     
     const currentByC: Record<string, any> = {};
     const prevByC: Record<string, any> = {};
     
-    (analyticsData.elements || []).forEach((el: any) => {
-      const cId = getCampaignId(el);
-      const elMonth = getElementMonth(el);
-      
-      if (cId) {
-        console.log(`Campaign ${cId} - month ${elMonth}: impressions=${el.impressions || 0}, clicks=${el.clicks || 0}`);
-        if (elMonth === currentMonth) {
-          currentByC[cId] = parseMetrics(el);
-        } else if (elMonth === prevMonth) {
-          prevByC[cId] = parseMetrics(el);
-        }
+    const addMetrics = (target: Record<string, any>, cId: string, metrics: any) => {
+      if (!target[cId]) {
+        target[cId] = { impressions: 0, clicks: 0, spend: 0, conversions: 0, leads: 0, videoViews: 0, landingPageClicks: 0 };
       }
-    });
+      target[cId].impressions += metrics.impressions;
+      target[cId].clicks += metrics.clicks;
+      target[cId].spend += metrics.spend;
+      target[cId].conversions += metrics.conversions;
+      target[cId].leads += metrics.leads;
+      target[cId].videoViews += metrics.videoViews;
+      target[cId].landingPageClicks += metrics.landingPageClicks;
+    };
     
-    console.log(`Current month (${currentMonth}) campaigns: ${Object.keys(currentByC).length}`);
-    console.log(`Previous month (${prevMonth}) campaigns: ${Object.keys(prevByC).length}`);
+    if (mode === 'fullMonth') {
+      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const twoMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      const targetCurrentMonth = lastMonth.getMonth() + 1;
+      const targetPrevMonth = twoMonthsAgo.getMonth() + 1;
+      
+      (analyticsData.elements || []).forEach((el: any) => {
+        const cId = getCampaignId(el);
+        const elDate = getElementDate(el);
+        if (cId && elDate) {
+          const elMonth = elDate.getMonth() + 1;
+          if (elMonth === targetCurrentMonth) {
+            currentByC[cId] = parseMetrics(el);
+          } else if (elMonth === targetPrevMonth) {
+            prevByC[cId] = parseMetrics(el);
+          }
+        }
+      });
+    } else {
+      const currentPeriodEnd = new Date(now);
+      const currentPeriodStart = new Date(now.getTime() - 28 * 24 * 60 * 60 * 1000);
+      const previousPeriodEnd = new Date(currentPeriodStart.getTime() - 1);
+      const previousPeriodStart = new Date(currentPeriodStart.getTime() - 28 * 24 * 60 * 60 * 1000);
+      
+      (analyticsData.elements || []).forEach((el: any) => {
+        const cId = getCampaignId(el);
+        const elDate = getElementDate(el);
+        if (cId && elDate) {
+          if (elDate >= currentPeriodStart && elDate <= currentPeriodEnd) {
+            addMetrics(currentByC, cId, parseMetrics(el));
+          } else if (elDate >= previousPeriodStart && elDate <= previousPeriodEnd) {
+            addMetrics(prevByC, cId, parseMetrics(el));
+          }
+        }
+      });
+    }
+    
+    console.log(`Current period campaigns: ${Object.keys(currentByC).length}`);
+    console.log(`Previous period campaigns: ${Object.keys(prevByC).length}`);
     
     const emptyMetrics = {
       impressions: 0, clicks: 0, spend: 0, conversions: 0, leads: 0, videoViews: 0, landingPageClicks: 0
@@ -637,13 +692,11 @@ app.get('/api/linkedin/account/:accountId/analytics', requireAuth, async (req, r
       currency: 'GBP',
     }));
     
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    
     res.json({
       accountId,
       campaigns,
-      currentMonthLabel: `${monthNames[currentMonth - 1]} ${currentYear}`,
-      previousMonthLabel: `${monthNames[prevMonth - 1]} ${prevYear}`,
+      currentMonthLabel: currentPeriodLabel,
+      previousMonthLabel: previousPeriodLabel,
     });
   } catch (err: any) {
     console.error('Analytics error:', err.response?.data || err.message);
@@ -1920,7 +1973,7 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
         groupId: extractId(c.campaignGroup),
         status: c.status,
         dailyBudget,
-        hasLan: c.audienceExpansionEnabled === true || c.offsiteDeliveryEnabled === true,
+        hasLan: c.offsiteDeliveryEnabled === true,
         hasExpansion: c.audienceExpansionEnabled === true
       });
     }
@@ -2132,7 +2185,7 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
         groupId: extractId(c.campaignGroup),
         status: c.status,
         dailyBudget,
-        hasLan: c.audienceExpansionEnabled === true || c.offsiteDeliveryEnabled === true,
+        hasLan: c.offsiteDeliveryEnabled === true,
         hasExpansion: c.audienceExpansionEnabled === true
       });
     }
@@ -2327,7 +2380,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
   try {
     const sessionId = (req as any).sessionId;
     const { accountId } = req.params;
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, comparisonMode } = req.query;
     
     const auditAccount = await getAuditAccount(accountId);
     if (!auditAccount) {
@@ -2343,7 +2396,32 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       getCreativeDailyMetrics(accountId, start, end)
     ]);
     
-    // Calculate current and previous week's spend for each campaign
+    // Determine comparison periods based on mode
+    const mode = (comparisonMode as string) || 'rolling28';
+    const now = new Date();
+    
+    let currentPeriodStart: Date;
+    let currentPeriodEnd: Date;
+    let previousPeriodStart: Date;
+    let previousPeriodEnd: Date;
+    
+    if (mode === 'fullMonth') {
+      // Full month comparison: last complete month vs month before
+      // Last complete month
+      currentPeriodEnd = new Date(now.getFullYear(), now.getMonth(), 0); // Last day of previous month
+      currentPeriodStart = new Date(now.getFullYear(), now.getMonth() - 1, 1); // First day of previous month
+      // Month before that
+      previousPeriodEnd = new Date(now.getFullYear(), now.getMonth() - 1, 0); // Last day of 2 months ago
+      previousPeriodStart = new Date(now.getFullYear(), now.getMonth() - 2, 1); // First day of 2 months ago
+    } else {
+      // Rolling 28 days (default): last 28 days vs previous 28 days
+      currentPeriodEnd = new Date(now);
+      currentPeriodStart = new Date(now.getTime() - 28 * 24 * 60 * 60 * 1000);
+      previousPeriodEnd = new Date(currentPeriodStart.getTime() - 1); // Day before current period
+      previousPeriodStart = new Date(currentPeriodStart.getTime() - 28 * 24 * 60 * 60 * 1000);
+    }
+    
+    // Calculate current and previous week's spend for each campaign (for budget alerts)
     // Find the latest metric date in the dataset to anchor the 7-day window
     let latestMetricDate = new Date(0);
     for (const m of campaignMetrics) {
@@ -2415,19 +2493,27 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       console.warn('Could not fetch live campaign settings:', err.message);
     }
     
-    // Aggregate metrics by campaign and month for the dashboard
-    const campaignsByMonth = new Map<string, Map<string, any>>();
-    const creativesByMonth = new Map<string, Map<string, any>>();
+    // Aggregate metrics by campaign for current and previous periods
+    const currentPeriodCampaigns = new Map<string, any>();
+    const previousPeriodCampaigns = new Map<string, any>();
+    const currentPeriodCreatives = new Map<string, any>();
+    const previousPeriodCreatives = new Map<string, any>();
     
     for (const m of campaignMetrics) {
-      const monthKey = `${m.metric_date.getFullYear()}-${String(m.metric_date.getMonth() + 1).padStart(2, '0')}`;
-      if (!campaignsByMonth.has(monthKey)) {
-        campaignsByMonth.set(monthKey, new Map());
-      }
-      const monthMap = campaignsByMonth.get(monthKey)!;
+      const metricDate = new Date(m.metric_date);
       
-      if (!monthMap.has(m.campaign_id)) {
-        monthMap.set(m.campaign_id, {
+      // Determine which period this metric belongs to
+      let targetMap: Map<string, any> | null = null;
+      if (metricDate >= currentPeriodStart && metricDate <= currentPeriodEnd) {
+        targetMap = currentPeriodCampaigns;
+      } else if (metricDate >= previousPeriodStart && metricDate <= previousPeriodEnd) {
+        targetMap = previousPeriodCampaigns;
+      }
+      
+      if (!targetMap) continue;
+      
+      if (!targetMap.has(m.campaign_id)) {
+        targetMap.set(m.campaign_id, {
           campaignId: m.campaign_id,
           campaignName: m.campaign_name,
           campaignGroupId: m.campaign_group_id,
@@ -2441,7 +2527,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         });
       }
       
-      const agg = monthMap.get(m.campaign_id)!;
+      const agg = targetMap.get(m.campaign_id)!;
       agg.impressions += parseInt(m.impressions) || 0;
       agg.clicks += parseInt(m.clicks) || 0;
       agg.spend += parseFloat(m.spend) || 0;
@@ -2451,14 +2537,20 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
     }
     
     for (const m of creativeMetrics) {
-      const monthKey = `${m.metric_date.getFullYear()}-${String(m.metric_date.getMonth() + 1).padStart(2, '0')}`;
-      if (!creativesByMonth.has(monthKey)) {
-        creativesByMonth.set(monthKey, new Map());
-      }
-      const monthMap = creativesByMonth.get(monthKey)!;
+      const metricDate = new Date(m.metric_date);
       
-      if (!monthMap.has(m.creative_id)) {
-        monthMap.set(m.creative_id, {
+      // Determine which period this metric belongs to
+      let targetMap: Map<string, any> | null = null;
+      if (metricDate >= currentPeriodStart && metricDate <= currentPeriodEnd) {
+        targetMap = currentPeriodCreatives;
+      } else if (metricDate >= previousPeriodStart && metricDate <= previousPeriodEnd) {
+        targetMap = previousPeriodCreatives;
+      }
+      
+      if (!targetMap) continue;
+      
+      if (!targetMap.has(m.creative_id)) {
+        targetMap.set(m.creative_id, {
           creativeId: m.creative_id,
           creativeName: m.creative_name,
           campaignId: m.campaign_id,
@@ -2474,7 +2566,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         });
       }
       
-      const agg = monthMap.get(m.creative_id)!;
+      const agg = targetMap.get(m.creative_id)!;
       agg.impressions += parseInt(m.impressions) || 0;
       agg.clicks += parseInt(m.clicks) || 0;
       agg.spend += parseFloat(m.spend) || 0;
@@ -2483,15 +2575,14 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       agg.leads += parseInt(m.leads) || 0;
     }
     
-    // Convert to response format
-    const months = Array.from(campaignsByMonth.keys()).sort().reverse();
-    const currentMonth = months[0];
-    const previousMonth = months[1];
+    // Check if we have data for both periods
+    const hasCurrentPeriod = currentPeriodCampaigns.size > 0;
+    const hasPreviousPeriod = previousPeriodCampaigns.size > 0;
     
     // Build campaign name lookup
     const campaignNameLookup = new Map<string, string>();
-    if (currentMonth) {
-      for (const [campId, campData] of campaignsByMonth.get(currentMonth)!) {
+    if (hasCurrentPeriod) {
+      for (const [campId, campData] of currentPeriodCampaigns) {
         campaignNameLookup.set(campId, campData.campaignName || `Campaign ${campId}`);
       }
     }
@@ -2503,8 +2594,8 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
     let hasLanOrExpansion = false;
     
     // Build campaigns in the expected format (CampaignItem)
-    const campaigns = currentMonth ? Array.from(campaignsByMonth.get(currentMonth)!.values()).map(c => {
-      const prev = previousMonth ? campaignsByMonth.get(previousMonth)?.get(c.campaignId) : null;
+    const campaigns = hasCurrentPeriod ? Array.from(currentPeriodCampaigns.values()).map(c => {
+      const prev = hasPreviousPeriod ? previousPeriodCampaigns.get(c.campaignId) : null;
       const currentCtr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
       const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
       const ctrChange = prevCtr > 0 ? ((currentCtr - prevCtr) / prevCtr) * 100 : 0;
@@ -2596,8 +2687,8 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
     }) : [];
     
     // Build ads in the expected format (AdItem)
-    const ads = currentMonth ? Array.from(creativesByMonth.get(currentMonth)!.values()).map(c => {
-      const prev = previousMonth ? creativesByMonth.get(previousMonth)?.get(c.creativeId) : null;
+    const ads = hasCurrentPeriod ? Array.from(currentPeriodCreatives.values()).map(c => {
+      const prev = hasPreviousPeriod ? previousPeriodCreatives.get(c.creativeId) : null;
       const currentCtr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
       const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
       const ctrChange = prevCtr > 0 ? ((currentCtr - prevCtr) / prevCtr) * 100 : 0;

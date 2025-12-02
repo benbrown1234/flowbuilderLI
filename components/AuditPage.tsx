@@ -17,8 +17,12 @@ import {
   Users,
   Zap,
   Target,
-  Info
+  Info,
+  Calendar,
+  ChevronDown
 } from 'lucide-react';
+
+type ComparisonMode = 'rolling28' | 'fullMonth';
 
 interface AuditPageProps {
   accountId: string;
@@ -408,6 +412,8 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
   const [isStarting, setIsStarting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [comparisonMode, setComparisonMode] = useState<ComparisonMode>('rolling28');
+  const [showModeDropdown, setShowModeDropdown] = useState(false);
 
   const checkAuditStatus = useCallback(async () => {
     if (!accountId) return;
@@ -422,11 +428,11 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
     }
   }, [accountId]);
 
-  const fetchAuditData = useCallback(async () => {
+  const fetchAuditData = useCallback(async (mode: ComparisonMode = comparisonMode) => {
     if (!accountId) return;
     
     try {
-      const response = await axios.get(`/api/audit/data/${accountId}`);
+      const response = await axios.get(`/api/audit/data/${accountId}?comparisonMode=${mode}`);
       const rawData = response.data;
       
       setData({
@@ -443,7 +449,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
         setError('Failed to load audit data');
       }
     }
-  }, [accountId]);
+  }, [accountId, comparisonMode]);
 
   const initialize = useCallback(async () => {
     setLoading(true);
@@ -503,6 +509,27 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
     } finally {
       setIsRefreshing(false);
     }
+  };
+
+  const handleModeChange = async (mode: ComparisonMode) => {
+    setComparisonMode(mode);
+    setShowModeDropdown(false);
+    await fetchAuditData(mode);
+  };
+
+  const getComparisonModeLabel = (mode: ComparisonMode) => {
+    if (mode === 'rolling28') return 'Rolling 28 days';
+    return 'Full month';
+  };
+
+  const getComparisonModeDescription = (mode: ComparisonMode) => {
+    if (mode === 'rolling28') return 'Last 4 weeks vs previous 4 weeks';
+    const now = new Date();
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const twoMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+    const lastMonthName = lastMonth.toLocaleDateString('en-US', { month: 'short' });
+    const twoMonthsAgoName = twoMonthsAgo.toLocaleDateString('en-US', { month: 'short' });
+    return `${lastMonthName} vs ${twoMonthsAgoName}`;
   };
 
   if (!isLiveData) {
@@ -613,12 +640,44 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
         syncFrequency={data.syncFrequency}
       />
       
-      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4 flex items-start gap-2">
-        <Info className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
-        <p className="text-xs text-gray-600">
-          Note: LinkedIn Audience Network (LAN) and Audience Expansion settings are not available via the LinkedIn API. 
-          Budget alerts flag campaigns spending less than 80% of their daily budget over the previous week.
-        </p>
+      <div className="flex items-center justify-between mb-4">
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-start gap-2 flex-1 mr-4">
+          <Info className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
+          <p className="text-xs text-gray-600">
+            Budget alerts flag campaigns spending less than 80% of their daily budget (requires 7 days of activity).
+          </p>
+        </div>
+        
+        <div className="relative">
+          <button
+            onClick={() => setShowModeDropdown(!showModeDropdown)}
+            className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
+          >
+            <Calendar className="w-4 h-4 text-gray-500" />
+            <span className="font-medium">{getComparisonModeLabel(comparisonMode)}</span>
+            <span className="text-gray-500 text-xs">({getComparisonModeDescription(comparisonMode)})</span>
+            <ChevronDown className="w-4 h-4 text-gray-400" />
+          </button>
+          
+          {showModeDropdown && (
+            <div className="absolute right-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+              <button
+                onClick={() => handleModeChange('rolling28')}
+                className={`w-full px-4 py-3 text-left hover:bg-gray-50 first:rounded-t-lg ${comparisonMode === 'rolling28' ? 'bg-blue-50' : ''}`}
+              >
+                <div className="font-medium text-sm">Rolling 28 days</div>
+                <div className="text-xs text-gray-500">Last 4 weeks vs previous 4 weeks</div>
+              </button>
+              <button
+                onClick={() => handleModeChange('fullMonth')}
+                className={`w-full px-4 py-3 text-left hover:bg-gray-50 last:rounded-b-lg border-t border-gray-100 ${comparisonMode === 'fullMonth' ? 'bg-blue-50' : ''}`}
+              >
+                <div className="font-medium text-sm">Full month</div>
+                <div className="text-xs text-gray-500">{getComparisonModeDescription('fullMonth')}</div>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
       
       <div className="space-y-8 pb-8">
