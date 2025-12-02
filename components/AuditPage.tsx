@@ -16,7 +16,8 @@ import {
   DollarSign,
   Users,
   Zap,
-  Target
+  Target,
+  Info
 } from 'lucide-react';
 
 interface AuditPageProps {
@@ -163,10 +164,10 @@ function CampaignCard({ campaign, accountId, showIssues }: { campaign: CampaignI
         </div>
       </div>
       
-      {campaign.budgetUtilization !== undefined && campaign.budgetUtilization < 80 && (
+      {campaign.budgetUtilization !== undefined && campaign.budgetUtilization < 20 && (
         <div className="flex items-center gap-2 text-amber-600 text-xs bg-amber-50 rounded px-2 py-1 mb-2">
           <DollarSign className="w-3 h-3" />
-          <span>Budget utilization: {campaign.budgetUtilization.toFixed(0)}%</span>
+          <span>Low spend ({campaign.budgetUtilization.toFixed(0)}% of budget) - bid may be too low, audience too small, or low relevancy</span>
         </div>
       )}
       
@@ -612,6 +613,14 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
         isRefreshing={isRefreshing}
         syncFrequency={data.syncFrequency}
       />
+      
+      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-4 flex items-start gap-2">
+        <Info className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
+        <p className="text-xs text-gray-600">
+          Note: LinkedIn Audience Network (LAN) and Audience Expansion settings are not available via the LinkedIn API. 
+          Budget alerts are based on previous week's spend compared to daily budget.
+        </p>
+      </div>
       
       <div className="space-y-8 pb-8">
         {data.alerts.length > 0 && (
