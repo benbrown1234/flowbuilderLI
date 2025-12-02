@@ -2550,14 +2550,19 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       
       // Flag campaigns spending less than 80% of daily budget (only if ran all 7 days)
       if (budgetUtilization !== undefined && budgetUtilization < 80) {
-        issues.push(`Daily budget not getting close (${budgetUtilization.toFixed(0)}% utilized)`);
-        alerts.push({ type: 'budget', message: `${c.campaignName} spending only ${budgetUtilization.toFixed(0)}% of budget - not reaching daily budget target`, campaignId: c.campaignId, campaignName: c.campaignName });
+        const avgSpendFormatted = avgDailySpend.toFixed(2);
+        const budgetFormatted = dailyBudget!.toFixed(2);
+        issues.push(`Avg daily spend $${avgSpendFormatted} vs $${budgetFormatted} budget (${budgetUtilization.toFixed(0)}%)`);
+        alerts.push({ type: 'budget', message: `${c.campaignName} avg daily spend $${avgSpendFormatted} vs $${budgetFormatted} daily budget (${budgetUtilization.toFixed(0)}% utilized)`, campaignId: c.campaignId, campaignName: c.campaignName });
       }
       
       // Flag if average daily spend declining more than 20% week-over-week
-      if (spendChange < -20) {
-        issues.push(`Spend declining ${Math.abs(spendChange).toFixed(0)}% week-over-week`);
-        alerts.push({ type: 'budget', message: `${c.campaignName} spend down ${Math.abs(spendChange).toFixed(0)}% from previous week`, campaignId: c.campaignId, campaignName: c.campaignName });
+      // Only fire if both weeks had sufficient activity (5+ days) - the spendChange is already 0 if not
+      if (spendChange < -20 && currentWeekDays >= 5 && previousWeekDays >= 5) {
+        const currAvgFormatted = avgDailySpend.toFixed(2);
+        const prevAvgFormatted = prevAvgDailySpend.toFixed(2);
+        issues.push(`Avg daily spend $${currAvgFormatted} vs $${prevAvgFormatted} last week (${Math.abs(spendChange).toFixed(0)}% down)`);
+        alerts.push({ type: 'budget', message: `${c.campaignName} avg daily spend $${currAvgFormatted} vs $${prevAvgFormatted} last week (${Math.abs(spendChange).toFixed(0)}% decline, ${currentWeekDays} days this week)`, campaignId: c.campaignId, campaignName: c.campaignName });
       }
       
       if (hasLan || hasExpansion) {
