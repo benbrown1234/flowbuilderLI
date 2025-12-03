@@ -247,16 +247,37 @@ function CampaignCard({ campaign, accountId, showIssues, onClick }: { campaign: 
       
       <div className="grid grid-cols-3 gap-4 text-center mb-3">
         <div>
-          <p className="text-lg font-semibold text-gray-900">{formatCtr(campaign.ctr)}</p>
+          <div className="flex items-center justify-center gap-1">
+            <p className="text-lg font-semibold text-gray-900">{formatCtr(campaign.ctr)}</p>
+            {campaign.ctrChange !== null && campaign.ctrChange !== undefined && Math.abs(campaign.ctrChange) >= 0.5 && (
+              <span className={`text-xs font-medium ${campaign.ctrChange > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {campaign.ctrChange > 0 ? '+' : ''}{campaign.ctrChange.toFixed(1)}%
+              </span>
+            )}
+          </div>
           <p className="text-xs text-gray-500">CTR</p>
         </div>
         <div>
-          <p className="text-lg font-semibold text-gray-900">{formatNumber(campaign.impressions)}</p>
-          <p className="text-xs text-gray-500">Impressions</p>
+          <div className="flex items-center justify-center gap-1">
+            <p className="text-lg font-semibold text-gray-900">{campaign.cpc ? `$${campaign.cpc.toFixed(2)}` : '-'}</p>
+            {campaign.cpcChange !== null && campaign.cpcChange !== undefined && Math.abs(campaign.cpcChange) >= 0.5 && (
+              <span className={`text-xs font-medium ${campaign.cpcChange < 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {campaign.cpcChange > 0 ? '+' : ''}{campaign.cpcChange.toFixed(1)}%
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-gray-500">CPC</p>
         </div>
         <div>
-          <p className="text-lg font-semibold text-gray-900">${formatNumber(campaign.spend)}</p>
-          <p className="text-xs text-gray-500">Spend</p>
+          <div className="flex items-center justify-center gap-1">
+            <p className="text-lg font-semibold text-gray-900">{campaign.cpm ? `$${campaign.cpm.toFixed(2)}` : '-'}</p>
+            {campaign.cpmChange !== null && campaign.cpmChange !== undefined && Math.abs(campaign.cpmChange) >= 0.5 && (
+              <span className={`text-xs font-medium ${campaign.cpmChange < 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {campaign.cpmChange > 0 ? '+' : ''}{campaign.cpmChange.toFixed(1)}%
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-gray-500">CPM</p>
         </div>
       </div>
       
