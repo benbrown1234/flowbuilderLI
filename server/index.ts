@@ -2472,10 +2472,10 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
     const currentWeekStart = new Date(windowEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
     const previousWeekStart = new Date(windowEnd.getTime() - 14 * 24 * 60 * 60 * 1000);
     // WoW metrics by campaign
-    const currentWeekByCampaign = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number; days: Set<string> }>();
-    const previousWeekByCampaign = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number; days: Set<string> }>();
+    const currentWeekByCampaign = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number; days: Set<string>; dwellTimeSum: number; dwellTimeCount: number }>();
+    const previousWeekByCampaign = new Map<string, { spend: number; impressions: number; clicks: number; conversions: number; days: Set<string>; dwellTimeSum: number; dwellTimeCount: number }>();
     
-    const initWeekMetrics = () => ({ spend: 0, impressions: 0, clicks: 0, conversions: 0, days: new Set<string>() });
+    const initWeekMetrics = () => ({ spend: 0, impressions: 0, clicks: 0, conversions: 0, days: new Set<string>(), dwellTimeSum: 0, dwellTimeCount: 0 });
     
     for (const m of campaignMetrics) {
       const metricDate = new Date(m.metric_date);
@@ -2496,6 +2496,11 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         curr.clicks += clicks;
         curr.conversions += conversions;
         curr.days.add(dateKey);
+        // Track dwell time for WoW
+        if (m.average_dwell_time !== null && m.average_dwell_time !== undefined && impressions > 0) {
+          curr.dwellTimeSum += (parseFloat(m.average_dwell_time) || 0) * impressions;
+          curr.dwellTimeCount += impressions;
+        }
       }
       // Previous week (8-14 days ago)
       if (metricDate >= previousWeekStart && metricDate < currentWeekStart) {
@@ -2508,6 +2513,11 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         prev.clicks += clicks;
         prev.conversions += conversions;
         prev.days.add(dateKey);
+        // Track dwell time for WoW
+        if (m.average_dwell_time !== null && m.average_dwell_time !== undefined && impressions > 0) {
+          prev.dwellTimeSum += (parseFloat(m.average_dwell_time) || 0) * impressions;
+          prev.dwellTimeCount += impressions;
+        }
       }
     }
     
@@ -2598,8 +2608,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
           videoViews: 0,
           leads: 0,
           approximateMemberReach: 0,
-          audiencePenetrationSum: 0,
-          audiencePenetrationCount: 0,
+          audiencePenetrationMax: 0,
           averageDwellTimeSum: 0,
           averageDwellTimeCount: 0,
           activeDays: 0
@@ -2619,10 +2628,12 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       if (m.approximate_member_reach) {
         agg.approximateMemberReach += parseInt(m.approximate_member_reach) || 0;
       }
-      // Track audience penetration (average over days with data)
+      // Track audience penetration (take MAX value - it's cumulative)
       if (m.audience_penetration !== null && m.audience_penetration !== undefined) {
-        agg.audiencePenetrationSum += parseFloat(m.audience_penetration) || 0;
-        agg.audiencePenetrationCount += 1;
+        const penetrationValue = parseFloat(m.audience_penetration) || 0;
+        if (penetrationValue > agg.audiencePenetrationMax) {
+          agg.audiencePenetrationMax = penetrationValue;
+        }
       }
       // Track average dwell time (weighted by impressions)
       if (m.average_dwell_time !== null && m.average_dwell_time !== undefined && m.impressions > 0) {
@@ -2657,7 +2668,9 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
           spend: 0,
           conversions: 0,
           videoViews: 0,
-          leads: 0
+          leads: 0,
+          averageDwellTimeSum: 0,
+          averageDwellTimeCount: 0
         });
       }
       
@@ -2668,6 +2681,12 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       agg.conversions += parseInt(m.conversions) || 0;
       agg.videoViews += parseInt(m.video_views) || 0;
       agg.leads += parseInt(m.leads) || 0;
+      
+      // Track average dwell time for ads (weighted by impressions)
+      if (m.average_dwell_time !== null && m.average_dwell_time !== undefined && m.impressions > 0) {
+        agg.averageDwellTimeSum += (parseFloat(m.average_dwell_time) || 0) * (parseInt(m.impressions) || 0);
+        agg.averageDwellTimeCount += parseInt(m.impressions) || 0;
+      }
     }
     
     // Check if we have data for both periods
@@ -2740,6 +2759,13 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       const cpmWoWCurr = currWeek.impressions > 0 ? (currWeek.spend / currWeek.impressions) * 1000 : 0;
       const cpmWoWPrev = prevWeek.impressions > 0 ? (prevWeek.spend / prevWeek.impressions) * 1000 : 0;
       
+      // WoW dwell time
+      const dwellTimeWoWCurr = currWeek.dwellTimeCount > 0 ? currWeek.dwellTimeSum / currWeek.dwellTimeCount : null;
+      const dwellTimeWoWPrev = prevWeek.dwellTimeCount > 0 ? prevWeek.dwellTimeSum / prevWeek.dwellTimeCount : null;
+      const dwellTimeChangeWoW = dwellTimeWoWCurr !== null && dwellTimeWoWPrev !== null && dwellTimeWoWPrev > 0
+        ? pctChange(dwellTimeWoWCurr, dwellTimeWoWPrev)
+        : null;
+      
       // Calculate average daily spend
       const avgDailySpend = currentWeekDays > 0 ? currWeek.spend / currentWeekDays : 0;
       const prevAvgDailySpend = previousWeekDays > 0 ? prevWeek.spend / previousWeekDays : 0;
@@ -2754,19 +2780,33 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       const hasMaximizeDelivery = liveSettings.hasMaximizeDelivery || false;
       
       // Calculate new metrics from aggregated analytics data
-      // Audience Penetration: average of daily values (already as decimal 0-1)
-      const audiencePenetration = c.audiencePenetrationCount > 0 
-        ? c.audiencePenetrationSum / c.audiencePenetrationCount 
+      // Audience Penetration: max value over the period (cumulative metric, returned as decimal 0-1)
+      const audiencePenetration = c.audiencePenetrationMax > 0 ? c.audiencePenetrationMax : null;
+      const prevAudiencePenetration = prev && prev.audiencePenetrationMax > 0 ? prev.audiencePenetrationMax : null;
+      const audiencePenetrationChange = audiencePenetration !== null && prevAudiencePenetration !== null && prevAudiencePenetration > 0
+        ? pctChange(audiencePenetration, prevAudiencePenetration)
         : null;
       
       // Frequency: impressions / unique reach
       const frequency = c.approximateMemberReach > 0 
         ? c.impressions / c.approximateMemberReach 
         : null;
+      const prevFrequency = prev && prev.approximateMemberReach > 0 
+        ? prev.impressions / prev.approximateMemberReach 
+        : null;
+      const frequencyChange = frequency !== null && prevFrequency !== null && prevFrequency > 0
+        ? pctChange(frequency, prevFrequency)
+        : null;
       
       // Average Dwell Time: weighted by impressions (in seconds)
       const averageDwellTime = c.averageDwellTimeCount > 0 
         ? c.averageDwellTimeSum / c.averageDwellTimeCount 
+        : null;
+      const prevAverageDwellTime = prev && prev.averageDwellTimeCount > 0 
+        ? prev.averageDwellTimeSum / prev.averageDwellTimeCount 
+        : null;
+      const dwellTimeChange = averageDwellTime !== null && prevAverageDwellTime !== null && prevAverageDwellTime > 0
+        ? pctChange(averageDwellTime, prevAverageDwellTime)
         : null;
       
       // Calculate cost efficiency vs account average
@@ -3132,10 +3172,14 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         hasLan,
         hasExpansion,
         hasMaximizeDelivery,
-        // New metrics
+        // New metrics with MoM comparisons
         frequency,
+        frequencyChange,
         audiencePenetration: audiencePenetration !== null ? audiencePenetration * 100 : null,
+        audiencePenetrationChange,
         averageDwellTime,
+        dwellTimeChange,
+        dwellTimeChangeWoW,
         cpcVsAccount,
         cpaVsAccount,
         // Scoring breakdown with actual applied contributions
@@ -3160,6 +3204,17 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
       const hasPreviousData = prev && prev.impressions >= 100;
       const ctrChange = hasPreviousData && prevCtr > 0 ? pctChange(currentCtr, prevCtr) : null;
+      
+      // Average Dwell Time for ads (weighted by impressions)
+      const averageDwellTime = c.averageDwellTimeCount > 0 
+        ? c.averageDwellTimeSum / c.averageDwellTimeCount 
+        : null;
+      const prevAverageDwellTime = prev && prev.averageDwellTimeCount > 0 
+        ? prev.averageDwellTimeSum / prev.averageDwellTimeCount 
+        : null;
+      const dwellTimeChange = averageDwellTime !== null && prevAverageDwellTime !== null && prevAverageDwellTime > 0
+        ? pctChange(averageDwellTime, prevAverageDwellTime)
+        : null;
       
       // Calculate conversion rate
       const currentCvr = c.clicks > 0 ? (c.conversions / c.clicks) * 100 : 0;
@@ -3216,6 +3271,8 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         prevClicks: prev?.clicks || 0,
         spend: c.spend,
         prevSpend: prev?.spend || 0,
+        averageDwellTime,
+        dwellTimeChange,
         scoringStatus,
         isPerformingWell,
         issues
