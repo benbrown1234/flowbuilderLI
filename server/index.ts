@@ -43,8 +43,13 @@ import {
   removeAuditAccount,
   saveCampaignDailyMetrics,
   saveCreativeDailyMetrics,
+  saveCampaignHourlyMetrics,
   getCampaignDailyMetrics,
   getCreativeDailyMetrics,
+  getCampaignHourlyMetrics,
+  getHourlyHeatmapData,
+  getDeliveryCutoffByDay,
+  getCampaignsWithHourlyData,
   getLatestMetricsDate,
   updateCampaignScoring,
   updateCreativeScoring,
@@ -2406,6 +2411,52 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
       await saveCreativeDailyMetrics(accountId, creativeMetrics);
     }
     
+    // Step 6: Fetch hourly analytics for drilldown (last 14 days only)
+    console.log('Fetching hourly analytics for drilldown...');
+    await delay(300);
+    
+    const fourteenDaysAgo = new Date(now.getTime() - (14 * 24 * 60 * 60 * 1000));
+    const hourlyAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${fourteenDaysAgo.getFullYear()},month:${fourteenDaysAgo.getMonth() + 1},day:${fourteenDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=HOURLY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,dateRange,pivotValues`;
+    
+    let hourlyAnalytics: any = { elements: [] };
+    try {
+      hourlyAnalytics = await linkedinApiRequest(sessionId, '/adAnalytics', {}, hourlyAnalyticsQuery);
+      console.log(`Got ${hourlyAnalytics.elements?.length || 0} hourly analytics rows`);
+    } catch (err: any) {
+      console.warn('Hourly analytics fetch error:', err.message);
+    }
+    
+    // Process and save hourly metrics
+    const hourlyMetrics: any[] = [];
+    for (const elem of (hourlyAnalytics.elements || [])) {
+      const campaignId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
+      if (!campaignId) continue;
+      
+      const dateRange = elem.dateRange?.start;
+      if (!dateRange) continue;
+      
+      // LinkedIn returns hour in UTC
+      const metricDate = new Date(dateRange.year, dateRange.month - 1, dateRange.day);
+      const metricHour = dateRange.hour !== undefined ? dateRange.hour : 0;
+      const campaignInfo = campaignMap.get(campaignId) || {};
+      
+      hourlyMetrics.push({
+        campaignId,
+        campaignName: campaignInfo.name,
+        metricDate,
+        metricHour,
+        impressions: elem.impressions || 0,
+        clicks: elem.clicks || 0,
+        spend: parseFloat(elem.costInLocalCurrency || '0'),
+        conversions: elem.externalWebsiteConversions || 0
+      });
+    }
+    
+    if (hourlyMetrics.length > 0) {
+      console.log(`Saving ${hourlyMetrics.length} campaign hourly metrics...`);
+      await saveCampaignHourlyMetrics(accountId, hourlyMetrics);
+    }
+    
     // Compute and save scoring status for Structure view caching
     console.log('Computing and saving scoring status...');
     await computeAndSaveScoringStatus(accountId, campaignMetrics, creativeMetrics);
@@ -2413,7 +2464,7 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     await updateAuditAccountSyncStatus(accountId, 'completed');
     console.log(`=== Audit sync completed for account ${accountId} ===\n`);
     
-    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length };
+    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length, hourlyMetrics: hourlyMetrics.length };
     
   } catch (err: any) {
     console.error(`Audit sync error for account ${accountId}:`, err.message);
@@ -2641,6 +2692,52 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
       await saveCreativeDailyMetrics(accountId, creativeMetrics);
     }
     
+    // Step 6: Fetch hourly analytics for drilldown (last 14 days only)
+    console.log('Fetching hourly analytics for drilldown...');
+    await delay(300);
+    
+    const fourteenDaysAgo = new Date(now.getTime() - (14 * 24 * 60 * 60 * 1000));
+    const hourlyAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${fourteenDaysAgo.getFullYear()},month:${fourteenDaysAgo.getMonth() + 1},day:${fourteenDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=HOURLY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,dateRange,pivotValues`;
+    
+    let hourlyAnalytics: any = { elements: [] };
+    try {
+      hourlyAnalytics = await linkedinApiRequestWithToken(accessToken, '/adAnalytics', {}, hourlyAnalyticsQuery);
+      console.log(`Got ${hourlyAnalytics.elements?.length || 0} hourly analytics rows`);
+    } catch (err: any) {
+      console.warn('Hourly analytics fetch error:', err.message);
+    }
+    
+    // Process and save hourly metrics
+    const hourlyMetrics: any[] = [];
+    for (const elem of (hourlyAnalytics.elements || [])) {
+      const campaignId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
+      if (!campaignId) continue;
+      
+      const dateRange = elem.dateRange?.start;
+      if (!dateRange) continue;
+      
+      // LinkedIn returns hour in UTC
+      const metricDate = new Date(dateRange.year, dateRange.month - 1, dateRange.day);
+      const metricHour = dateRange.hour !== undefined ? dateRange.hour : 0;
+      const campaignInfo = campaignMap.get(campaignId) || {};
+      
+      hourlyMetrics.push({
+        campaignId,
+        campaignName: campaignInfo.name,
+        metricDate,
+        metricHour,
+        impressions: elem.impressions || 0,
+        clicks: elem.clicks || 0,
+        spend: parseFloat(elem.costInLocalCurrency || '0'),
+        conversions: elem.externalWebsiteConversions || 0
+      });
+    }
+    
+    if (hourlyMetrics.length > 0) {
+      console.log(`Saving ${hourlyMetrics.length} campaign hourly metrics...`);
+      await saveCampaignHourlyMetrics(accountId, hourlyMetrics);
+    }
+    
     // Compute and save scoring status for Structure view caching
     console.log('Computing and saving scoring status...');
     await computeAndSaveScoringStatus(accountId, campaignMetrics, creativeMetrics);
@@ -2648,7 +2745,7 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     await updateAuditAccountSyncStatus(accountId, 'completed');
     console.log(`=== Audit sync completed for account ${accountId} ===\n`);
     
-    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length };
+    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length, hourlyMetrics: hourlyMetrics.length };
     
   } catch (err: any) {
     console.error(`Audit sync error for account ${accountId}:`, err.message);
@@ -3930,6 +4027,51 @@ app.get('/api/audit/structure-summary/:accountId', requireAuth, async (req, res)
   } catch (err: any) {
     console.error('Audit structure-summary error:', err.message);
     res.status(500).json({ error: 'Failed to get audit summary' });
+  }
+});
+
+// Get hourly heatmap data for drilldown
+app.get('/api/audit/drilldown/heatmap/:accountId', requireAuth, async (req, res) => {
+  const { accountId } = req.params;
+  const { campaignId, metric = 'impressions' } = req.query;
+  
+  try {
+    const heatmapData = await getHourlyHeatmapData(
+      accountId, 
+      campaignId as string | undefined,
+      metric as string
+    );
+    res.json(heatmapData);
+  } catch (err: any) {
+    console.error('Drilldown heatmap error:', err.message);
+    res.status(500).json({ error: 'Failed to get heatmap data' });
+  }
+});
+
+// Get delivery cutoff analysis by day
+app.get('/api/audit/drilldown/cutoffs/:accountId', requireAuth, async (req, res) => {
+  const { accountId } = req.params;
+  const { campaignId } = req.query;
+  
+  try {
+    const cutoffData = await getDeliveryCutoffByDay(accountId, campaignId as string | undefined);
+    res.json(cutoffData);
+  } catch (err: any) {
+    console.error('Drilldown cutoffs error:', err.message);
+    res.status(500).json({ error: 'Failed to get cutoff data' });
+  }
+});
+
+// Get list of campaigns with hourly data available
+app.get('/api/audit/drilldown/campaigns/:accountId', requireAuth, async (req, res) => {
+  const { accountId } = req.params;
+  
+  try {
+    const campaigns = await getCampaignsWithHourlyData(accountId);
+    res.json(campaigns);
+  } catch (err: any) {
+    console.error('Drilldown campaigns error:', err.message);
+    res.status(500).json({ error: 'Failed to get campaigns' });
   }
 });
 

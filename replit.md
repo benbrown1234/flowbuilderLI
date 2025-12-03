@@ -47,6 +47,17 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   **LAN/Expansion Monitoring**: Campaigns with LinkedIn Audience Network or Audience Expansion enabled get daily syncs instead of weekly.
     *   **Weekly Sync**: Default sync frequency is weekly; campaigns with LAN/Expansion get daily syncs.
     *   **Manual Refresh**: "Refresh" button to pull latest data on-demand.
+*   **Drilldown (Hourly Performance Analysis)**:
+    *   **Hourly Heatmap**: Visual 7x24 grid showing performance by day of week and hour of day (last 14 days).
+    *   **Selectable Metrics**: Toggle between Impressions, Clicks, Spend, CTR, CPC, CPM, and Conversions.
+    *   **Color-Coded Intensity**: Darker cells indicate higher activity/performance.
+    *   **Hover Tooltips**: Full metric breakdown on hover (impressions, clicks, spend, CTR, CPC, CPM).
+    *   **Delivery Cutoff Analysis**: Shows when ad delivery stops each day, indicating budget exhaustion patterns.
+    *   **Budget Exhaustion Alerts**: Highlights days where ads stopped delivering before 8pm (early cutoff).
+    *   **Per-Campaign Breakdown**: Filter to individual campaigns with 7+ days of hourly data.
+    *   **Daily Delivery Window Visualization**: Bar chart showing first and last delivery hours per day.
+    *   **Data Collection**: Hourly data fetched during audit sync (last 14 days via LinkedIn Analytics API with HOURLY granularity).
+    *   **Database Storage**: `analytics_campaign_hourly` table stores hourly metrics per campaign per day.
 *   **Ideate Canvas**:
     *   A visual planning tool for campaigns, featuring a drag-and-drop interface.
     *   **Import from Structure**: One-click import of live LinkedIn campaign data into Ideate canvas. Transforms campaign groups, campaigns, and ads into editable nodes with full targeting data preserved. Auto-generates TOF audience nodes from targeting criteria (industries, company sizes, seniorities).

@@ -167,6 +167,28 @@ export async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_analytics_campaign_daily_campaign ON analytics_campaign_daily(campaign_id, metric_date DESC);
       CREATE INDEX IF NOT EXISTS idx_analytics_creative_daily_campaign ON analytics_creative_daily(campaign_id, metric_date DESC);
 
+      -- Hourly analytics for drilldown view (one row per campaign per hour)
+      CREATE TABLE IF NOT EXISTS analytics_campaign_hourly (
+        id SERIAL PRIMARY KEY,
+        account_id VARCHAR(50) NOT NULL,
+        campaign_id VARCHAR(50) NOT NULL,
+        campaign_name VARCHAR(500),
+        metric_date DATE NOT NULL,
+        metric_hour INTEGER NOT NULL CHECK (metric_hour >= 0 AND metric_hour <= 23),
+        impressions BIGINT DEFAULT 0,
+        clicks BIGINT DEFAULT 0,
+        spend DECIMAL(12,2) DEFAULT 0,
+        conversions INTEGER DEFAULT 0,
+        ctr DECIMAL(8,4),
+        cpc DECIMAL(10,4),
+        cpm DECIMAL(10,4),
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(account_id, campaign_id, metric_date, metric_hour)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_analytics_hourly_account_date ON analytics_campaign_hourly(account_id, metric_date DESC, metric_hour);
+      CREATE INDEX IF NOT EXISTS idx_analytics_hourly_campaign ON analytics_campaign_hourly(campaign_id, metric_date DESC, metric_hour);
+
       -- Ideate Canvas tables
       CREATE TABLE IF NOT EXISTS ideate_canvases (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -787,6 +809,258 @@ export async function getCampaignDailyMetrics(
      WHERE account_id = $1 AND metric_date >= $2 AND metric_date <= $3
      ORDER BY metric_date DESC, campaign_id`,
     [accountId, startDate, endDate]
+  );
+  return result.rows;
+}
+
+// Hourly Analytics Storage for Drilldown
+export async function saveCampaignHourlyMetrics(
+  accountId: string,
+  metrics: Array<{
+    campaignId: string;
+    campaignName?: string;
+    metricDate: Date;
+    metricHour: number;
+    impressions: number;
+    clicks: number;
+    spend: number;
+    conversions?: number;
+  }>
+) {
+  const accId = String(accountId);
+  
+  for (const m of metrics) {
+    const ctr = m.impressions > 0 ? (m.clicks / m.impressions) * 100 : 0;
+    const cpc = m.clicks > 0 ? m.spend / m.clicks : 0;
+    const cpm = m.impressions > 0 ? (m.spend / m.impressions) * 1000 : 0;
+    
+    const dateStr = m.metricDate.toISOString().split('T')[0];
+    
+    await pool.query(
+      `INSERT INTO analytics_campaign_hourly 
+       (account_id, campaign_id, campaign_name, metric_date, metric_hour, impressions, clicks, spend, conversions, ctr, cpc, cpm)
+       VALUES ($1::text, $2::text, $3::text, $4::date, $5::integer, $6::bigint, $7::bigint, $8::numeric, $9::integer, $10::numeric, $11::numeric, $12::numeric)
+       ON CONFLICT (account_id, campaign_id, metric_date, metric_hour) DO UPDATE SET
+         campaign_name = EXCLUDED.campaign_name,
+         impressions = EXCLUDED.impressions,
+         clicks = EXCLUDED.clicks,
+         spend = EXCLUDED.spend,
+         conversions = EXCLUDED.conversions,
+         ctr = EXCLUDED.ctr,
+         cpc = EXCLUDED.cpc,
+         cpm = EXCLUDED.cpm`,
+      [
+        accId,
+        String(m.campaignId),
+        m.campaignName || null,
+        dateStr,
+        m.metricHour,
+        m.impressions || 0,
+        m.clicks || 0,
+        m.spend || 0,
+        m.conversions || 0,
+        ctr,
+        cpc,
+        cpm
+      ]
+    );
+  }
+}
+
+export async function getCampaignHourlyMetrics(
+  accountId: string,
+  startDate: Date,
+  endDate: Date,
+  campaignId?: string
+) {
+  let query = `SELECT * FROM analytics_campaign_hourly 
+     WHERE account_id = $1 AND metric_date >= $2 AND metric_date <= $3`;
+  const params: any[] = [accountId, startDate, endDate];
+  
+  if (campaignId) {
+    query += ` AND campaign_id = $4`;
+    params.push(campaignId);
+  }
+  
+  query += ` ORDER BY metric_date DESC, metric_hour, campaign_id`;
+  
+  const result = await pool.query(query, params);
+  return result.rows;
+}
+
+export async function getHourlyHeatmapData(
+  accountId: string,
+  campaignId?: string,
+  metric: string = 'impressions'
+) {
+  // Default to last 14 days
+  const endDate = new Date();
+  const startDate = new Date(endDate.getTime() - (14 * 24 * 60 * 60 * 1000));
+  
+  // Aggregate hourly data into day-of-week x hour matrix
+  let query = `
+    SELECT 
+      EXTRACT(DOW FROM metric_date)::int as day_of_week,
+      metric_hour,
+      SUM(impressions) as total_impressions,
+      SUM(clicks) as total_clicks,
+      SUM(spend) as total_spend,
+      SUM(conversions) as total_conversions,
+      CASE WHEN SUM(impressions) > 0 THEN (SUM(clicks)::float / SUM(impressions)) * 100 ELSE 0 END as avg_ctr,
+      CASE WHEN SUM(clicks) > 0 THEN SUM(spend) / SUM(clicks) ELSE 0 END as avg_cpc,
+      CASE WHEN SUM(impressions) > 0 THEN (SUM(spend) / SUM(impressions)) * 1000 ELSE 0 END as avg_cpm,
+      COUNT(DISTINCT metric_date) as days_with_data
+    FROM analytics_campaign_hourly
+    WHERE account_id = $1 AND metric_date >= $2 AND metric_date <= $3
+  `;
+  const params: any[] = [accountId, startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0]];
+  
+  if (campaignId) {
+    query += ` AND campaign_id = $4`;
+    params.push(campaignId);
+  }
+  
+  query += ` GROUP BY EXTRACT(DOW FROM metric_date)::int, metric_hour ORDER BY day_of_week, metric_hour`;
+  
+  const result = await pool.query(query, params);
+  
+  // Format into a 7x24 heatmap matrix
+  const heatmap: any[][] = Array.from({ length: 7 }, () => Array(24).fill(null));
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  
+  for (const row of result.rows) {
+    const dow = parseInt(row.day_of_week);
+    const hour = row.metric_hour;
+    
+    // Select the requested metric
+    let value = 0;
+    switch (metric) {
+      case 'impressions':
+        value = parseFloat(row.total_impressions) || 0;
+        break;
+      case 'clicks':
+        value = parseFloat(row.total_clicks) || 0;
+        break;
+      case 'spend':
+        value = parseFloat(row.total_spend) || 0;
+        break;
+      case 'ctr':
+        value = parseFloat(row.avg_ctr) || 0;
+        break;
+      case 'cpc':
+        value = parseFloat(row.avg_cpc) || 0;
+        break;
+      case 'cpm':
+        value = parseFloat(row.avg_cpm) || 0;
+        break;
+      case 'conversions':
+        value = parseFloat(row.total_conversions) || 0;
+        break;
+      default:
+        value = parseFloat(row.total_impressions) || 0;
+    }
+    
+    heatmap[dow][hour] = {
+      value,
+      impressions: parseFloat(row.total_impressions) || 0,
+      clicks: parseFloat(row.total_clicks) || 0,
+      spend: parseFloat(row.total_spend) || 0,
+      conversions: parseFloat(row.total_conversions) || 0,
+      ctr: parseFloat(row.avg_ctr) || 0,
+      cpc: parseFloat(row.avg_cpc) || 0,
+      cpm: parseFloat(row.avg_cpm) || 0,
+      daysWithData: parseInt(row.days_with_data) || 0
+    };
+  }
+  
+  return {
+    heatmap,
+    dayNames,
+    metric,
+    dateRange: {
+      start: startDate.toISOString().split('T')[0],
+      end: endDate.toISOString().split('T')[0]
+    }
+  };
+}
+
+export async function getDeliveryCutoffByDay(
+  accountId: string,
+  campaignId?: string
+) {
+  // Default to last 14 days
+  const endDate = new Date();
+  const startDate = new Date(endDate.getTime() - (14 * 24 * 60 * 60 * 1000));
+  
+  // Find the last hour with impressions for each day (delivery cutoff)
+  let query = `
+    SELECT 
+      metric_date,
+      EXTRACT(DOW FROM metric_date)::int as day_of_week,
+      MAX(CASE WHEN impressions > 0 THEN metric_hour ELSE NULL END) as last_delivery_hour,
+      MIN(CASE WHEN impressions > 0 THEN metric_hour ELSE NULL END) as first_delivery_hour,
+      SUM(impressions) as total_impressions,
+      SUM(spend) as total_spend
+    FROM analytics_campaign_hourly
+    WHERE account_id = $1 AND metric_date >= $2 AND metric_date <= $3
+  `;
+  const params: any[] = [accountId, startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0]];
+  
+  if (campaignId) {
+    query += ` AND campaign_id = $4`;
+    params.push(campaignId);
+  }
+  
+  query += ` GROUP BY metric_date ORDER BY metric_date DESC`;
+  
+  const result = await pool.query(query, params);
+  
+  // Analyze cutoff patterns
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const cutoffs = result.rows.map(row => ({
+    date: row.metric_date,
+    dayOfWeek: parseInt(row.day_of_week),
+    dayName: dayNames[parseInt(row.day_of_week)],
+    firstDeliveryHour: row.first_delivery_hour,
+    lastDeliveryHour: row.last_delivery_hour,
+    totalImpressions: parseFloat(row.total_impressions) || 0,
+    totalSpend: parseFloat(row.total_spend) || 0,
+    earlyBudgetExhaustion: row.last_delivery_hour !== null && row.last_delivery_hour < 20
+  }));
+  
+  // Calculate average cutoff hour
+  const validCutoffs = cutoffs.filter(c => c.lastDeliveryHour !== null);
+  const avgCutoffHour = validCutoffs.length > 0
+    ? validCutoffs.reduce((sum, c) => sum + c.lastDeliveryHour, 0) / validCutoffs.length
+    : null;
+  
+  // Count days with early budget exhaustion (before 8pm)
+  const earlyExhaustionDays = cutoffs.filter(c => c.earlyBudgetExhaustion).length;
+  
+  return {
+    cutoffs,
+    avgCutoffHour,
+    earlyExhaustionDays,
+    totalDaysAnalyzed: cutoffs.length,
+    dateRange: {
+      start: startDate.toISOString().split('T')[0],
+      end: endDate.toISOString().split('T')[0]
+    }
+  };
+}
+
+export async function getCampaignsWithHourlyData(accountId: string) {
+  const result = await pool.query(
+    `SELECT DISTINCT campaign_id, campaign_name, 
+            MIN(metric_date) as first_date, 
+            MAX(metric_date) as last_date,
+            COUNT(DISTINCT metric_date) as days_with_data
+     FROM analytics_campaign_hourly 
+     WHERE account_id = $1
+     GROUP BY campaign_id, campaign_name
+     HAVING COUNT(DISTINCT metric_date) >= 7
+     ORDER BY last_date DESC`,
+    [accountId]
   );
   return result.rows;
 }

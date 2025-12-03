@@ -9,9 +9,10 @@ import { AudienceFlow } from './components/AudienceFlow';
 import { RemarketingFlow } from './components/RemarketingFlow';
 import { TargetingInspector } from './components/TargetingInspector';
 import AuditPage from './components/AuditPage';
+import DrilldownPage from './components/DrilldownPage';
 import { IdeateCanvas } from './components/IdeateCanvas';
 import LandingPage from './components/LandingPage';
-import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, ClipboardCheck, Lightbulb, Eye } from 'lucide-react';
+import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, ClipboardCheck, Lightbulb, Eye, BarChart3 } from 'lucide-react';
 
 // Audit summary type for Structure view
 interface AuditSummary {
@@ -23,7 +24,7 @@ interface AuditSummary {
 
 const App: React.FC = () => {
   const [data, setData] = useState<AccountStructure | null>(null);
-  const [viewMode, setViewMode] = useState<'TREE' | 'FLOW' | 'REMARKETING' | 'AUDIT' | 'IDEATE'>('TREE');
+  const [viewMode, setViewMode] = useState<'TREE' | 'FLOW' | 'REMARKETING' | 'AUDIT' | 'DRILLDOWN' | 'IDEATE'>('TREE');
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>(() => {
     return localStorage.getItem('selectedAccountId') || '';
@@ -437,6 +438,13 @@ const App: React.FC = () => {
                   Audit
                 </button>
                 <button 
+                  onClick={() => setViewMode('DRILLDOWN')}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'DRILLDOWN' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  <BarChart3 size={16} />
+                  Drilldown
+                </button>
+                <button 
                   onClick={() => setViewMode('IDEATE')}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'IDEATE' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
                 >
@@ -456,7 +464,7 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className={`flex-1 overflow-hidden flex flex-col ${sharedCanvasToken ? 'p-0' : 'max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8'}`}>
-        {viewMode !== 'AUDIT' && viewMode !== 'IDEATE' && (
+        {viewMode !== 'AUDIT' && viewMode !== 'IDEATE' && viewMode !== 'DRILLDOWN' && (
           <div className="mb-6 flex-shrink-0">
             <h2 className="text-lg font-semibold text-gray-800 mb-1">
               {viewMode === 'TREE' ? 'Account Hierarchy' : 
@@ -488,6 +496,12 @@ const App: React.FC = () => {
               shareToken={sharedCanvasToken || undefined} 
               canvasId={importedCanvasId || undefined}
               key={importedCanvasId || 'default'}
+            />
+          ) : viewMode === 'DRILLDOWN' ? (
+            <DrilldownPage 
+              accountId={selectedAccountId}
+              accountName={accounts.find(a => a.id === selectedAccountId)?.name || `Account ${selectedAccountId}`}
+              onBack={() => setViewMode('AUDIT')}
             />
           ) : viewMode === 'AUDIT' ? (
             <AuditPage 
