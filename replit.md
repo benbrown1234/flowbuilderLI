@@ -11,7 +11,12 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
 
 **Core Features & Implementations:**
 *   **Account Visualization**:
-    *   **Structure Tree**: Hierarchical view of campaign groups, campaigns, and ads.
+    *   **Structure Tree**: Hierarchical view of campaign groups, campaigns, and ads with integrated audit performance display.
+        - **Audit View Toggle**: Switch between Audit View (color-coded by performance) and standard view.
+        - **Color-Coded Nodes**: Red border = Needs Attention, Amber border = Mild Issues, Green border = Performing Well.
+        - **Inline Issues**: Campaign cards show top 2 issues with truncated display and "+N more" indicator.
+        - **Positive Signals**: Performing campaigns show their top positive indicator.
+        - **Lightweight Loading**: Uses cached database data via `/api/audit/structure-summary` endpoint (no live API calls).
     *   **Targeting Flow**: Visualizes audience composition.
     *   **Remarketing Flow**: Illustrates campaign and audience flow through a 3-column marketing funnel (Cold Campaigns → Remarketing Audiences → Remarketing Campaigns), showing connections and audience movement.
 *   **Account Audit**:

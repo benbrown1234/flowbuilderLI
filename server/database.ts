@@ -813,4 +813,61 @@ export async function getLatestMetricsDate(accountId: string): Promise<Date | nu
   return result.rows[0]?.latest_date || null;
 }
 
+// Update scoring status for campaigns
+export async function updateCampaignScoring(
+  accountId: string,
+  campaignId: string,
+  scoringStatus: string,
+  issues: string[],
+  positiveSignals: string[]
+) {
+  await pool.query(
+    `UPDATE audit_campaigns 
+     SET scoring_status = $1, scoring_issues = $2, scoring_positive_signals = $3
+     WHERE account_id = $4 AND campaign_id = $5`,
+    [scoringStatus, JSON.stringify(issues), JSON.stringify(positiveSignals), accountId, campaignId]
+  );
+}
+
+// Update scoring status for creatives
+export async function updateCreativeScoring(
+  accountId: string,
+  creativeId: string,
+  scoringStatus: string,
+  issues: string[]
+) {
+  await pool.query(
+    `UPDATE audit_creatives 
+     SET scoring_status = $1, scoring_issues = $2
+     WHERE account_id = $3 AND creative_id = $4`,
+    [scoringStatus, JSON.stringify(issues), accountId, creativeId]
+  );
+}
+
+// Get precomputed scoring data for structure view
+export async function getStructureScoringData(accountId: string) {
+  const [campaigns, creatives] = await Promise.all([
+    pool.query(
+      `SELECT campaign_id, scoring_status, 
+              COALESCE(scoring_issues, '[]'::jsonb) as scoring_issues, 
+              COALESCE(scoring_positive_signals, '[]'::jsonb) as scoring_positive_signals 
+       FROM audit_campaigns 
+       WHERE account_id = $1 AND scoring_status IS NOT NULL`,
+      [accountId]
+    ),
+    pool.query(
+      `SELECT creative_id, campaign_id, scoring_status, 
+              COALESCE(scoring_issues, '[]'::jsonb) as scoring_issues 
+       FROM audit_creatives 
+       WHERE account_id = $1 AND scoring_status IS NOT NULL`,
+      [accountId]
+    )
+  ]);
+  
+  return {
+    campaigns: campaigns.rows,
+    creatives: creatives.rows
+  };
+}
+
 export default pool;

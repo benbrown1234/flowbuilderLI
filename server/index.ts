@@ -45,7 +45,10 @@ import {
   saveCreativeDailyMetrics,
   getCampaignDailyMetrics,
   getCreativeDailyMetrics,
-  getLatestMetricsDate
+  getLatestMetricsDate,
+  updateCampaignScoring,
+  updateCreativeScoring,
+  getStructureScoringData
 } from './database.js';
 import { runAuditRules, calculateAccountScore } from './auditRules.js';
 
@@ -1865,6 +1868,212 @@ app.get('/api/audit/account/:accountId', requireAuth, async (req, res) => {
   }
 });
 
+// Helper function to compute and save scoring status for Structure view caching
+async function computeAndSaveScoringStatus(accountId: string, campaignMetrics: any[], creativeMetrics: any[]) {
+  const pctChange = (current: number, previous: number): number => {
+    if (previous === 0) return current > 0 ? 100 : 0;
+    return ((current - previous) / previous) * 100;
+  };
+  
+  const now = new Date();
+  const currentPeriodEnd = now;
+  const currentPeriodStart = new Date(now.getTime() - 28 * 24 * 60 * 60 * 1000);
+  const previousPeriodEnd = new Date(currentPeriodStart.getTime() - 1);
+  const previousPeriodStart = new Date(currentPeriodStart.getTime() - 28 * 24 * 60 * 60 * 1000);
+  
+  // Aggregate campaign metrics
+  const currentPeriodCampaigns = new Map<string, any>();
+  const previousPeriodCampaigns = new Map<string, any>();
+  
+  for (const m of campaignMetrics) {
+    const metricDate = new Date(m.metricDate);
+    const campaignId = m.campaignId;
+    
+    const initCampaign = () => ({
+      impressions: 0,
+      clicks: 0,
+      spend: 0,
+      conversions: 0,
+      activeDays: new Set<string>()
+    });
+    
+    if (metricDate >= currentPeriodStart && metricDate <= currentPeriodEnd) {
+      if (!currentPeriodCampaigns.has(campaignId)) {
+        currentPeriodCampaigns.set(campaignId, initCampaign());
+      }
+      const c = currentPeriodCampaigns.get(campaignId)!;
+      c.impressions += m.impressions || 0;
+      c.clicks += m.clicks || 0;
+      c.spend += m.spend || 0;
+      c.conversions += m.conversions || 0;
+      c.activeDays.add(metricDate.toISOString().split('T')[0]);
+    }
+    
+    if (metricDate >= previousPeriodStart && metricDate <= previousPeriodEnd) {
+      if (!previousPeriodCampaigns.has(campaignId)) {
+        previousPeriodCampaigns.set(campaignId, initCampaign());
+      }
+      const c = previousPeriodCampaigns.get(campaignId)!;
+      c.impressions += m.impressions || 0;
+      c.clicks += m.clicks || 0;
+      c.spend += m.spend || 0;
+      c.conversions += m.conversions || 0;
+      c.activeDays.add(metricDate.toISOString().split('T')[0]);
+    }
+  }
+  
+  // Calculate account averages
+  let accountTotalClicks = 0, accountTotalSpend = 0;
+  for (const [, c] of currentPeriodCampaigns) {
+    accountTotalClicks += c.clicks;
+    accountTotalSpend += c.spend;
+  }
+  const accountAvgCpc = accountTotalClicks > 0 ? accountTotalSpend / accountTotalClicks : 0;
+  
+  // Score and save campaigns
+  for (const [campaignId, c] of currentPeriodCampaigns) {
+    const prev = previousPeriodCampaigns.get(campaignId);
+    const issues: string[] = [];
+    const positiveSignals: string[] = [];
+    let negativeScore = 0;
+    let positiveScore = 0;
+    
+    // Low volume filter
+    if (c.impressions < 1000 || c.spend < 20 || c.activeDays.size < 3) {
+      await updateCampaignScoring(accountId, campaignId, 'low_volume', [], []);
+      continue;
+    }
+    
+    const ctr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
+    const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
+    const cpc = c.clicks > 0 ? c.spend / c.clicks : 0;
+    const prevCpc = prev && prev.clicks > 0 ? prev.spend / prev.clicks : 0;
+    
+    // CTR scoring
+    if (prev && prevCtr > 0) {
+      const ctrChange = pctChange(ctr, prevCtr);
+      if (ctrChange < -20) {
+        negativeScore -= 2;
+        issues.push(`CTR down ${Math.abs(ctrChange).toFixed(0)}%`);
+      } else if (ctrChange >= 20) {
+        positiveScore += 1;
+        positiveSignals.push(`CTR up ${ctrChange.toFixed(0)}%`);
+      }
+    }
+    
+    if (ctr < 0.3) {
+      negativeScore -= 2;
+      issues.push(`Low CTR (${ctr.toFixed(2)}%)`);
+    } else if (ctr < 0.4) {
+      negativeScore -= 1;
+      issues.push(`CTR below 0.4%`);
+    }
+    
+    // CPC scoring
+    if (accountAvgCpc > 0 && cpc > 0) {
+      const cpcVsAccount = ((cpc - accountAvgCpc) / accountAvgCpc) * 100;
+      if (cpcVsAccount > 30) {
+        negativeScore -= 2;
+        issues.push(`CPC ${cpcVsAccount.toFixed(0)}% above avg`);
+      } else if (cpcVsAccount > 15) {
+        negativeScore -= 1;
+        issues.push(`CPC ${cpcVsAccount.toFixed(0)}% above avg`);
+      } else if (cpcVsAccount <= -10) {
+        positiveScore += 1;
+        positiveSignals.push(`CPC ${Math.abs(cpcVsAccount).toFixed(0)}% below avg`);
+      }
+    }
+    
+    if (prev && prevCpc > 0) {
+      const cpcChange = pctChange(cpc, prevCpc);
+      if (cpcChange > 25) {
+        negativeScore -= 2;
+        issues.push(`CPC up ${cpcChange.toFixed(0)}%`);
+      } else if (cpcChange > 20) {
+        negativeScore -= 1;
+        issues.push(`CPC up ${cpcChange.toFixed(0)}%`);
+      }
+    }
+    
+    // Determine status
+    const effectivePositive = Math.min(positiveScore, 2);
+    const finalScore = negativeScore + effectivePositive;
+    
+    let scoringStatus: string;
+    if (finalScore <= -3) {
+      scoringStatus = 'needs_attention';
+    } else if (finalScore < 0) {
+      scoringStatus = 'mild_issues';
+    } else {
+      scoringStatus = 'performing_well';
+    }
+    
+    await updateCampaignScoring(accountId, campaignId, scoringStatus, issues, positiveSignals);
+  }
+  
+  // Score and save creatives
+  const currentPeriodAds = new Map<string, any>();
+  const previousPeriodAds = new Map<string, any>();
+  
+  for (const m of creativeMetrics) {
+    const metricDate = new Date(m.metricDate);
+    const creativeId = m.creativeId;
+    const campaignId = m.campaignId;
+    
+    const initAd = () => ({
+      campaignId,
+      impressions: 0,
+      clicks: 0,
+      conversions: 0
+    });
+    
+    if (metricDate >= currentPeriodStart && metricDate <= currentPeriodEnd) {
+      if (!currentPeriodAds.has(creativeId)) {
+        currentPeriodAds.set(creativeId, initAd());
+      }
+      const a = currentPeriodAds.get(creativeId)!;
+      a.impressions += m.impressions || 0;
+      a.clicks += m.clicks || 0;
+      a.conversions += m.conversions || 0;
+    }
+    
+    if (metricDate >= previousPeriodStart && metricDate <= previousPeriodEnd) {
+      if (!previousPeriodAds.has(creativeId)) {
+        previousPeriodAds.set(creativeId, initAd());
+      }
+      const a = previousPeriodAds.get(creativeId)!;
+      a.impressions += m.impressions || 0;
+      a.clicks += m.clicks || 0;
+      a.conversions += m.conversions || 0;
+    }
+  }
+  
+  for (const [adId, a] of currentPeriodAds) {
+    const prev = previousPeriodAds.get(adId);
+    const issues: string[] = [];
+    
+    if (a.impressions < 500 || a.clicks < 10 || !prev || prev.impressions < 100) {
+      await updateCreativeScoring(accountId, adId, 'insufficient_data', []);
+      continue;
+    }
+    
+    const ctr = a.impressions > 0 ? (a.clicks / a.impressions) * 100 : 0;
+    const prevCtr = prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
+    
+    if (prevCtr > 0) {
+      const ctrChange = pctChange(ctr, prevCtr);
+      if (ctrChange < -20) {
+        issues.push(`CTR down ${Math.abs(ctrChange).toFixed(0)}%`);
+      }
+    }
+    
+    const scoringStatus = issues.length > 0 ? 'needs_attention' : 'performing_well';
+    await updateCreativeScoring(accountId, adId, scoringStatus, issues);
+  }
+  
+  console.log(`Saved scoring for ${currentPeriodCampaigns.size} campaigns and ${currentPeriodAds.size} ads`);
+}
+
 // Staggered sync function - processes API calls with delays
 async function runAuditSync(sessionId: string, accountId: string, accountName: string) {
   console.log(`\n=== Starting audit sync for account ${accountId} (${accountName}) ===`);
@@ -2126,6 +2335,10 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
       await saveCreativeDailyMetrics(accountId, creativeMetrics);
     }
     
+    // Compute and save scoring status for Structure view caching
+    console.log('Computing and saving scoring status...');
+    await computeAndSaveScoringStatus(accountId, campaignMetrics, creativeMetrics);
+    
     await updateAuditAccountSyncStatus(accountId, 'completed');
     console.log(`=== Audit sync completed for account ${accountId} ===\n`);
     
@@ -2355,6 +2568,10 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
       console.log(`Saving ${creativeMetrics.length} creative daily metrics...`);
       await saveCreativeDailyMetrics(accountId, creativeMetrics);
     }
+    
+    // Compute and save scoring status for Structure view caching
+    console.log('Computing and saving scoring status...');
+    await computeAndSaveScoringStatus(accountId, campaignMetrics, creativeMetrics);
     
     await updateAuditAccountSyncStatus(accountId, 'completed');
     console.log(`=== Audit sync completed for account ${accountId} ===\n`);
@@ -3489,6 +3706,86 @@ app.delete('/api/audit/account/:accountId', requireAuth, async (req, res) => {
   } catch (err: any) {
     console.error('Audit remove error:', err.message);
     res.status(500).json({ error: 'Failed to remove audit account' });
+  }
+});
+
+// Lightweight audit summary for Structure view - returns scoring status without heavy processing
+app.get('/api/audit/structure-summary/:accountId', requireAuth, async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    
+    // Check if account is opted into audit
+    const auditAccount = await getAuditAccount(accountId);
+    if (!auditAccount) {
+      return res.json({ 
+        hasAuditData: false,
+        campaigns: {},
+        ads: {},
+        lastSyncAt: null
+      });
+    }
+    
+    // Get precomputed scoring data from database (lightweight, no recomputation)
+    const scoringData = await getStructureScoringData(accountId);
+    
+    // If no scoring data, return empty (audit hasn't run yet)
+    if (!scoringData.campaigns.length && !scoringData.creatives.length) {
+      return res.json({
+        hasAuditData: true,
+        campaigns: {},
+        ads: {},
+        lastSyncAt: auditAccount.last_sync_at,
+        noMetrics: true
+      });
+    }
+    
+    // Build lightweight summary from precomputed data
+    const campaignsMap: Record<string, { scoringStatus: string; issues: string[]; positiveSignals: string[] }> = {};
+    const adsMap: Record<string, { scoringStatus: string; issues: string[]; campaignId: string }> = {};
+    
+    for (const c of scoringData.campaigns) {
+      // Ensure arrays are properly parsed (handle both string JSON and already-parsed arrays)
+      let issues = c.scoring_issues;
+      let positiveSignals = c.scoring_positive_signals;
+      
+      if (typeof issues === 'string') {
+        try { issues = JSON.parse(issues); } catch { issues = []; }
+      }
+      if (typeof positiveSignals === 'string') {
+        try { positiveSignals = JSON.parse(positiveSignals); } catch { positiveSignals = []; }
+      }
+      
+      campaignsMap[c.campaign_id] = {
+        scoringStatus: c.scoring_status,
+        issues: Array.isArray(issues) ? issues : [],
+        positiveSignals: Array.isArray(positiveSignals) ? positiveSignals : []
+      };
+    }
+    
+    for (const a of scoringData.creatives) {
+      // Ensure arrays are properly parsed
+      let issues = a.scoring_issues;
+      if (typeof issues === 'string') {
+        try { issues = JSON.parse(issues); } catch { issues = []; }
+      }
+      
+      adsMap[a.creative_id] = {
+        scoringStatus: a.scoring_status,
+        issues: Array.isArray(issues) ? issues : [],
+        campaignId: a.campaign_id
+      };
+    }
+    
+    return res.json({
+      hasAuditData: true,
+      campaigns: campaignsMap,
+      ads: adsMap,
+      lastSyncAt: auditAccount.last_sync_at
+    });
+    
+  } catch (err: any) {
+    console.error('Audit structure-summary error:', err.message);
+    res.status(500).json({ error: 'Failed to get audit summary' });
   }
 });
 

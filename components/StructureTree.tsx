@@ -2,21 +2,65 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AccountStructure, NodeType, TargetingSummary, CreativeNode, CampaignNode, GroupNode } from '../types';
 import { getTreeGraph, TreeNode } from '../services/linkedinLogic';
-import { Folder, LayoutGrid, FileImage, FileVideo, Globe, Briefcase, Plus, Minus, Maximize, Move, Lightbulb, Loader2 } from 'lucide-react';
+import { Folder, LayoutGrid, FileImage, FileVideo, Globe, Briefcase, Plus, Minus, Maximize, Move, Lightbulb, Loader2, AlertTriangle, CheckCircle, AlertCircle, ToggleLeft, ToggleRight } from 'lucide-react';
+
+interface AuditSummary {
+  hasAuditData: boolean;
+  campaigns: Record<string, { scoringStatus: string; issues: string[]; positiveSignals: string[] }>;
+  ads: Record<string, { scoringStatus: string; issues: string[]; campaignId: string }>;
+  lastSyncAt: string | null;
+}
 
 interface Props {
   data: AccountStructure;
   onSelect: (type: NodeType, name: string, targeting?: TargetingSummary, creatives?: CreativeNode[], singleCreative?: CreativeNode, objective?: string, biddingStrategy?: string, campaignId?: string) => void;
   onImportToIdeate?: (data: AccountStructure) => Promise<void>;
+  auditSummary?: AuditSummary | null;
+  showAuditView?: boolean;
+  onToggleAuditView?: () => void;
 }
 
-export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeate }) => {
+export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeate, auditSummary, showAuditView = true, onToggleAuditView }) => {
   const [graph, setGraph] = useState<ReturnType<typeof getTreeGraph> | null>(null);
   const [transform, setTransform] = useState({ x: 50, y: 50, scale: 1 });
   const [isDragging, setIsDragging] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
   const [isImporting, setIsImporting] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  
+  // Helper to get audit status for a node
+  const getAuditStatus = (nodeType: NodeType, nodeId: string) => {
+    if (!auditSummary?.hasAuditData || !showAuditView) return null;
+    
+    if (nodeType === NodeType.CAMPAIGN) {
+      return auditSummary.campaigns[nodeId] || null;
+    } else if (nodeType === NodeType.CREATIVE) {
+      return auditSummary.ads[nodeId] || null;
+    }
+    return null;
+  };
+  
+  // Get border color based on scoring status
+  const getStatusBorderClass = (status: string | undefined) => {
+    switch (status) {
+      case 'needs_attention': return 'border-red-500 border-l-4';
+      case 'mild_issues': return 'border-amber-500 border-l-4';
+      case 'performing_well': return 'border-green-500 border-l-4';
+      case 'low_volume': 
+      case 'insufficient_data': return 'border-gray-300 border-l-2';
+      default: return '';
+    }
+  };
+  
+  // Get background tint based on status
+  const getStatusBgClass = (status: string | undefined) => {
+    switch (status) {
+      case 'needs_attention': return 'bg-red-50';
+      case 'mild_issues': return 'bg-amber-50';
+      case 'performing_well': return 'bg-green-50';
+      default: return 'bg-white';
+    }
+  };
   
   const handleImportToIdeate = async () => {
     if (!onImportToIdeate || isImporting) return;
@@ -107,6 +151,43 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeat
           <div className="flex items-center gap-2 pointer-events-none"><span className="w-2 h-2 rounded-full bg-gray-500"></span> Campaign Group</div>
           <div className="flex items-center gap-2 pointer-events-none"><span className="w-2 h-2 rounded-full bg-orange-500"></span> Campaign</div>
           <div className="flex items-center gap-2 pointer-events-none"><span className="w-2 h-2 rounded-full bg-green-500"></span> Ad</div>
+          
+          {/* Audit View Toggle and Legend */}
+          {auditSummary?.hasAuditData && Object.keys(auditSummary?.campaigns || {}).length > 0 && (
+            <>
+              <div className="mt-2 pt-2 border-t border-gray-100">
+                <button
+                  onClick={onToggleAuditView}
+                  className="flex items-center gap-2 text-[10px] font-medium text-gray-600 hover:text-gray-900"
+                >
+                  {showAuditView ? <ToggleRight size={16} className="text-blue-500" /> : <ToggleLeft size={16} className="text-gray-400" />}
+                  <span>Audit View</span>
+                </button>
+              </div>
+              
+              {showAuditView && (
+                <div className="mt-1 space-y-1 text-[9px]">
+                  <div className="flex items-center gap-2 pointer-events-none">
+                    <span className="w-3 h-2 rounded-sm bg-red-500"></span> Needs Attention
+                  </div>
+                  <div className="flex items-center gap-2 pointer-events-none">
+                    <span className="w-3 h-2 rounded-sm bg-amber-500"></span> Mild Issues
+                  </div>
+                  <div className="flex items-center gap-2 pointer-events-none">
+                    <span className="w-3 h-2 rounded-sm bg-green-500"></span> Performing Well
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          
+          {/* Show message if audit is enabled but no scoring data yet */}
+          {auditSummary?.hasAuditData && Object.keys(auditSummary?.campaigns || {}).length === 0 && (
+            <div className="mt-2 pt-2 border-t border-gray-100 text-[9px] text-gray-400">
+              Audit pending sync
+            </div>
+          )}
+          
           <div className="mt-2 pt-2 border-t border-gray-100 flex items-center gap-1 text-gray-400 pointer-events-none">
             <Move size={10} /> Drag to Pan
           </div>
@@ -202,6 +283,32 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeat
             const nodeHeight = node.height || 70;
             const actualTop = node.y - (nodeHeight / 2);
             
+            // Get audit status for this node
+            const auditStatus = getAuditStatus(node.type, node.id);
+            const hasAuditStyling = auditStatus && showAuditView && auditSummary?.hasAuditData;
+            
+            // Determine node styling based on audit status
+            const getCampaignBorderClass = () => {
+              if (hasAuditStyling) {
+                return getStatusBorderClass(auditStatus.scoringStatus);
+              }
+              return 'border-orange-200 border-l-4 border-l-orange-500';
+            };
+            
+            const getCreativeBorderClass = () => {
+              if (hasAuditStyling) {
+                return getStatusBorderClass(auditStatus.scoringStatus);
+              }
+              return 'border-green-200 border-l-2 border-l-green-500';
+            };
+            
+            const getNodeBgClass = () => {
+              if (hasAuditStyling) {
+                return getStatusBgClass(auditStatus.scoringStatus);
+              }
+              return 'bg-white';
+            };
+            
             return (
             <div
               key={node.id}
@@ -213,8 +320,8 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeat
                 ${node.type !== NodeType.ACCOUNT ? 'cursor-pointer hover:scale-105' : 'cursor-default'}
                 ${node.type === NodeType.ACCOUNT ? 'bg-blue-600 border-blue-700 text-white min-h-[60px]' : ''}
                 ${node.type === NodeType.GROUP ? 'bg-white border-gray-300 min-h-[50px]' : ''}
-                ${node.type === NodeType.CAMPAIGN ? 'bg-white border-orange-200 border-l-4 border-l-orange-500' : ''}
-                ${node.type === NodeType.CREATIVE ? 'bg-white border-green-200 border-l-2 border-l-green-500 min-h-[42px]' : ''}
+                ${node.type === NodeType.CAMPAIGN ? `${getNodeBgClass()} ${getCampaignBorderClass()}` : ''}
+                ${node.type === NodeType.CREATIVE ? `${getNodeBgClass()} ${getCreativeBorderClass()} min-h-[42px]` : ''}
               `}
               style={{ 
                 left: actualLeft, 
@@ -280,6 +387,35 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeat
                   </span>
                 )
               )}
+              
+              {/* Audit Issues Display - for ads with their own issues */}
+              {node.type === NodeType.CREATIVE && hasAuditStyling && Array.isArray(auditStatus?.issues) && auditStatus.issues.length > 0 && (
+                <div className="mt-0.5 space-y-0.5">
+                  {auditStatus.issues.slice(0, 1).map((issue: string, idx: number) => (
+                    <div key={idx} className="flex items-center gap-0.5 text-[7px] text-red-600">
+                      <AlertTriangle className="w-2 h-2 flex-shrink-0" />
+                      <span className="truncate">{issue}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* Show inherited campaign issues for ads (context) */}
+              {node.type === NodeType.CREATIVE && hasAuditStyling && (auditStatus as any)?.campaignId && (
+                (() => {
+                  const campaignData = auditSummary?.campaigns[(auditStatus as any).campaignId];
+                  const hasOwnIssues = Array.isArray(auditStatus?.issues) && auditStatus.issues.length > 0;
+                  if (campaignData && campaignData.scoringStatus === 'needs_attention' && !hasOwnIssues) {
+                    return (
+                      <div className="mt-0.5 flex items-center gap-0.5 text-[7px] text-amber-600">
+                        <AlertCircle className="w-2 h-2 flex-shrink-0" />
+                        <span className="truncate">Campaign issues</span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()
+              )}
 
               {/* Optional Metadata - only for campaigns */}
               {node.type === NodeType.CAMPAIGN && (
@@ -288,6 +424,29 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeat
                   <span className={`px-1.5 rounded-full text-[8px] ${(node.data as any).status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-gray-100'}`}>
                     {(node.data as any).status}
                   </span>
+                </div>
+              )}
+              
+              {/* Audit Issues Display - for campaigns with audit data */}
+              {node.type === NodeType.CAMPAIGN && hasAuditStyling && Array.isArray(auditStatus?.issues) && auditStatus.issues.length > 0 && (
+                <div className="mt-1.5 space-y-0.5">
+                  {auditStatus.issues.slice(0, 2).map((issue: string, idx: number) => (
+                    <div key={idx} className="flex items-center gap-1 text-[8px] text-red-600">
+                      <AlertTriangle className="w-2.5 h-2.5 flex-shrink-0" />
+                      <span className="truncate">{issue}</span>
+                    </div>
+                  ))}
+                  {auditStatus.issues.length > 2 && (
+                    <div className="text-[7px] text-gray-400">+{auditStatus.issues.length - 2} more issues</div>
+                  )}
+                </div>
+              )}
+              
+              {/* Positive signals for performing campaigns */}
+              {node.type === NodeType.CAMPAIGN && hasAuditStyling && auditStatus?.scoringStatus === 'performing_well' && Array.isArray((auditStatus as any)?.positiveSignals) && (auditStatus as any).positiveSignals.length > 0 && (
+                <div className="mt-1.5 flex items-center gap-1 text-[8px] text-green-600">
+                  <CheckCircle className="w-2.5 h-2.5 flex-shrink-0" />
+                  <span className="truncate">{(auditStatus as any).positiveSignals[0]}</span>
                 </div>
               )}
             </div>

@@ -13,6 +13,14 @@ import { IdeateCanvas } from './components/IdeateCanvas';
 import LandingPage from './components/LandingPage';
 import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, ClipboardCheck, Lightbulb, Eye } from 'lucide-react';
 
+// Audit summary type for Structure view
+interface AuditSummary {
+  hasAuditData: boolean;
+  campaigns: Record<string, { scoringStatus: string; issues: string[]; positiveSignals: string[] }>;
+  ads: Record<string, { scoringStatus: string; issues: string[]; campaignId: string }>;
+  lastSyncAt: string | null;
+}
+
 const App: React.FC = () => {
   const [data, setData] = useState<AccountStructure | null>(null);
   const [viewMode, setViewMode] = useState<'TREE' | 'FLOW' | 'REMARKETING' | 'AUDIT' | 'IDEATE'>('TREE');
@@ -28,6 +36,8 @@ const App: React.FC = () => {
   const [importedCanvasId, setImportedCanvasId] = useState<string | null>(null);
   const [visualizeDropdownOpen, setVisualizeDropdownOpen] = useState(false);
   const visualizeDropdownRef = useRef<HTMLDivElement>(null);
+  const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
+  const [showAuditView, setShowAuditView] = useState<boolean>(true); // Default to audit view when available
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -150,6 +160,26 @@ const App: React.FC = () => {
     
     loadData();
   }, [selectedAccountId, isAuthenticated, activeOnly]);
+
+  // Fetch audit summary for Structure view (only from database, no LinkedIn API calls)
+  useEffect(() => {
+    const loadAuditSummary = async () => {
+      if (!selectedAccountId || !isAuthenticated) {
+        setAuditSummary(null);
+        return;
+      }
+      
+      try {
+        const response = await axios.get(`/api/audit/structure-summary/${selectedAccountId}`);
+        setAuditSummary(response.data);
+      } catch (err: any) {
+        console.warn('Could not load audit summary:', err.message);
+        setAuditSummary(null);
+      }
+    };
+    
+    loadAuditSummary();
+  }, [selectedAccountId, isAuthenticated]);
 
   const handleLogin = async () => {
     try {
@@ -461,6 +491,9 @@ const App: React.FC = () => {
                   data={data}
                   onSelect={handleNodeSelect}
                   onImportToIdeate={handleImportToIdeate}
+                  auditSummary={auditSummary}
+                  showAuditView={showAuditView}
+                  onToggleAuditView={() => setShowAuditView(!showAuditView)}
                 />
               )}
 
