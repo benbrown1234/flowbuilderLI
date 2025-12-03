@@ -76,10 +76,19 @@ interface CampaignItem {
   hasLan?: boolean;
   hasExpansion?: boolean;
   hasMaximizeDelivery?: boolean;
+  // New metrics
+  frequency?: number | null;
+  audiencePenetration?: number | null;
+  cpcVsAccount?: number | null;
+  cpaVsAccount?: number | null;
+  // Scoring breakdown
   score?: number;
+  negativeScore?: number;
+  positiveScore?: number;
   scoringStatus?: ScoringStatus;
   isPerformingWell: boolean;
   issues: string[];
+  positiveSignals?: string[];
   flags?: string[];
 }
 
@@ -446,6 +455,22 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
           </a>
         </div>
         
+        {/* Score Breakdown */}
+        {(campaign.negativeScore !== undefined || campaign.positiveScore !== undefined) && (
+          <div className="bg-gray-100 rounded-lg p-3 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="text-gray-600">Score Breakdown</span>
+              <span className="font-medium">
+                <span className="text-red-600">{campaign.negativeScore || 0}</span>
+                {(campaign.positiveScore || 0) > 0 && (
+                  <span className="text-green-600 ml-1">+{campaign.positiveScore}</span>
+                )}
+                <span className="text-gray-900 ml-2">= {campaign.score}</span>
+              </span>
+            </div>
+          </div>
+        )}
+        
         {campaign.issues.length > 0 && (
           <div className="bg-red-50 rounded-lg p-4 border border-red-100">
             <h5 className="font-medium text-red-800 mb-2 flex items-center gap-2">
@@ -455,6 +480,21 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
               {campaign.issues.map((issue, idx) => (
                 <li key={idx} className="text-sm text-red-700 flex items-start gap-2">
                   <span className="text-red-400 mt-1">•</span> {issue}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        
+        {campaign.positiveSignals && campaign.positiveSignals.length > 0 && (
+          <div className="bg-green-50 rounded-lg p-4 border border-green-100">
+            <h5 className="font-medium text-green-800 mb-2 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" /> Positive Signals
+            </h5>
+            <ul className="space-y-1">
+              {campaign.positiveSignals.map((signal, idx) => (
+                <li key={idx} className="text-sm text-green-700 flex items-start gap-2">
+                  <span className="text-green-400 mt-1">•</span> {signal}
                 </li>
               ))}
             </ul>
@@ -557,6 +597,64 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
             />
           </div>
         </div>
+        
+        {/* Advanced Metrics */}
+        {(campaign.frequency !== null || campaign.audiencePenetration !== null || campaign.cpcVsAccount !== null) && (
+          <div>
+            <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+              <Target className="w-4 h-4" /> Advanced Metrics
+            </h5>
+            <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+              {campaign.frequency !== null && campaign.frequency !== undefined && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Frequency</span>
+                  <span className={`font-medium ${
+                    campaign.frequency > 6 ? 'text-red-600' :
+                    campaign.frequency > 4 ? 'text-amber-600' :
+                    campaign.frequency >= 1.5 && campaign.frequency <= 3 ? 'text-green-600' : 'text-gray-900'
+                  }`}>
+                    {campaign.frequency.toFixed(1)}x
+                  </span>
+                </div>
+              )}
+              {campaign.audiencePenetration !== null && campaign.audiencePenetration !== undefined && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Audience Penetration</span>
+                  <span className={`font-medium ${
+                    campaign.audiencePenetration < 10 ? 'text-red-600' :
+                    campaign.audiencePenetration < 20 ? 'text-amber-600' :
+                    campaign.audiencePenetration > 60 ? 'text-green-600' : 'text-gray-900'
+                  }`}>
+                    {campaign.audiencePenetration.toFixed(0)}%
+                  </span>
+                </div>
+              )}
+              {campaign.cpcVsAccount !== null && campaign.cpcVsAccount !== undefined && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">CPC vs Account Avg</span>
+                  <span className={`font-medium ${
+                    campaign.cpcVsAccount > 30 ? 'text-red-600' :
+                    campaign.cpcVsAccount > 15 ? 'text-amber-600' :
+                    campaign.cpcVsAccount <= -10 ? 'text-green-600' : 'text-gray-900'
+                  }`}>
+                    {campaign.cpcVsAccount > 0 ? '+' : ''}{campaign.cpcVsAccount.toFixed(0)}%
+                  </span>
+                </div>
+              )}
+              {campaign.cpaVsAccount !== null && campaign.cpaVsAccount !== undefined && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">CPA vs Account Avg</span>
+                  <span className={`font-medium ${
+                    campaign.cpaVsAccount > 25 ? 'text-red-600' :
+                    campaign.cpaVsAccount <= -15 ? 'text-green-600' : 'text-gray-900'
+                  }`}>
+                    {campaign.cpaVsAccount > 0 ? '+' : ''}{campaign.cpaVsAccount.toFixed(0)}%
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         
         {campaign.budgetUtilization !== undefined && (
           <div>
