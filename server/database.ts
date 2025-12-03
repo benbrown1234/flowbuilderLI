@@ -127,7 +127,7 @@ export async function initDatabase() {
         cpm DECIMAL(10,4),
         approximate_member_reach BIGINT DEFAULT NULL,
         audience_penetration DECIMAL(10,6) DEFAULT NULL,
-        average_dwell_time BIGINT DEFAULT NULL,
+        average_dwell_time DECIMAL(10,4) DEFAULT NULL,
         created_at TIMESTAMP DEFAULT NOW(),
         UNIQUE(account_id, campaign_id, metric_date)
       );
@@ -135,7 +135,7 @@ export async function initDatabase() {
       -- Add columns if they don't exist (for migration)
       ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS approximate_member_reach BIGINT DEFAULT NULL;
       ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS audience_penetration DECIMAL(10,6) DEFAULT NULL;
-      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS average_dwell_time BIGINT DEFAULT NULL;
+      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS average_dwell_time DECIMAL(10,4) DEFAULT NULL;
 
       -- Daily analytics for ads/creatives
       CREATE TABLE IF NOT EXISTS analytics_creative_daily (
