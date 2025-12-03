@@ -2610,7 +2610,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       }
       // Track average dwell time (weighted by impressions)
       if (m.average_dwell_time !== null && m.average_dwell_time !== undefined && m.impressions > 0) {
-        agg.averageDwellTimeSum += (parseInt(m.average_dwell_time) || 0) * (parseInt(m.impressions) || 0);
+        agg.averageDwellTimeSum += (parseFloat(m.average_dwell_time) || 0) * (parseInt(m.impressions) || 0);
         agg.averageDwellTimeCount += parseInt(m.impressions) || 0;
       }
     }
