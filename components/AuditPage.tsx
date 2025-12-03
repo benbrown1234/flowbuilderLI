@@ -1127,6 +1127,8 @@ function SyncStatusBanner({ status, lastSync, onRefresh, isRefreshing, syncFrequ
   );
 }
 
+type StatusTab = 'needs_attention' | 'mild_issues' | 'performing_well';
+
 export default function AuditPage({ accountId, accountName, isLiveData }: AuditPageProps) {
   const [auditStatus, setAuditStatus] = useState<AuditAccountStatus | null>(null);
   const [data, setData] = useState<AuditData | null>(null);
@@ -1138,6 +1140,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
   const [showModeDropdown, setShowModeDropdown] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState<CampaignItem | null>(null);
   const [selectedAd, setSelectedAd] = useState<AdItem | null>(null);
+  const [activeTab, setActiveTab] = useState<StatusTab>('needs_attention');
 
   const checkAuditStatus = useCallback(async () => {
     if (!accountId) return;
@@ -1349,13 +1352,63 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
     return null;
   }
 
-  const performingWellCampaigns = data.campaigns.filter(c => c.scoringStatus === 'performing_well');
-  const mildIssuesCampaigns = data.campaigns.filter(c => c.scoringStatus === 'mild_issues');
-  const needsAttentionCampaigns = data.campaigns.filter(c => c.scoringStatus === 'needs_attention');
+  // Filter campaigns and ads by status
+  const campaignsByStatus = {
+    needs_attention: data.campaigns.filter(c => c.scoringStatus === 'needs_attention'),
+    mild_issues: data.campaigns.filter(c => c.scoringStatus === 'mild_issues'),
+    performing_well: data.campaigns.filter(c => c.scoringStatus === 'performing_well')
+  };
+  
+  const adsByStatus = {
+    needs_attention: data.ads.filter(a => a.scoringStatus === 'needs_attention'),
+    mild_issues: data.ads.filter(a => a.scoringStatus === 'insufficient_data'), // Map insufficient to mild for display
+    performing_well: data.ads.filter(a => a.scoringStatus === 'performing_well')
+  };
+  
   const otherCampaigns = data.campaigns.filter(c => ['paused', 'low_volume', 'new_campaign'].includes(c.scoringStatus || ''));
-  const performingWellAds = data.ads.filter(a => a.scoringStatus === 'performing_well');
-  const needsAttentionAds = data.ads.filter(a => a.scoringStatus === 'needs_attention');
-  const insufficientDataAds = data.ads.filter(a => a.scoringStatus === 'insufficient_data');
+
+  // Get counts for tab badges
+  const getCounts = (status: StatusTab) => ({
+    campaigns: campaignsByStatus[status].length,
+    ads: adsByStatus[status].length
+  });
+
+  // Tab styling
+  const getTabStyle = (tab: StatusTab) => {
+    const isActive = activeTab === tab;
+    const baseStyle = 'flex-1 py-3 px-4 text-center font-medium transition-all rounded-lg flex items-center justify-center gap-2';
+    
+    if (tab === 'needs_attention') {
+      return `${baseStyle} ${isActive ? 'bg-red-100 text-red-800 border-2 border-red-300' : 'bg-white text-gray-600 border border-gray-200 hover:bg-red-50'}`;
+    }
+    if (tab === 'mild_issues') {
+      return `${baseStyle} ${isActive ? 'bg-amber-100 text-amber-800 border-2 border-amber-300' : 'bg-white text-gray-600 border border-gray-200 hover:bg-amber-50'}`;
+    }
+    return `${baseStyle} ${isActive ? 'bg-green-100 text-green-800 border-2 border-green-300' : 'bg-white text-gray-600 border border-gray-200 hover:bg-green-50'}`;
+  };
+
+  const getTabIcon = (tab: StatusTab) => {
+    if (tab === 'needs_attention') return <XCircle className="w-5 h-5" />;
+    if (tab === 'mild_issues') return <AlertTriangle className="w-5 h-5" />;
+    return <CheckCircle2 className="w-5 h-5" />;
+  };
+
+  const getTabLabel = (tab: StatusTab) => {
+    if (tab === 'needs_attention') return 'Needs Attention';
+    if (tab === 'mild_issues') return 'Mild Issues';
+    return 'Performing Well';
+  };
+
+  const getEmptyMessage = (tab: StatusTab, type: 'campaigns' | 'ads') => {
+    if (tab === 'needs_attention') return `No ${type} need urgent attention`;
+    if (tab === 'mild_issues') {
+      return type === 'ads' ? 'No ads with insufficient data' : `No ${type} with mild issues`;
+    }
+    return `No ${type} performing well yet`;
+  };
+
+  const currentCampaigns = campaignsByStatus[activeTab];
+  const currentAds = adsByStatus[activeTab];
 
   return (
     <div className="h-full overflow-auto p-6">
@@ -1367,194 +1420,146 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
         syncFrequency={data.syncFrequency}
       />
       
-      <div className="flex items-center justify-between mb-4">
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-start gap-2 flex-1 mr-4">
-          <Info className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
-          <p className="text-xs text-gray-600">
-            Budget alerts flag campaigns spending less than 80% of their daily budget (requires 7 days of activity).
-          </p>
+      {/* Alerts Banner (if any) */}
+      {data.alerts.length > 0 && (
+        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-amber-800">
+                {data.alerts.length} alert{data.alerts.length > 1 ? 's' : ''} require attention
+              </p>
+              <p className="text-xs text-amber-600 mt-1">
+                {data.alerts[0].message}
+                {data.alerts.length > 1 && ` (+${data.alerts.length - 1} more)`}
+              </p>
+            </div>
+          </div>
         </div>
-        
-        <div className="relative">
-          <button
-            onClick={() => setShowModeDropdown(!showModeDropdown)}
-            className="inline-flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
-          >
-            <Calendar className="w-4 h-4 text-gray-500" />
-            <span className="font-medium">{getComparisonModeLabel(comparisonMode)}</span>
-            <span className="text-gray-500 text-xs">({getComparisonModeDescription(comparisonMode)})</span>
-            <ChevronDown className="w-4 h-4 text-gray-400" />
-          </button>
+      )}
+      
+      {/* Tab Navigation */}
+      <div className="flex gap-3 mb-6">
+        {(['needs_attention', 'mild_issues', 'performing_well'] as StatusTab[]).map(tab => {
+          const counts = getCounts(tab);
+          return (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={getTabStyle(tab)}
+            >
+              {getTabIcon(tab)}
+              <span>{getTabLabel(tab)}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                activeTab === tab ? 'bg-white/50' : 'bg-gray-100'
+              }`}>
+                {counts.campaigns + counts.ads}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Two-Column Layout: Campaigns Left, Ads Right */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-8">
+        {/* Campaigns Column */}
+        <div className={`rounded-lg p-4 border ${
+          activeTab === 'needs_attention' ? 'bg-red-50 border-red-100' :
+          activeTab === 'mild_issues' ? 'bg-amber-50 border-amber-100' :
+          'bg-green-50 border-green-100'
+        }`}>
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <Target className="w-5 h-5 text-gray-600" />
+            Campaigns
+            <span className="text-sm font-normal text-gray-500">
+              ({currentCampaigns.length})
+            </span>
+          </h3>
           
-          {showModeDropdown && (
-            <div className="absolute right-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
-              <button
-                onClick={() => handleModeChange('rolling28')}
-                className={`w-full px-4 py-3 text-left hover:bg-gray-50 first:rounded-t-lg ${comparisonMode === 'rolling28' ? 'bg-blue-50' : ''}`}
-              >
-                <div className="font-medium text-sm">Rolling 28 days</div>
-                <div className="text-xs text-gray-500">Last 4 weeks vs previous 4 weeks</div>
-              </button>
-              <button
-                onClick={() => handleModeChange('fullMonth')}
-                className={`w-full px-4 py-3 text-left hover:bg-gray-50 last:rounded-b-lg border-t border-gray-100 ${comparisonMode === 'fullMonth' ? 'bg-blue-50' : ''}`}
-              >
-                <div className="font-medium text-sm">Full month</div>
-                <div className="text-xs text-gray-500">{getComparisonModeDescription('fullMonth')}</div>
-              </button>
+          {currentCampaigns.length > 0 ? (
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
+              {currentCampaigns.map(campaign => (
+                <CampaignCard 
+                  key={campaign.id} 
+                  campaign={campaign} 
+                  accountId={accountId} 
+                  showIssues={activeTab !== 'performing_well'} 
+                  onClick={() => setSelectedCampaign(campaign)} 
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              <Target className="w-10 h-10 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">{getEmptyMessage(activeTab, 'campaigns')}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Ads Column */}
+        <div className={`rounded-lg p-4 border ${
+          activeTab === 'needs_attention' ? 'bg-red-50 border-red-100' :
+          activeTab === 'mild_issues' ? 'bg-amber-50 border-amber-100' :
+          'bg-green-50 border-green-100'
+        }`}>
+          <div className="mb-4">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <MousePointer className="w-5 h-5 text-gray-600" />
+              Ads
+              <span className="text-sm font-normal text-gray-500">
+                ({currentAds.length})
+              </span>
+            </h3>
+            {activeTab === 'mild_issues' && currentAds.length > 0 && (
+              <p className="text-xs text-gray-500 mt-1 ml-7">Insufficient data for scoring</p>
+            )}
+          </div>
+          
+          {currentAds.length > 0 ? (
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
+              {currentAds.map(ad => (
+                <AdCard 
+                  key={ad.id} 
+                  ad={ad} 
+                  accountId={accountId} 
+                  showIssues={activeTab !== 'performing_well'} 
+                  onClick={() => setSelectedAd(ad)} 
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              <MousePointer className="w-10 h-10 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">{getEmptyMessage(activeTab, 'ads')}</p>
             </div>
           )}
         </div>
       </div>
-      
-      <div className="space-y-8 pb-8">
-        {data.alerts.length > 0 && (
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-amber-500" />
-              Alerts
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {data.alerts.slice(0, 6).map((alert, idx) => (
-                <AlertCard key={idx} alert={alert} accountId={accountId} />
-              ))}
-            </div>
-          </div>
-        )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Needs Attention - Red */}
-          <div className="bg-red-50 rounded-lg p-4 border border-red-100">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <XCircle className="w-5 h-5 text-red-500" />
-              Needs Attention
-              <span className="text-sm font-normal text-gray-500">
-                ({needsAttentionCampaigns.length})
-              </span>
-            </h3>
-            
-            {needsAttentionCampaigns.length > 0 ? (
-              <div className="space-y-3">
-                {needsAttentionCampaigns.map(campaign => (
-                  <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={true} onClick={() => setSelectedCampaign(campaign)} />
-                ))}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-sm">No campaigns need urgent attention.</p>
-            )}
-          </div>
-
-          {/* Mild Issues - Amber */}
-          <div className="bg-amber-50 rounded-lg p-4 border border-amber-100">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-amber-500" />
-              Mild Issues
-              <span className="text-sm font-normal text-gray-500">
-                ({mildIssuesCampaigns.length})
-              </span>
-            </h3>
-            
-            {mildIssuesCampaigns.length > 0 ? (
-              <div className="space-y-3">
-                {mildIssuesCampaigns.map(campaign => (
-                  <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={true} onClick={() => setSelectedCampaign(campaign)} />
-                ))}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-sm">No campaigns with mild issues.</p>
-            )}
-          </div>
-
-          {/* Performing Well - Green */}
-          <div className="bg-green-50 rounded-lg p-4 border border-green-100">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5 text-green-500" />
-              Performing Well
-              <span className="text-sm font-normal text-gray-500">
-                ({performingWellCampaigns.length})
-              </span>
-            </h3>
-            
-            {performingWellCampaigns.length > 0 ? (
-              <div className="space-y-3">
-                {performingWellCampaigns.slice(0, 5).map(campaign => (
-                  <CampaignCard key={campaign.id} campaign={campaign} accountId={accountId} showIssues={false} onClick={() => setSelectedCampaign(campaign)} />
-                ))}
-                {performingWellCampaigns.length > 5 && (
-                  <p className="text-sm text-gray-500 text-center">+{performingWellCampaigns.length - 5} more</p>
-                )}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-sm">No campaigns performing well yet.</p>
-            )}
-          </div>
-        </div>
-
-        {/* Ads Section */}
-        {(needsAttentionAds.length > 0 || performingWellAds.length > 0) && (
-          <div className="mt-8">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Ad Performance</h3>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {needsAttentionAds.length > 0 && (
-                <div className="bg-red-50 rounded-lg p-4 border border-red-100">
-                  <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-                    <XCircle className="w-4 h-4 text-red-500" />
-                    Ads Needing Attention ({needsAttentionAds.length})
-                  </h4>
-                  <div className="space-y-3">
-                    {needsAttentionAds.slice(0, 5).map(ad => (
-                      <AdCard key={ad.id} ad={ad} accountId={accountId} showIssues={true} onClick={() => setSelectedAd(ad)} />
-                    ))}
-                  </div>
-                </div>
-              )}
-              
-              {performingWellAds.length > 0 && (
-                <div className="bg-green-50 rounded-lg p-4 border border-green-100">
-                  <h4 className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-green-500" />
-                    Ads Performing Well ({performingWellAds.length})
-                  </h4>
-                  <div className="space-y-3">
-                    {performingWellAds.slice(0, 5).map(ad => (
-                      <AdCard key={ad.id} ad={ad} accountId={accountId} showIssues={false} onClick={() => setSelectedAd(ad)} />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Other Campaigns (Paused, Low Volume, New) */}
-        {otherCampaigns.length > 0 && (
-          <div className="mt-8">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <Info className="w-5 h-5 text-gray-400" />
-              Not Scored
-              <span className="text-sm font-normal text-gray-500">
-                ({otherCampaigns.length} campaigns)
-              </span>
-            </h3>
-            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-              <div className="space-y-2">
-                {otherCampaigns.slice(0, 5).map(campaign => (
+      {/* Not Scored Section (collapsed at bottom) */}
+      {otherCampaigns.length > 0 && (
+        <div className="mt-4 border-t pt-4">
+          <details className="group">
+            <summary className="cursor-pointer text-sm text-gray-500 hover:text-gray-700 flex items-center gap-2">
+              <Info className="w-4 h-4" />
+              {otherCampaigns.length} campaigns not scored (paused, low volume, or new)
+              <ChevronDown className="w-4 h-4 group-open:rotate-180 transition-transform" />
+            </summary>
+            <div className="mt-3 bg-gray-50 rounded-lg p-3 border border-gray-200">
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {otherCampaigns.map(campaign => (
                   <div key={campaign.id} className="flex items-center justify-between text-sm">
-                    <span className="text-gray-700">{campaign.name}</span>
-                    <span className="text-gray-500 capitalize">
-                      {campaign.scoringStatus === 'low_volume' ? 'Low volume' : 
-                       campaign.scoringStatus === 'new_campaign' ? 'New campaign' : 'Paused'}
+                    <span className="text-gray-700 truncate">{campaign.name}</span>
+                    <span className="text-xs text-gray-400 capitalize ml-2">
+                      {campaign.scoringStatus?.replace('_', ' ')}
                     </span>
                   </div>
                 ))}
-                {otherCampaigns.length > 5 && (
-                  <p className="text-sm text-gray-500 text-center">+{otherCampaigns.length - 5} more</p>
-                )}
               </div>
             </div>
-          </div>
-        )}
-      </div>
+          </details>
+        </div>
+      )}
       
       {selectedCampaign && (
         <>
