@@ -2720,6 +2720,16 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       let scoringStatus: 'needs_attention' | 'mild_issues' | 'performing_well' | 'paused' | 'low_volume' | 'new_campaign' = 'performing_well';
       let hasHardFailure = false; // Disables positive bonuses
       
+      // Track per-metric contributions for UI display
+      interface MetricContribution {
+        metric: string;
+        value: number | string | null;
+        contribution: number;
+        threshold: string;
+        applied: boolean;
+      }
+      const scoringBreakdown: MetricContribution[] = [];
+      
       // Check if paused
       if (campaignStatus === 'PAUSED') {
         scoringStatus = 'paused';
@@ -2730,150 +2740,259 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         issues.push('Low volume — trends unreliable');
       }
       else {
-        // === CTR NEGATIVE ===
-        if (pctChange(ctr4w, prevCtr4w) < -20) {
-          negativeScore -= 2;
-          issues.push(`CTR down ${Math.abs(pctChange(ctr4w, prevCtr4w)).toFixed(0)}% (4w)`);
-        }
-        if (currentWeekDays >= 3 && previousWeekDays >= 3 && pctChange(ctrWoWCurr, ctrWoWPrev) < -15) {
-          negativeScore -= 1;
-          issues.push(`CTR down ${Math.abs(pctChange(ctrWoWCurr, ctrWoWPrev)).toFixed(0)}% (WoW)`);
-        }
+        const ctrChange4w = pctChange(ctr4w, prevCtr4w);
+        
+        // === CTR ABSOLUTE ===
         if (ctr4w < 0.3) {
           negativeScore -= 2;
           issues.push(`CTR ${ctr4w.toFixed(2)}% (below 0.3%)`);
+          scoringBreakdown.push({ metric: 'CTR Absolute', value: `${ctr4w.toFixed(2)}%`, contribution: -2, threshold: '<0.3% = -2', applied: true });
         } else if (ctr4w < 0.4) {
           negativeScore -= 1;
           issues.push(`CTR ${ctr4w.toFixed(2)}% (below 0.4%)`);
+          scoringBreakdown.push({ metric: 'CTR Absolute', value: `${ctr4w.toFixed(2)}%`, contribution: -1, threshold: '<0.4% = -1', applied: true });
+        } else {
+          scoringBreakdown.push({ metric: 'CTR Absolute', value: `${ctr4w.toFixed(2)}%`, contribution: 0, threshold: '≥0.4% = 0', applied: false });
+        }
+        
+        // === CTR 4W CHANGE (NEGATIVE) ===
+        if (ctrChange4w < -20) {
+          negativeScore -= 2;
+          issues.push(`CTR down ${Math.abs(ctrChange4w).toFixed(0)}% (4w)`);
+          scoringBreakdown.push({ metric: 'CTR Change (4w)', value: `${ctrChange4w.toFixed(1)}%`, contribution: -2, threshold: '<-20% = -2', applied: true });
+        } else {
+          scoringBreakdown.push({ metric: 'CTR Change (4w)', value: `${ctrChange4w.toFixed(1)}%`, contribution: 0, threshold: '≥-20% = 0', applied: false });
+        }
+        
+        // === CTR WoW CHANGE ===
+        const ctrWoWChange = pctChange(ctrWoWCurr, ctrWoWPrev);
+        if (currentWeekDays >= 3 && previousWeekDays >= 3 && ctrWoWChange < -15) {
+          negativeScore -= 1;
+          issues.push(`CTR down ${Math.abs(ctrWoWChange).toFixed(0)}% (WoW)`);
+          scoringBreakdown.push({ metric: 'CTR Change (WoW)', value: `${ctrWoWChange.toFixed(1)}%`, contribution: -1, threshold: '<-15% = -1', applied: true });
+        } else if (currentWeekDays >= 3 && previousWeekDays >= 3) {
+          scoringBreakdown.push({ metric: 'CTR Change (WoW)', value: `${ctrWoWChange.toFixed(1)}%`, contribution: 0, threshold: '≥-15% = 0', applied: false });
+        } else {
+          scoringBreakdown.push({ metric: 'CTR Change (WoW)', value: 'N/A', contribution: 0, threshold: 'Need ≥3 days', applied: false });
         }
         
         // === CTR POSITIVE ===
-        const ctrChange4w = pctChange(ctr4w, prevCtr4w);
-        // Strong CTR with volume: +1 for ≥20% above account avg CTR, +2 for ≥35% AND ≥10 conversions
+        let ctrPositiveContrib = 0;
         if (prevCtr4w > 0 && ctrChange4w >= 20 && c.impressions >= 1000) {
           if (ctrChange4w >= 35 && c.conversions >= 10) {
+            ctrPositiveContrib = 2;
             positiveScore += 2;
             positiveSignals.push(`CTR up ${ctrChange4w.toFixed(0)}% with strong conversions`);
           } else {
+            ctrPositiveContrib = 1;
             positiveScore += 1;
             positiveSignals.push(`CTR up ${ctrChange4w.toFixed(0)}%`);
           }
         }
+        scoringBreakdown.push({ metric: 'CTR Improvement Bonus', value: `${ctrChange4w.toFixed(1)}%`, contribution: ctrPositiveContrib, threshold: '≥20% = +1, ≥35% & conv = +2', applied: ctrPositiveContrib > 0 });
         
-        // === CPC NEGATIVE ===
-        if (prevCpc4w > 0 && pctChange(cpc4w, prevCpc4w) > 25) {
+        // === CPC 4W CHANGE ===
+        const cpcChange4w = pctChange(cpc4w, prevCpc4w);
+        if (prevCpc4w > 0 && cpcChange4w > 25) {
           negativeScore -= 2;
-          issues.push(`CPC up ${pctChange(cpc4w, prevCpc4w).toFixed(0)}% (4w)`);
-        }
-        if (currentWeekDays >= 3 && previousWeekDays >= 3 && cpcWoWPrev > 0 && pctChange(cpcWoWCurr, cpcWoWPrev) > 20) {
-          negativeScore -= 1;
-          issues.push(`CPC up ${pctChange(cpcWoWCurr, cpcWoWPrev).toFixed(0)}% (WoW)`);
+          issues.push(`CPC up ${cpcChange4w.toFixed(0)}% (4w)`);
+          scoringBreakdown.push({ metric: 'CPC Change (4w)', value: `${cpcChange4w.toFixed(1)}%`, contribution: -2, threshold: '>25% = -2', applied: true });
+        } else {
+          scoringBreakdown.push({ metric: 'CPC Change (4w)', value: `${cpcChange4w.toFixed(1)}%`, contribution: 0, threshold: '≤25% = 0', applied: false });
         }
         
-        // === CPM NEGATIVE ===
-        if (prevCpm4w > 0 && pctChange(cpm4w, prevCpm4w) > 25) {
+        // === CPC WoW CHANGE ===
+        const cpcWoWChange = pctChange(cpcWoWCurr, cpcWoWPrev);
+        if (currentWeekDays >= 3 && previousWeekDays >= 3 && cpcWoWPrev > 0 && cpcWoWChange > 20) {
+          negativeScore -= 1;
+          issues.push(`CPC up ${cpcWoWChange.toFixed(0)}% (WoW)`);
+          scoringBreakdown.push({ metric: 'CPC Change (WoW)', value: `${cpcWoWChange.toFixed(1)}%`, contribution: -1, threshold: '>20% = -1', applied: true });
+        } else if (currentWeekDays >= 3 && previousWeekDays >= 3) {
+          scoringBreakdown.push({ metric: 'CPC Change (WoW)', value: `${cpcWoWChange.toFixed(1)}%`, contribution: 0, threshold: '≤20% = 0', applied: false });
+        } else {
+          scoringBreakdown.push({ metric: 'CPC Change (WoW)', value: 'N/A', contribution: 0, threshold: 'Need ≥3 days', applied: false });
+        }
+        
+        // === CPM 4W CHANGE ===
+        const cpmChange4w = pctChange(cpm4w, prevCpm4w);
+        if (prevCpm4w > 0 && cpmChange4w > 25) {
           negativeScore -= 2;
-          issues.push(`CPM up ${pctChange(cpm4w, prevCpm4w).toFixed(0)}% (4w)`);
-        }
-        if (currentWeekDays >= 3 && previousWeekDays >= 3 && cpmWoWPrev > 0 && pctChange(cpmWoWCurr, cpmWoWPrev) > 20) {
-          negativeScore -= 1;
-          issues.push(`CPM up ${pctChange(cpmWoWCurr, cpmWoWPrev).toFixed(0)}% (WoW)`);
+          issues.push(`CPM up ${cpmChange4w.toFixed(0)}% (4w)`);
+          scoringBreakdown.push({ metric: 'CPM Change (4w)', value: `${cpmChange4w.toFixed(1)}%`, contribution: -2, threshold: '>25% = -2', applied: true });
+        } else {
+          scoringBreakdown.push({ metric: 'CPM Change (4w)', value: `${cpmChange4w.toFixed(1)}%`, contribution: 0, threshold: '≤25% = 0', applied: false });
         }
         
-        // === COST EFFICIENCY VS ACCOUNT AVERAGE ===
-        // Negative: >30% above account average with no conversion lift
-        if (cpcVsAccount !== null && cpcVsAccount > 30) {
-          const conversionLift = prev && prev.conversions > 0 ? pctChange(c.conversions, prev.conversions) : 0;
-          if (conversionLift <= 0) {
-            negativeScore -= 2;
+        // === CPM WoW CHANGE ===
+        const cpmWoWChange = pctChange(cpmWoWCurr, cpmWoWPrev);
+        if (currentWeekDays >= 3 && previousWeekDays >= 3 && cpmWoWPrev > 0 && cpmWoWChange > 20) {
+          negativeScore -= 1;
+          issues.push(`CPM up ${cpmWoWChange.toFixed(0)}% (WoW)`);
+          scoringBreakdown.push({ metric: 'CPM Change (WoW)', value: `${cpmWoWChange.toFixed(1)}%`, contribution: -1, threshold: '>20% = -1', applied: true });
+        } else if (currentWeekDays >= 3 && previousWeekDays >= 3) {
+          scoringBreakdown.push({ metric: 'CPM Change (WoW)', value: `${cpmWoWChange.toFixed(1)}%`, contribution: 0, threshold: '≤20% = 0', applied: false });
+        } else {
+          scoringBreakdown.push({ metric: 'CPM Change (WoW)', value: 'N/A', contribution: 0, threshold: 'Need ≥3 days', applied: false });
+        }
+        
+        // === CPC VS ACCOUNT AVERAGE ===
+        let cpcVsAccountContrib = 0;
+        if (cpcVsAccount !== null) {
+          if (cpcVsAccount > 30) {
+            const conversionLift = prev && prev.conversions > 0 ? pctChange(c.conversions, prev.conversions) : 0;
+            if (conversionLift <= 0) {
+              cpcVsAccountContrib = -2;
+              negativeScore -= 2;
+              issues.push(`CPC ${cpcVsAccount.toFixed(0)}% above account avg`);
+            }
+          } else if (cpcVsAccount > 15) {
+            cpcVsAccountContrib = -1;
+            negativeScore -= 1;
             issues.push(`CPC ${cpcVsAccount.toFixed(0)}% above account avg`);
+          } else if (cpcVsAccount <= -10) {
+            cpcVsAccountContrib = 1;
+            positiveScore += 1;
+            positiveSignals.push(`CPC ${Math.abs(cpcVsAccount).toFixed(0)}% below account avg`);
           }
-        } else if (cpcVsAccount !== null && cpcVsAccount > 15) {
-          negativeScore -= 1;
-          issues.push(`CPC ${cpcVsAccount.toFixed(0)}% above account avg`);
-        }
-        // Positive: ≤10% below account average
-        else if (cpcVsAccount !== null && cpcVsAccount <= -10) {
-          positiveScore += 1;
-          positiveSignals.push(`CPC ${Math.abs(cpcVsAccount).toFixed(0)}% below account avg`);
+          scoringBreakdown.push({ metric: 'CPC vs Account Avg', value: `${cpcVsAccount.toFixed(0)}%`, contribution: cpcVsAccountContrib, threshold: '>30% = -2, >15% = -1, ≤-10% = +1', applied: cpcVsAccountContrib !== 0 });
+        } else {
+          scoringBreakdown.push({ metric: 'CPC vs Account Avg', value: 'N/A', contribution: 0, threshold: 'No account avg', applied: false });
         }
         
-        // === CPA EFFICIENCY POSITIVE ===
+        // === CPA VS ACCOUNT AVERAGE ===
+        let cpaVsAccountContrib = 0;
         if (c.conversions >= 5 && cpaVsAccount !== null && cpaVsAccount <= -15) {
           if (cpaVsAccount <= -25 && c.conversions >= 15) {
+            cpaVsAccountContrib = 2;
             positiveScore += 2;
             positiveSignals.push(`CPA ${Math.abs(cpaVsAccount).toFixed(0)}% below account avg (${c.conversions} conv)`);
           } else {
+            cpaVsAccountContrib = 1;
             positiveScore += 1;
             positiveSignals.push(`CPA ${Math.abs(cpaVsAccount).toFixed(0)}% below account avg`);
           }
+          scoringBreakdown.push({ metric: 'CPA vs Account Avg', value: `${cpaVsAccount.toFixed(0)}%`, contribution: cpaVsAccountContrib, threshold: '≤-25% & ≥15 conv = +2, ≤-15% = +1', applied: true });
+        } else if (cpaVsAccount !== null) {
+          scoringBreakdown.push({ metric: 'CPA vs Account Avg', value: `${cpaVsAccount.toFixed(0)}%`, contribution: 0, threshold: 'Need ≥5 conv & ≤-15%', applied: false });
+        } else {
+          scoringBreakdown.push({ metric: 'CPA vs Account Avg', value: 'N/A', contribution: 0, threshold: 'No data', applied: false });
         }
         
         // === FREQUENCY ===
+        let frequencyContrib = 0;
         if (frequency !== null) {
           if (frequency > 6) {
+            frequencyContrib = -2;
             negativeScore -= 2;
             issues.push(`High frequency (${frequency.toFixed(1)}x) - audience fatigue risk`);
           } else if (frequency > 4) {
+            frequencyContrib = -1;
             negativeScore -= 1;
             issues.push(`Elevated frequency (${frequency.toFixed(1)}x)`);
           } else if (frequency >= 1.5 && frequency <= 3 && ctrChange4w >= 0) {
-            // Healthy frequency with stable/positive CTR
+            frequencyContrib = 1;
             positiveScore += 1;
             positiveSignals.push(`Healthy frequency (${frequency.toFixed(1)}x)`);
           }
+          scoringBreakdown.push({ metric: 'Frequency', value: `${frequency.toFixed(1)}x`, contribution: frequencyContrib, threshold: '>6x = -2, >4x = -1, 1.5-3x = +1', applied: frequencyContrib !== 0 });
+        } else {
+          scoringBreakdown.push({ metric: 'Frequency', value: 'N/A', contribution: 0, threshold: 'No reach data', applied: false });
         }
         
         // === AUDIENCE PENETRATION ===
+        let penetrationContrib = 0;
         if (audiencePenetration !== null) {
           const penetrationPct = audiencePenetration * 100;
           if (penetrationPct < 10) {
+            penetrationContrib = -2;
             negativeScore -= 2;
             issues.push(`Low penetration (${penetrationPct.toFixed(0)}%) - consider broader targeting`);
           } else if (penetrationPct < 20) {
+            penetrationContrib = -1;
             negativeScore -= 1;
             issues.push(`Moderate penetration (${penetrationPct.toFixed(0)}%)`);
           } else if (penetrationPct > 60 && Math.abs(ctrChange4w) < 5) {
-            // High penetration with stable CTR is positive
+            penetrationContrib = 1;
             positiveScore += 1;
             positiveSignals.push(`Strong penetration (${penetrationPct.toFixed(0)}%) with stable CTR`);
           }
+          scoringBreakdown.push({ metric: 'Audience Penetration', value: `${penetrationPct.toFixed(0)}%`, contribution: penetrationContrib, threshold: '<10% = -2, <20% = -1, >60% = +1', applied: penetrationContrib !== 0 });
+        } else {
+          scoringBreakdown.push({ metric: 'Audience Penetration', value: 'N/A', contribution: 0, threshold: 'No data', applied: false });
         }
         
         // === Budget ===
-        // Severely under budget (auto needs_attention - HARD FAILURE)
+        let budgetContrib = 0;
         if (budgetUtilization !== undefined && budgetUtilization < 50) {
-          negativeScore -= 10; // Auto flag
+          budgetContrib = -10;
+          negativeScore -= 10;
           hasHardFailure = true;
           issues.push(`Severely under budget ($${avgDailySpend.toFixed(0)} vs $${dailyBudget!.toFixed(0)}) - check bidding`);
           alerts.push({ type: 'budget', message: `${c.campaignName} severely under budget ($${avgDailySpend.toFixed(0)} vs $${dailyBudget!.toFixed(0)} daily) - check bidding`, campaignId: c.campaignId, campaignName: c.campaignName });
+          scoringBreakdown.push({ metric: 'Budget Utilization', value: `${budgetUtilization.toFixed(0)}%`, contribution: -10, threshold: '<50% = -10 (HARD FAIL)', applied: true });
         } else if (budgetUtilization !== undefined && budgetUtilization < 80) {
+          budgetContrib = -1;
           negativeScore -= 1;
           issues.push(`Under budget ($${avgDailySpend.toFixed(0)} vs $${dailyBudget!.toFixed(0)})`);
           alerts.push({ type: 'budget', message: `${c.campaignName} under budget ($${avgDailySpend.toFixed(0)} vs $${dailyBudget!.toFixed(0)} daily, ${budgetUtilization.toFixed(0)}%)`, campaignId: c.campaignId, campaignName: c.campaignName });
+          scoringBreakdown.push({ metric: 'Budget Utilization', value: `${budgetUtilization.toFixed(0)}%`, contribution: -1, threshold: '<80% = -1', applied: true });
+        } else if (budgetUtilization !== undefined) {
+          scoringBreakdown.push({ metric: 'Budget Utilization', value: `${budgetUtilization.toFixed(0)}%`, contribution: 0, threshold: '≥80% = 0', applied: false });
+        } else {
+          scoringBreakdown.push({ metric: 'Budget Utilization', value: 'N/A', contribution: 0, threshold: 'No budget data', applied: false });
         }
         
         // === Conversions (only if enough data) ===
+        let convDeclineContrib = 0;
+        let cpaIncreaseContrib = 0;
         if (c.conversions >= 5) {
-          if (prev && prev.conversions > 0 && pctChange(c.conversions, prev.conversions) < -25) {
+          const convChange = prev && prev.conversions > 0 ? pctChange(c.conversions, prev.conversions) : 0;
+          if (prev && prev.conversions > 0 && convChange < -25) {
+            convDeclineContrib = -2;
             negativeScore -= 2;
-            issues.push(`Conversions down ${Math.abs(pctChange(c.conversions, prev.conversions)).toFixed(0)}%`);
+            issues.push(`Conversions down ${Math.abs(convChange).toFixed(0)}%`);
           }
-          if (prevCpa4w > 0 && pctChange(cpa4w, prevCpa4w) > 25) {
+          scoringBreakdown.push({ metric: 'Conversion Decline', value: `${convChange.toFixed(0)}%`, contribution: convDeclineContrib, threshold: '<-25% = -2', applied: convDeclineContrib !== 0 });
+          
+          const cpaChange = pctChange(cpa4w, prevCpa4w);
+          if (prevCpa4w > 0 && cpaChange > 25) {
+            cpaIncreaseContrib = -2;
             negativeScore -= 2;
-            issues.push(`CPA up ${pctChange(cpa4w, prevCpa4w).toFixed(0)}%`);
+            issues.push(`CPA up ${cpaChange.toFixed(0)}%`);
           }
+          scoringBreakdown.push({ metric: 'CPA Increase', value: `${cpaChange.toFixed(0)}%`, contribution: cpaIncreaseContrib, threshold: '>25% = -2', applied: cpaIncreaseContrib !== 0 });
+        } else {
+          scoringBreakdown.push({ metric: 'Conversion Decline', value: `${c.conversions} conv`, contribution: 0, threshold: 'Need ≥5 conversions', applied: false });
+          scoringBreakdown.push({ metric: 'CPA Increase', value: `${c.conversions} conv`, contribution: 0, threshold: 'Need ≥5 conversions', applied: false });
         }
         
         // === APPLY SCORING CAPS AND GUARDRAILS ===
         // Cap negative at -10 to prevent runaway penalties
+        const rawNegativeScore = negativeScore;
         negativeScore = Math.max(negativeScore, -10);
         
         // Cap positive at +2 per campaign (disable if hard failure)
+        const rawPositiveScore = positiveScore;
         const effectivePositive = hasHardFailure ? 0 : Math.min(positiveScore, 2);
         
         // Calculate final score
         const finalScore = negativeScore + effectivePositive;
+        
+        // Add guardrail summary
+        scoringBreakdown.push({ 
+          metric: 'Negative Cap Applied', 
+          value: rawNegativeScore < -10 ? `${rawNegativeScore} → -10` : 'No', 
+          contribution: rawNegativeScore < -10 ? (rawNegativeScore + 10) : 0, 
+          threshold: 'Cap at -10', 
+          applied: rawNegativeScore < -10 
+        });
+        scoringBreakdown.push({ 
+          metric: 'Positive Cap Applied', 
+          value: hasHardFailure ? `+${rawPositiveScore} → 0 (hard fail)` : (rawPositiveScore > 2 ? `+${rawPositiveScore} → +2` : 'No'), 
+          contribution: hasHardFailure ? -rawPositiveScore : (rawPositiveScore > 2 ? -(rawPositiveScore - 2) : 0), 
+          threshold: hasHardFailure ? 'Disabled on hard failure' : 'Cap at +2', 
+          applied: hasHardFailure || rawPositiveScore > 2 
+        });
         
         // Determine result tier (hard failures always needs_attention regardless of positives)
         if (hasHardFailure || finalScore <= -3) {
@@ -2886,6 +3005,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       }
       
       // Calculate final score for display
+      const rawPositiveForDisplay = positiveScore;
       const effectivePositiveScore = hasHardFailure ? 0 : Math.min(positiveScore, 2);
       const score = Math.max(negativeScore, -10) + effectivePositiveScore;
       
@@ -2934,10 +3054,13 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         audiencePenetration: audiencePenetration ? audiencePenetration * 100 : null,
         cpcVsAccount,
         cpaVsAccount,
-        // Scoring breakdown
+        // Scoring breakdown with actual applied contributions
         score,
         negativeScore,
         positiveScore: effectivePositiveScore,
+        rawPositiveScore: rawPositiveForDisplay,
+        hasHardFailure,
+        scoringBreakdown,
         scoringStatus,
         isPerformingWell: scoringStatus === 'performing_well',
         issues,

@@ -49,6 +49,14 @@ interface AuditAccountStatus {
 
 type ScoringStatus = 'needs_attention' | 'mild_issues' | 'performing_well' | 'paused' | 'low_volume' | 'new_campaign';
 
+interface MetricContribution {
+  metric: string;
+  value: number | string | null;
+  contribution: number;
+  threshold: string;
+  applied: boolean;
+}
+
 interface CampaignItem {
   id: string;
   name: string;
@@ -81,10 +89,13 @@ interface CampaignItem {
   audiencePenetration?: number | null;
   cpcVsAccount?: number | null;
   cpaVsAccount?: number | null;
-  // Scoring breakdown
+  // Scoring breakdown with actual applied contributions
   score?: number;
   negativeScore?: number;
   positiveScore?: number;
+  rawPositiveScore?: number;
+  hasHardFailure?: boolean;
+  scoringBreakdown?: MetricContribution[];
   scoringStatus?: ScoringStatus;
   isPerformingWell: boolean;
   issues: string[];
@@ -682,6 +693,107 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
             </div>
           </div>
         )}
+        
+        {/* Scoring Inputs - All Assessed Metrics (from backend) */}
+        <div>
+          <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+            <Info className="w-4 h-4" /> Scoring Inputs (All Assessed Metrics)
+          </h5>
+          <div className="bg-slate-50 rounded-lg p-3 text-xs space-y-1 border border-slate-200">
+            {/* Volume Filters first */}
+            <div className="space-y-1 pb-2 border-b border-slate-200">
+              <div className="font-medium text-slate-700">Volume Filters</div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Impressions</span>
+                <span className={campaign.impressions < 1000 ? 'text-amber-600 font-medium' : 'text-slate-700'}>
+                  {campaign.impressions.toLocaleString()} {campaign.impressions < 1000 ? '(excluded)' : '✓'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Spend</span>
+                <span className={campaign.spend < 20 ? 'text-amber-600 font-medium' : 'text-slate-700'}>
+                  ${campaign.spend.toFixed(2)} {campaign.spend < 20 ? '(excluded)' : '✓'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Active Days</span>
+                <span className={(campaign.currentWeekDays || 0) < 3 ? 'text-amber-600 font-medium' : 'text-slate-700'}>
+                  {campaign.currentWeekDays || 0} days {(campaign.currentWeekDays || 0) < 3 ? '(excluded)' : '✓'}
+                </span>
+              </div>
+            </div>
+            
+            {/* Actual Scoring Breakdown from Backend */}
+            {campaign.scoringBreakdown && campaign.scoringBreakdown.length > 0 ? (
+              <div className="space-y-1 py-2">
+                <div className="font-medium text-slate-700 pb-1">Per-Metric Contributions</div>
+                <div className="grid grid-cols-1 gap-1">
+                  {campaign.scoringBreakdown.map((item, idx) => (
+                    <div key={idx} className={`flex justify-between py-1 ${item.applied ? 'bg-slate-100 rounded px-1' : ''}`}>
+                      <div className="flex-1">
+                        <span className={item.applied ? 'font-medium text-slate-800' : 'text-slate-500'}>
+                          {item.metric}
+                        </span>
+                        <span className="text-slate-400 ml-1 text-[10px]">({item.threshold})</span>
+                      </div>
+                      <div className="text-right flex items-center gap-2">
+                        <span className="text-slate-600">{item.value}</span>
+                        {item.contribution !== 0 ? (
+                          <span className={`font-bold min-w-[30px] text-right ${
+                            item.contribution > 0 ? 'text-green-600' : 'text-red-600'
+                          }`}>
+                            {item.contribution > 0 ? '+' : ''}{item.contribution}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 min-w-[30px] text-right">0</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="py-2 text-slate-400 italic">
+                {campaign.scoringStatus === 'paused' ? 'Campaign is paused - not scored' :
+                 campaign.scoringStatus === 'low_volume' ? 'Low volume - not enough data for scoring' :
+                 'No scoring breakdown available'}
+              </div>
+            )}
+            
+            {/* Final Summary */}
+            <div className="space-y-1 pt-2 border-t border-slate-300">
+              <div className="font-medium text-slate-700">Final Score</div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Negative Total</span>
+                <span className="text-red-600 font-medium">{campaign.negativeScore || 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Positive Total</span>
+                <span className="text-green-600 font-medium">
+                  +{campaign.positiveScore || 0}
+                  {campaign.hasHardFailure && campaign.rawPositiveScore && campaign.rawPositiveScore > 0 && (
+                    <span className="text-slate-400 text-[10px] ml-1">(raw +{campaign.rawPositiveScore} disabled)</span>
+                  )}
+                  {!campaign.hasHardFailure && campaign.rawPositiveScore && campaign.rawPositiveScore > 2 && (
+                    <span className="text-slate-400 text-[10px] ml-1">(raw +{campaign.rawPositiveScore} capped)</span>
+                  )}
+                </span>
+              </div>
+              <div className="flex justify-between font-medium">
+                <span className="text-slate-700">Combined Score</span>
+                <span className={`font-bold ${
+                  (campaign.score || 0) <= -3 ? 'text-red-600' :
+                  (campaign.score || 0) < 0 ? 'text-amber-600' : 'text-green-600'
+                }`}>
+                  {campaign.score || 0}
+                </span>
+              </div>
+              <div className="text-slate-400 italic text-[10px] pt-1">
+                Tiers: ≤-3 Needs Attention | &lt;0 Mild Issues | ≥0 Performing Well
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
