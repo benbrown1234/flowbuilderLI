@@ -1,0 +1,308 @@
+================================================================================
+PYTHON METRICS AND SCORING SYSTEMS REFERENCE
+================================================================================
+
+--------------------------------------------------------------------------------
+A. METRIC DEFINITIONS & FORMULAS
+--------------------------------------------------------------------------------
+
+1. VARIANCE (POPULATION)
+   Population Variance σ² of X:
+   
+   import numpy as np
+   variance = np.sum((x - np.mean(x))**2) / len(x)
+   # Or using NumPy
+   variance = np.var(x)
+   
+   Formula: σ² = Σ(xi - μ)² / N
+
+--------------------------------------------------------------------------------
+
+2. UNBIASED (SAMPLE) VARIANCE
+   Sample Variance s² with Bessel's correction:
+   
+   variance = np.sum((x - np.mean(x))**2) / (len(x) - 1)
+   # Or
+   variance = np.var(x, ddof=1)
+   
+   Formula: s² = Σ(xi - x̄)² / (n-1)
+
+--------------------------------------------------------------------------------
+
+3. COVARIANCE
+   Covariance between X and Y:
+   
+   covariance = np.sum((x - np.mean(x)) * (y - np.mean(y))) / len(x)
+   # Or
+   covariance = np.cov(x, y)[0, 1]
+   
+   Formula: Cov(X,Y) = Σ(xi - x̄)(yi - ȳ) / n
+
+--------------------------------------------------------------------------------
+
+4. EUCLIDEAN DISTANCE
+   Distance between two vectors:
+   
+   from scipy.spatial.distance import euclidean
+   distance = euclidean(x, y)
+   # Or manually
+   distance = np.sqrt(np.sum((x - y)**2))
+   
+   Formula: d = √[Σ(xi - yi)²]
+
+--------------------------------------------------------------------------------
+
+5. COSINE SIMILARITY VS. EUCLIDEAN DISTANCE
+   
+   Cosine Similarity:
+   from sklearn.metrics.pairwise import cosine_similarity
+   similarity = cosine_similarity([x], [y])[0, 0]
+   # Or
+   cos_sim = np.dot(x, y) / (np.linalg.norm(x) * np.linalg.norm(y))
+   
+   Formula: cos(θ) = (x · y) / (||x|| × ||y||)
+   
+   Key differences:
+   - Cosine measures angle (direction), range [-1, 1]
+   - Euclidean measures magnitude (distance)
+   - Cosine is scale-invariant
+
+--------------------------------------------------------------------------------
+
+6. MEAN OF VECTORS
+   
+   Single vector:
+   mean_x = np.mean(x)
+   
+   Two vectors:
+   combined = np.concatenate([x, y])
+   mean_both = np.mean(combined)
+   
+   Element-wise mean:
+   mean_elementwise = (x + y) / 2
+
+--------------------------------------------------------------------------------
+
+7. L1 (MANHATTAN) NORM
+   
+   l1_norm = np.sum(np.abs(x))
+   # Or
+   from numpy.linalg import norm
+   l1_norm = norm(x, ord=1)
+   
+   Formula: ||x||₁ = Σ|xi|
+
+--------------------------------------------------------------------------------
+
+8. L2 (EUCLIDEAN) NORM
+   
+   l2_norm = np.sqrt(np.sum(x**2))
+   # Or
+   from numpy.linalg import norm
+   l2_norm = norm(x, ord=2)
+   l2_norm = norm(x)  # Default is L2
+   
+   Formula: ||x||₂ = √(Σxi²)
+
+--------------------------------------------------------------------------------
+
+9. DOCUMENT-TERM MATRIX (FREQUENCY)
+   
+   from sklearn.feature_extraction.text import CountVectorizer
+   
+   corpus = ['This is document one', 'This is document two']
+   vectorizer = CountVectorizer()
+   dtm = vectorizer.fit_transform(corpus)
+   dtm_array = dtm.toarray()
+   
+   Output: Matrix where rows = documents, columns = terms
+
+--------------------------------------------------------------------------------
+
+10. TF-IDF (TERM FREQUENCY-INVERSE DOCUMENT FREQUENCY)
+    
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    
+    corpus = ['This is document one', 'This is document two']
+    tfidf_vectorizer = TfidfVectorizer()
+    tfidf_matrix = tfidf_vectorizer.fit_transform(corpus)
+    
+    Formulas:
+    TF(t,d) = (count of term t in doc d) / (total terms in doc d)
+    IDF(t) = log(N / df(t)) where N = total docs, df = docs containing term
+    TF-IDF = TF × IDF
+
+================================================================================
+B. CONFUSION SCORING SYSTEM BENCHMARKS
+================================================================================
+
+CONFUSION MATRIX:
+                    Predicted
+                 Positive    Negative
+Actual Positive     TP         FN
+Actual Negative     FP         TN
+
+TP = True Positive
+FP = False Positive
+TN = True Negative
+FN = False Negative
+
+--------------------------------------------------------------------------------
+
+1. PRECISION & TRUE/FALSE POSITIVE
+   
+   from sklearn.metrics import precision_score, confusion_matrix
+   
+   precision = precision_score(y_true, y_pred)
+   # Or manually
+   precision = TP / (TP + FP)
+   
+   Question: "Of all predicted positives, how many are correct?"
+   Hint: Use when False Positives are costly
+
+--------------------------------------------------------------------------------
+
+2. RECALL (SENSITIVITY, TRUE POSITIVE RATE)
+   
+   from sklearn.metrics import recall_score
+   
+   recall = recall_score(y_true, y_pred)
+   # Or manually
+   recall = TP / (TP + FN)
+   
+   Question: "Of all actual positives, how many did we find?"
+   Hint: Use when False Negatives are costly
+
+--------------------------------------------------------------------------------
+
+3. F1 SCORE (HARMONIC MEAN OF PRECISION & RECALL)
+   
+   from sklearn.metrics import f1_score
+   
+   f1 = f1_score(y_true, y_pred)
+   # Or manually
+   f1 = 2 * (precision * recall) / (precision + recall)
+   
+   Question: "What's the balance between precision and recall?"
+   Hint: Use for imbalanced datasets
+
+--------------------------------------------------------------------------------
+
+4. ACCURACY
+   
+   from sklearn.metrics import accuracy_score
+   
+   accuracy = accuracy_score(y_true, y_pred)
+   # Or manually
+   accuracy = (TP + TN) / (TP + TN + FP + FN)
+   
+   Question: "What proportion of all predictions are correct?"
+   Hint: Can be misleading with imbalanced data
+
+--------------------------------------------------------------------------------
+
+5. SPECIFICITY (TRUE NEGATIVE RATE)
+   
+   specificity = TN / (TN + FP)
+   
+   Question: "Of all actual negatives, how many did we correctly identify?"
+
+--------------------------------------------------------------------------------
+
+6. FALSE POSITIVE RATE
+   
+   fpr = FP / (FP + TN)
+   
+   Note: FPR = 1 - Specificity
+
+--------------------------------------------------------------------------------
+
+7. ROC CURVE & AUC (AREA UNDER CURVE)
+   
+   from sklearn.metrics import roc_curve, roc_auc_score
+   
+   fpr, tpr, thresholds = roc_curve(y_true, y_pred_proba)
+   auc_score = roc_auc_score(y_true, y_pred_proba)
+   
+   Plot: TPR (y-axis) vs FPR (x-axis)
+   AUC = 1.0 is perfect, AUC = 0.5 is random
+   
+   Hint: Use to evaluate classifier performance across thresholds
+
+--------------------------------------------------------------------------------
+
+8. LOG LOSS (LOGARITHMIC LOSS)
+   
+   from sklearn.metrics import log_loss
+   
+   loss = log_loss(y_true, y_pred_proba)
+   
+   Formula: -1/N * Σ[yi*log(pi) + (1-yi)*log(1-pi)]
+   
+   Hint: Penalizes confident wrong predictions heavily
+   Lower is better
+
+--------------------------------------------------------------------------------
+
+9. MATTHEWS CORRELATION COEFFICIENT (MCC)
+   
+   from sklearn.metrics import matthews_corrcoef
+   
+   mcc = matthews_corrcoef(y_true, y_pred)
+   
+   Formula: (TP*TN - FP*FN) / √[(TP+FP)(TP+FN)(TN+FP)(TN+FN)]
+   
+   Range: [-1, 1] where 1 = perfect, 0 = random, -1 = inverse
+   Hint: Good for imbalanced datasets
+
+--------------------------------------------------------------------------------
+
+10. COHEN'S KAPPA
+    
+    from sklearn.metrics import cohen_kappa_score
+    
+    kappa = cohen_kappa_score(y_true, y_pred)
+    
+    Measures agreement between two raters
+    Range: [-1, 1]
+    - 1 = perfect agreement
+    - 0 = random agreement
+    - <0 = worse than random
+    
+    Hint: Accounts for chance agreement
+
+================================================================================
+C. ERROR CLASSIFICATION RULES
+================================================================================
+
+TYPE I ERROR (FALSE POSITIVE, α ERROR)
+   - Rejecting a true null hypothesis
+   - "False alarm"
+   - Significance level α (e.g., 0.05)
+
+TYPE II ERROR (FALSE NEGATIVE, β ERROR)
+   - Failing to reject a false null hypothesis
+   - "Missed detection"
+   - Related to power (1 - β)
+
+TRADE-OFF:
+   - Lowering α increases β (and vice versa)
+   - Balance depends on cost of each error type
+
+================================================================================
+
+QUICK REFERENCE TABLE:
+
+Metric          Focus                  When to Use
+-----------------------------------------------------------------------------
+Precision       Positive predictions   False positives costly
+Recall          Actual positives       False negatives costly
+F1 Score        Balance both           Imbalanced data
+Accuracy        Overall correctness    Balanced datasets
+Specificity     Negative predictions   True negatives matter
+AUC-ROC         Threshold-independent  Overall performance
+Log Loss        Probability calibration Probabilistic predictions
+MCC             Correlation            All confusion matrix metrics
+Cohen's Kappa   Agreement              Inter-rater reliability
+
+================================================================================
