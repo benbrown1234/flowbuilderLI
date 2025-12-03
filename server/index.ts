@@ -2902,7 +2902,12 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         // c.id might be a number or URN string - handle both cases
         const idStr = String(c.id || '');
         const id = idStr.match(/:(\d+)$/)?.[1] || idStr;
-        const dailyBudget = c.dailyBudget?.amount ? parseFloat(c.dailyBudget.amount) / 100 : null;
+        const rawBudget = c.dailyBudget?.amount;
+        const dailyBudget = rawBudget ? parseFloat(rawBudget) / 100 : null;
+        // Debug: Log raw budget from API
+        if (rawBudget) {
+          console.log(`[Budget API] Campaign ${id}: rawAmount=${rawBudget}, parsed=${dailyBudget}`);
+        }
         liveCampaignSettings.set(id, {
           dailyBudget,
           hasLan: c.offsiteDeliveryEnabled === true,
@@ -3206,6 +3211,11 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       const budgetUtilization = dailyBudget && dailyBudget > 0 && currentWeekDays >= 1 
         ? (avgDailySpend / dailyBudget) * 100 
         : undefined;
+      
+      // Debug: Log budget calculation for all campaigns with budget
+      if (dailyBudget && dailyBudget > 0) {
+        console.log(`[Budget] Campaign ${c.campaignId}: weekSpend=${currWeek.spend}, days=${currentWeekDays}, avgDaily=${avgDailySpend.toFixed(2)}, dailyBudget=${dailyBudget}, util=${budgetUtilization?.toFixed(0)}%`);
+      }
       
       const hasLan = liveSettings.hasLan || false;
       const hasExpansion = liveSettings.hasExpansion || false;
