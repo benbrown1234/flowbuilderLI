@@ -1931,18 +1931,20 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     console.log(`Found ${creatives.length} creatives`);
     
     // Step 3: Fetch analytics for the last 90 days (with delay)
+    // Note: audiencePenetration requires date range <= 92 days
     console.log('Fetching analytics...');
     await delay(300);
     
     const now = new Date();
-    const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    // Use exactly 90 days back to stay within 92-day limit for audiencePenetration
+    const ninetyDaysAgo = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000));
     
     const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
     const encodedAccountUrn = encodeURIComponent(accountUrn);
     
     // Fetch campaign-level analytics with daily granularity
     // Include approximateMemberReach, audiencePenetration for frequency/penetration scoring
-    const campaignAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,approximateMemberReach,audiencePenetration,dateRange,pivotValues`;
+    const campaignAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${ninetyDaysAgo.getFullYear()},month:${ninetyDaysAgo.getMonth() + 1},day:${ninetyDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,approximateMemberReach,audiencePenetration,dateRange,pivotValues`;
     
     let campaignAnalytics: any = { elements: [] };
     try {
@@ -1966,7 +1968,7 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     
     // Step 4: Fetch creative-level analytics (with delay)
     await delay(300);
-    const creativeAnalyticsQuery = `q=analytics&pivot=CREATIVE&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,approximateMemberReach,audiencePenetration,dateRange,pivotValues`;
+    const creativeAnalyticsQuery = `q=analytics&pivot=CREATIVE&dateRange=(start:(year:${ninetyDaysAgo.getFullYear()},month:${ninetyDaysAgo.getMonth() + 1},day:${ninetyDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,approximateMemberReach,audiencePenetration,dateRange,pivotValues`;
     
     let creativeAnalytics: any = { elements: [] };
     try {
@@ -2159,30 +2161,44 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     console.log(`Found ${creatives.length} creatives`);
     
     // Step 3: Fetch analytics for the last 90 days (with delay)
+    // Note: audiencePenetration requires date range <= 92 days
     console.log('Fetching analytics...');
     await delay(300);
     
     const now = new Date();
-    const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+    // Use exactly 90 days back to stay within 92-day limit for audiencePenetration
+    const ninetyDaysAgo = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000));
     
     const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
     const encodedAccountUrn = encodeURIComponent(accountUrn);
     
     // Fetch campaign-level analytics with daily granularity
     // Include approximateMemberReach, audiencePenetration for frequency/penetration scoring
-    const campaignAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,approximateMemberReach,audiencePenetration,dateRange,pivotValues`;
+    const campaignAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${ninetyDaysAgo.getFullYear()},month:${ninetyDaysAgo.getMonth() + 1},day:${ninetyDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,approximateMemberReach,audiencePenetration,dateRange,pivotValues`;
     
     let campaignAnalytics: any = { elements: [] };
     try {
       campaignAnalytics = await linkedinApiRequestWithToken(accessToken, '/adAnalytics', {}, campaignAnalyticsQuery);
       console.log(`Got ${campaignAnalytics.elements?.length || 0} campaign analytics rows`);
+      // Debug: Log first element to check if new metrics are returned
+      if (campaignAnalytics.elements?.length > 0) {
+        const sample = campaignAnalytics.elements[0];
+        console.log('DEBUG Sample analytics element:', {
+          impressions: sample.impressions,
+          clicks: sample.clicks,
+          approximateMemberReach: sample.approximateMemberReach,
+          audiencePenetration: sample.audiencePenetration,
+          averageDwellTime: sample.averageDwellTime,
+          allKeys: Object.keys(sample)
+        });
+      }
     } catch (err: any) {
       console.warn('Campaign analytics fetch error:', err.message);
     }
     
     // Step 4: Fetch creative-level analytics (with delay)
     await delay(300);
-    const creativeAnalyticsQuery = `q=analytics&pivot=CREATIVE&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,approximateMemberReach,audiencePenetration,dateRange,pivotValues`;
+    const creativeAnalyticsQuery = `q=analytics&pivot=CREATIVE&dateRange=(start:(year:${ninetyDaysAgo.getFullYear()},month:${ninetyDaysAgo.getMonth() + 1},day:${ninetyDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,approximateMemberReach,audiencePenetration,dateRange,pivotValues`;
     
     let creativeAnalytics: any = { elements: [] };
     try {
