@@ -348,7 +348,7 @@ async function linkedinApiRequestWithToken(accessToken: string, endpoint: string
     const response = await axios.get(url, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
-        'LinkedIn-Version': '202411',
+        'LinkedIn-Version': '202511',
         'X-Restli-Protocol-Version': '2.0.0',
         'User-Agent': 'LinkedIn-Audience-Visualizer/1.0',
       },
