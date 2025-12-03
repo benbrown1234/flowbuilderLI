@@ -667,7 +667,7 @@ export async function saveCampaignDailyMetrics(
     await pool.query(
       `INSERT INTO analytics_campaign_daily 
        (account_id, campaign_id, campaign_name, campaign_group_id, campaign_status, metric_date, impressions, clicks, spend, conversions, video_views, leads, ctr, cpc, cpm, approximate_member_reach, audience_penetration, average_dwell_time)
-       VALUES ($1::text, $2::text, $3::text, $4::text, $5::text, $6::date, $7::bigint, $8::bigint, $9::numeric, $10::integer, $11::bigint, $12::integer, $13::numeric, $14::numeric, $15::numeric, $16::bigint, $17::numeric, $18::bigint)
+       VALUES ($1::text, $2::text, $3::text, $4::text, $5::text, $6::date, $7::bigint, $8::bigint, $9::numeric, $10::integer, $11::bigint, $12::integer, $13::numeric, $14::numeric, $15::numeric, $16::bigint, $17::numeric, $18::numeric)
        ON CONFLICT (account_id, campaign_id, metric_date) DO UPDATE SET
          campaign_name = EXCLUDED.campaign_name,
          campaign_group_id = EXCLUDED.campaign_group_id,
