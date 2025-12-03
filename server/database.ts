@@ -821,10 +821,15 @@ export async function updateCampaignScoring(
   issues: string[],
   positiveSignals: string[]
 ) {
+  // Update the most recent row for this campaign in analytics_campaign_daily
   await pool.query(
-    `UPDATE audit_campaigns 
+    `UPDATE analytics_campaign_daily 
      SET scoring_status = $1, scoring_issues = $2, scoring_positive_signals = $3
-     WHERE account_id = $4 AND campaign_id = $5`,
+     WHERE account_id = $4 AND campaign_id = $5 
+     AND metric_date = (
+       SELECT MAX(metric_date) FROM analytics_campaign_daily 
+       WHERE account_id = $4 AND campaign_id = $5
+     )`,
     [scoringStatus, JSON.stringify(issues), JSON.stringify(positiveSignals), accountId, campaignId]
   );
 }
@@ -836,10 +841,15 @@ export async function updateCreativeScoring(
   scoringStatus: string,
   issues: string[]
 ) {
+  // Update the most recent row for this creative in analytics_creative_daily
   await pool.query(
-    `UPDATE audit_creatives 
+    `UPDATE analytics_creative_daily 
      SET scoring_status = $1, scoring_issues = $2
-     WHERE account_id = $3 AND creative_id = $4`,
+     WHERE account_id = $3 AND creative_id = $4
+     AND metric_date = (
+       SELECT MAX(metric_date) FROM analytics_creative_daily 
+       WHERE account_id = $3 AND creative_id = $4
+     )`,
     [scoringStatus, JSON.stringify(issues), accountId, creativeId]
   );
 }
@@ -847,19 +857,25 @@ export async function updateCreativeScoring(
 // Get precomputed scoring data for structure view
 export async function getStructureScoringData(accountId: string) {
   const [campaigns, creatives] = await Promise.all([
+    // Get latest scoring per campaign from analytics_campaign_daily
     pool.query(
-      `SELECT campaign_id, scoring_status, 
+      `SELECT DISTINCT ON (campaign_id) 
+              campaign_id, scoring_status, 
               COALESCE(scoring_issues, '[]'::jsonb) as scoring_issues, 
               COALESCE(scoring_positive_signals, '[]'::jsonb) as scoring_positive_signals 
-       FROM audit_campaigns 
-       WHERE account_id = $1 AND scoring_status IS NOT NULL`,
+       FROM analytics_campaign_daily 
+       WHERE account_id = $1 AND scoring_status IS NOT NULL
+       ORDER BY campaign_id, metric_date DESC`,
       [accountId]
     ),
+    // Get latest scoring per creative from analytics_creative_daily
     pool.query(
-      `SELECT creative_id, campaign_id, scoring_status, 
+      `SELECT DISTINCT ON (creative_id) 
+              creative_id, campaign_id, scoring_status, 
               COALESCE(scoring_issues, '[]'::jsonb) as scoring_issues 
-       FROM audit_creatives 
-       WHERE account_id = $1 AND scoring_status IS NOT NULL`,
+       FROM analytics_creative_daily 
+       WHERE account_id = $1 AND scoring_status IS NOT NULL
+       ORDER BY creative_id, metric_date DESC`,
       [accountId]
     )
   ]);
