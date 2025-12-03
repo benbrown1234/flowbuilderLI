@@ -30,7 +30,11 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
         - Positive scoring capped at +2 per campaign, disabled on hard failures (budget <50%)
         - Negative scoring capped at -10
         - Score thresholds: ≤-3 = needs_attention, <0 = mild_issues, ≥0 = performing_well
-    *   **4-Week Comparison**: Uses 4-week on 4-week comparison to save API bandwidth.
+    *   **4-Week Comparison**: Uses 4-week on 4-week (28-day) comparison for all metrics including advanced metrics.
+    *   **Advanced Metrics with Trend Comparisons**:
+        - **Frequency**: Shows impressions/reach with MoM comparison (28-day on 28-day)
+        - **Audience Penetration**: Uses MAX value over 28-day period (cumulative metric) with MoM comparison
+        - **Avg Dwell Time**: Shows both MoM (28-day) and WoW (7-day) comparisons for campaigns and ads
     *   **Special Flags**: LAN, Expansion, and Maximize Delivery shown as colored badges.
     *   **Scoring Filters**: Excludes paused campaigns, low volume (<1000 impressions, <$20 spend, <3 active days), and new campaigns (<7 days).
     *   **Ad-Level Scoring**: Tracks CTR decline >20% and CVR decline >20% (if ≥3 conversions).
