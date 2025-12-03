@@ -2612,7 +2612,9 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         'q=search&search=(status:(values:List(ACTIVE,PAUSED)))'
       );
       for (const c of (campaignsResponse.elements || [])) {
-        const id = c.id?.match(/:(\d+)$/)?.[1] || c.id;
+        // c.id might be a number or URN string - handle both cases
+        const idStr = String(c.id || '');
+        const id = idStr.match(/:(\d+)$/)?.[1] || idStr;
         const dailyBudget = c.dailyBudget?.amount ? parseFloat(c.dailyBudget.amount) / 100 : null;
         liveCampaignSettings.set(id, {
           dailyBudget,
@@ -2641,6 +2643,9 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
     try {
       // Current 28-day period - TOTAL granularity for cumulative penetration
       const currentPeriodQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${currentPeriodStart.getFullYear()},month:${currentPeriodStart.getMonth() + 1},day:${currentPeriodStart.getDate()}),end:(year:${currentPeriodEnd.getFullYear()},month:${currentPeriodEnd.getMonth() + 1},day:${currentPeriodEnd.getDate()}))&timeGranularity=TOTAL&accounts=List(${encodedAccountUrn})&fields=impressions,audiencePenetration,approximateMemberReach,pivotValues`;
+      
+      console.log(`[Audit] TOTAL query current period:`, currentPeriodQuery);
+      console.log(`[Audit] Date range: ${currentPeriodStart.toISOString()} to ${currentPeriodEnd.toISOString()}`);
       
       const response = await linkedinApiRequest(sessionId, '/adAnalytics', {}, currentPeriodQuery);
       console.log(`[Audit] Got ${response.elements?.length || 0} current period TOTAL analytics rows`);
@@ -2699,6 +2704,9 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       }
     } catch (err: any) {
       console.warn('[Audit] Could not fetch TOTAL granularity penetration:', err.message);
+      if (err.response?.data) {
+        console.warn('[Audit] TOTAL API error details:', JSON.stringify(err.response.data, null, 2));
+      }
     }
     
     // Calculate account-level averages for cost efficiency comparison
@@ -2918,19 +2926,16 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       // Calculate new metrics from aggregated analytics data
       // Audience Penetration: Use TOTAL granularity values (cumulative over the period)
       // This matches what LinkedIn Campaign Manager shows
+      // Fallback: If TOTAL API failed, use the MAX daily penetration from database
       // c.campaignId is already normalized to numeric ID via extractId
       const totalPenetrationData = currentPeriodPenetration.get(c.campaignId);
       const prevTotalPenetrationData = prevPeriodPenetration.get(c.campaignId);
       
-      // Debug first few lookups (use a simple counter)
-      const debugIndex = Array.from(currentPeriodCampaigns.values()).indexOf(c);
-      if (debugIndex < 3) {
-        console.log(`[Audit] Looking up penetration for campaignId="${c.campaignId}" (type: ${typeof c.campaignId})`);
-        console.log(`[Audit] Found in currentPeriodPenetration: ${totalPenetrationData !== undefined}`);
-      }
-      
-      const audiencePenetration = totalPenetrationData?.penetration ?? null;
-      const prevAudiencePenetration = prevTotalPenetrationData?.penetration ?? null;
+      // Use TOTAL API value if available, otherwise fallback to daily MAX from aggregation
+      const audiencePenetration = totalPenetrationData?.penetration ?? 
+        (c.audiencePenetrationMax > 0 ? c.audiencePenetrationMax : null);
+      const prevAudiencePenetration = prevTotalPenetrationData?.penetration ?? 
+        (prev && prev.audiencePenetrationMax > 0 ? prev.audiencePenetrationMax : null);
       const audiencePenetrationChange = audiencePenetration !== null && prevAudiencePenetration !== null && prevAudiencePenetration > 0
         ? pctChange(audiencePenetration, prevAudiencePenetration)
         : null;
