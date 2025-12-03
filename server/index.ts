@@ -2941,11 +2941,21 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         : null;
       
       // Frequency: impressions / unique reach
-      const frequency = c.approximateMemberReach > 0 
-        ? c.impressions / c.approximateMemberReach 
+      // IMPORTANT: Use cumulative reach from ALL granularity API (not summed daily values)
+      // Summing daily reach double-counts users who saw ads on multiple days
+      const cumulativeReach = totalPenetrationData?.reach;
+      const prevCumulativeReach = prevTotalPenetrationData?.reach;
+      
+      // Log when cumulative reach is missing (helps track ALL API coverage)
+      if (!cumulativeReach && c.impressions > 1000) {
+        console.log(`[Audit] Campaign ${c.campaignId} has ${c.impressions} impressions but no cumulative reach from ALL API`);
+      }
+      
+      const frequency = cumulativeReach && cumulativeReach > 0 
+        ? c.impressions / cumulativeReach 
         : null;
-      const prevFrequency = prev && prev.approximateMemberReach > 0 
-        ? prev.impressions / prev.approximateMemberReach 
+      const prevFrequency = prevCumulativeReach && prevCumulativeReach > 0 && prev
+        ? prev.impressions / prevCumulativeReach 
         : null;
       const frequencyChange = frequency !== null && prevFrequency !== null && prevFrequency > 0
         ? pctChange(frequency, prevFrequency)
