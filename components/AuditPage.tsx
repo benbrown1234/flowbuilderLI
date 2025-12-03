@@ -84,6 +84,7 @@ interface CampaignItem {
   hasLan?: boolean;
   hasExpansion?: boolean;
   hasMaximizeDelivery?: boolean;
+  hasUnderspending?: boolean;
   // New metrics with MoM/WoW comparisons
   frequency?: number | null;
   frequencyChange?: number | null;
@@ -259,7 +260,7 @@ function CampaignCard({ campaign, accountId, showIssues, onClick }: { campaign: 
         </div>
       </div>
       
-      {(campaign.hasLan || campaign.hasExpansion || campaign.hasMaximizeDelivery) && (
+      {(campaign.hasLan || campaign.hasExpansion || campaign.hasMaximizeDelivery || campaign.hasUnderspending) && (
         <div className="flex items-center gap-2 flex-wrap mb-2">
           {campaign.hasLan && (
             <span className="inline-flex items-center gap-1 text-blue-600 text-xs bg-blue-50 rounded px-2 py-1">
@@ -277,6 +278,12 @@ function CampaignCard({ campaign, accountId, showIssues, onClick }: { campaign: 
             <span className="inline-flex items-center gap-1 text-orange-600 text-xs bg-orange-50 rounded px-2 py-1">
               <Zap className="w-3 h-3" />
               Max Delivery
+            </span>
+          )}
+          {campaign.hasUnderspending && (
+            <span className="inline-flex items-center gap-1 text-red-600 text-xs bg-red-50 rounded px-2 py-1">
+              <DollarSign className="w-3 h-3" />
+              Underspending
             </span>
           )}
         </div>
@@ -535,7 +542,7 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
           </div>
         )}
         
-        {(campaign.hasLan || campaign.hasExpansion || campaign.hasMaximizeDelivery) && (
+        {(campaign.hasLan || campaign.hasExpansion || campaign.hasMaximizeDelivery || campaign.hasUnderspending) && (
           <div className="flex gap-2 flex-wrap">
             {campaign.hasLan && (
               <span className="inline-flex items-center gap-1 text-blue-600 text-xs bg-blue-50 rounded px-2 py-1">
@@ -550,6 +557,11 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
             {campaign.hasMaximizeDelivery && (
               <span className="inline-flex items-center gap-1 text-orange-600 text-xs bg-orange-50 rounded px-2 py-1">
                 <Zap className="w-3 h-3" /> Maximize Delivery
+              </span>
+            )}
+            {campaign.hasUnderspending && (
+              <span className="inline-flex items-center gap-1 text-red-600 text-xs bg-red-50 rounded px-2 py-1">
+                <DollarSign className="w-3 h-3" /> Underspending - Check Bidding
               </span>
             )}
           </div>

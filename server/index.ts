@@ -1754,7 +1754,7 @@ app.post('/api/linkedin/audit/run/:accountId', requireAuth, async (req, res) => 
           status: c.status || 'UNKNOWN',
           objectiveType: c.objectiveType,
           costType: c.costType,
-          dailyBudget: c.dailyBudget?.amount ? parseFloat(c.dailyBudget.amount) / 100 : undefined,
+          dailyBudget: c.dailyBudget?.amount ? parseFloat(c.dailyBudget.amount) : undefined,
           targetingCriteria: c.targetingCriteria
         }));
         
@@ -2314,7 +2314,8 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     const campaignMap = new Map<string, any>();
     for (const c of campaigns) {
       const id = extractId(c.id);
-      const dailyBudget = c.dailyBudget?.amount ? parseFloat(c.dailyBudget.amount) / 100 : null;
+      // LinkedIn API returns budget in dollars directly (NOT cents)
+      const dailyBudget = c.dailyBudget?.amount ? parseFloat(c.dailyBudget.amount) : null;
       campaignMap.set(id, {
         name: c.name || `Campaign ${id}`,
         groupId: extractId(c.campaignGroup),
@@ -2548,7 +2549,8 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     const campaignMap = new Map<string, any>();
     for (const c of campaigns) {
       const id = extractId(c.id);
-      const dailyBudget = c.dailyBudget?.amount ? parseFloat(c.dailyBudget.amount) / 100 : null;
+      // LinkedIn API returns budget in dollars directly (NOT cents)
+      const dailyBudget = c.dailyBudget?.amount ? parseFloat(c.dailyBudget.amount) : null;
       campaignMap.set(id, {
         name: c.name || `Campaign ${id}`,
         groupId: extractId(c.campaignGroup),
@@ -2903,11 +2905,8 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         const idStr = String(c.id || '');
         const id = idStr.match(/:(\d+)$/)?.[1] || idStr;
         const rawBudget = c.dailyBudget?.amount;
-        const dailyBudget = rawBudget ? parseFloat(rawBudget) / 100 : null;
-        // Debug: Log raw budget from API
-        if (rawBudget) {
-          console.log(`[Budget API] Campaign ${id}: rawAmount=${rawBudget}, parsed=${dailyBudget}`);
-        }
+        // LinkedIn API returns budget in dollars directly (NOT cents)
+        const dailyBudget = rawBudget ? parseFloat(rawBudget) : null;
         liveCampaignSettings.set(id, {
           dailyBudget,
           hasLan: c.offsiteDeliveryEnabled === true,
@@ -3151,7 +3150,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
     }
     
     // Build alerts array
-    const alerts: { type: 'budget' | 'penetration' | 'lan_expansion'; message: string; campaignId?: string; campaignName?: string; }[] = [];
+    const alerts: { type: 'budget' | 'penetration' | 'lan_expansion' | 'underspending'; message: string; campaignId?: string; campaignName?: string; }[] = [];
     
     // Determine if any campaigns have LAN/Expansion (affects sync frequency)
     let hasLanOrExpansion = false;
@@ -3598,12 +3597,27 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       if (hasExpansion) flags.push('Expansion enabled');
       if (hasMaximizeDelivery) flags.push('Maximize Delivery enabled');
       
+      // Underspending flag: flag if < 50% of daily budget (potential bidding issue)
+      const hasUnderspending = budgetUtilization !== undefined && budgetUtilization < 50;
+      if (hasUnderspending) {
+        flags.push('Underspending');
+      }
+      
       if (hasLan || hasExpansion || hasMaximizeDelivery) {
         alerts.push({ 
           type: 'lan_expansion', 
           message: `${c.campaignName} has ${[hasLan && 'LAN', hasExpansion && 'Expansion', hasMaximizeDelivery && 'Maximize Delivery'].filter(Boolean).join(', ')} enabled`, 
           campaignId: c.campaignId, 
           campaignName: c.campaignName 
+        });
+      }
+      
+      if (hasUnderspending) {
+        alerts.push({
+          type: 'underspending',
+          message: `${c.campaignName} is underspending (${budgetUtilization?.toFixed(0)}% of budget) - check bidding`,
+          campaignId: c.campaignId,
+          campaignName: c.campaignName
         });
       }
       
@@ -3633,6 +3647,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         hasLan,
         hasExpansion,
         hasMaximizeDelivery,
+        hasUnderspending,
         // New metrics with MoM comparisons
         frequency,
         frequencyChange,
