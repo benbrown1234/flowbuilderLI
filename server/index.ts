@@ -225,27 +225,97 @@ app.get('/api/auth/url', (req, res) => {
   res.json({ authUrl, state });
 });
 
+// Allowed error codes (sanitized whitelist to prevent XSS)
+const ALLOWED_ERROR_CODES: Record<string, string> = {
+  'user_cancelled_authorize': 'Authorization was cancelled.',
+  'user_cancelled_login': 'Login was cancelled.',
+  'access_denied': 'Access was denied.',
+  'no_code': 'No authorization code received.',
+  'no_session': 'Session not found. Please try again.',
+  'state_mismatch': 'Security validation failed. Please try again.',
+  'token_exchange_failed': 'Failed to complete authentication. Please try again.',
+  'unknown_error': 'An unexpected error occurred. Please try again.'
+};
+
+// Helper to send auth result via postMessage and close popup/tab
+const sendAuthResultHtml = (success: boolean, errorCode?: string) => {
+  // Sanitize error code - only allow known error codes
+  const safeErrorCode = errorCode && ALLOWED_ERROR_CODES[errorCode] ? errorCode : 'unknown_error';
+  const safeErrorMessage = ALLOWED_ERROR_CODES[safeErrorCode];
+  
+  const message = success 
+    ? { type: 'LINKEDIN_AUTH_SUCCESS' }
+    : { type: 'LINKEDIN_AUTH_ERROR', error: safeErrorCode };
+  
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Authentication ${success ? 'Complete' : 'Failed'}</title>
+      <style>
+        body { 
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          display: flex; 
+          justify-content: center; 
+          align-items: center; 
+          height: 100vh;
+          margin: 0;
+          background: #f3f4f6;
+        }
+        .container {
+          text-align: center;
+          background: white;
+          padding: 2rem 3rem;
+          border-radius: 12px;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .icon { font-size: 48px; margin-bottom: 16px; }
+        h1 { margin: 0 0 8px; color: #111827; font-size: 24px; }
+        p { margin: 0; color: #6b7280; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="icon">${success ? '✓' : '✗'}</div>
+        <h1>${success ? 'Connected!' : 'Connection Failed'}</h1>
+        <p>${success ? 'You can close this tab and return to the app.' : safeErrorMessage}</p>
+      </div>
+      <script>
+        // Send message to opener window (works for popup or new tab)
+        if (window.opener) {
+          window.opener.postMessage(${JSON.stringify(message)}, window.location.origin);
+          setTimeout(function() { window.close(); }, 1500);
+        } else {
+          // If no opener (direct navigation), redirect to main app
+          setTimeout(function() { window.location.href = '/${success ? '?auth=success' : '?error=' + safeErrorCode}'; }, 1500);
+        }
+      </script>
+    </body>
+    </html>
+  `;
+};
+
 app.get('/api/auth/callback', async (req, res) => {
   const sessionId = req.cookies?.session_id;
   const { code, state, error } = req.query;
   
   if (error) {
-    return res.redirect(`/?error=${error}`);
+    return res.send(sendAuthResultHtml(false, error as string));
   }
   
   if (!code) {
-    return res.redirect('/?error=no_code');
+    return res.send(sendAuthResultHtml(false, 'no_code'));
   }
   
   if (!sessionId) {
-    return res.redirect('/?error=no_session');
+    return res.send(sendAuthResultHtml(false, 'no_session'));
   }
   
   const session = getSession(sessionId);
   
   if (!state || state !== session.state) {
     console.error('State mismatch:', { received: state, expected: session.state });
-    return res.redirect('/?error=state_mismatch');
+    return res.send(sendAuthResultHtml(false, 'state_mismatch'));
   }
   
   session.state = null;
@@ -273,10 +343,10 @@ app.get('/api/auth/callback', async (req, res) => {
     session.accessToken = tokenResponse.data.access_token;
     session.expiresAt = Date.now() + (tokenResponse.data.expires_in * 1000);
     
-    res.redirect('/?auth=success');
+    res.send(sendAuthResultHtml(true));
   } catch (err: any) {
     console.error('Token exchange error:', err.response?.data || err.message);
-    res.redirect(`/?error=token_exchange_failed`);
+    res.send(sendAuthResultHtml(false, 'token_exchange_failed'));
   }
 });
 

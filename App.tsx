@@ -184,12 +184,37 @@ const App: React.FC = () => {
   const handleLogin = async () => {
     try {
       const { authUrl } = await getAuthUrl();
-      window.location.href = authUrl;
+      // Open in new tab to avoid iframe restrictions from LinkedIn
+      window.open(authUrl, '_blank');
     } catch (err) {
       console.error('Login failed:', err);
       setError('Failed to initiate login');
     }
   };
+
+  // Listen for OAuth completion message from popup/new tab
+  useEffect(() => {
+    const handleAuthMessage = async (event: MessageEvent) => {
+      // Only accept messages from same origin
+      if (event.origin !== window.location.origin) return;
+      
+      if (event.data?.type === 'LINKEDIN_AUTH_SUCCESS') {
+        // Re-check auth status after successful login
+        try {
+          const status = await getAuthStatus();
+          setIsAuthenticated(status.isAuthenticated);
+          setError(null);
+        } catch (err) {
+          console.error('Failed to refresh auth status:', err);
+        }
+      } else if (event.data?.type === 'LINKEDIN_AUTH_ERROR') {
+        setError(`Authentication failed: ${event.data.error}`);
+      }
+    };
+
+    window.addEventListener('message', handleAuthMessage);
+    return () => window.removeEventListener('message', handleAuthMessage);
+  }, []);
 
   const handleLogout = async () => {
     try {
