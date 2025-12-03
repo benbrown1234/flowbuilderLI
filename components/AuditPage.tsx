@@ -611,7 +611,7 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
         </div>
         
         {/* Advanced Metrics */}
-        {(campaign.frequency !== null || campaign.audiencePenetration !== null || campaign.cpcVsAccount !== null) && (
+        {(campaign.frequency !== null || campaign.audiencePenetration !== null || campaign.averageDwellTime !== null || campaign.cpcVsAccount !== null) && (
           <div>
             <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
               <Target className="w-4 h-4" /> Advanced Metrics
@@ -638,6 +638,17 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
                     campaign.audiencePenetration > 60 ? 'text-green-600' : 'text-gray-900'
                   }`}>
                     {campaign.audiencePenetration.toFixed(0)}%
+                  </span>
+                </div>
+              )}
+              {campaign.averageDwellTime !== null && campaign.averageDwellTime !== undefined && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Avg Dwell Time</span>
+                  <span className={`font-medium ${
+                    campaign.averageDwellTime < 1.5 ? 'text-red-600' :
+                    campaign.averageDwellTime >= 4 ? 'text-green-600' : 'text-gray-900'
+                  }`}>
+                    {campaign.averageDwellTime.toFixed(1)}s
                   </span>
                 </div>
               )}
