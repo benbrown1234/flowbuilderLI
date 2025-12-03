@@ -134,6 +134,9 @@ interface AdItem {
   scoringStatus?: AdScoringStatus;
   isPerformingWell: boolean;
   issues: string[];
+  campaignIssues?: string[];
+  campaignScoringStatus?: string;
+  hasCampaignIssues?: boolean;
 }
 
 interface AuditData {
@@ -342,6 +345,19 @@ function AdCard({ ad, accountId, showIssues, onClick }: { ad: AdItem; accountId:
         <div className="mt-2 pt-2 border-t border-red-100">
           {ad.issues.map((issue, idx) => (
             <div key={idx} className="flex items-center gap-2 text-red-600 text-xs">
+              <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+              <span>{issue}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {/* Show inherited campaign issues (even for performing well ads) */}
+      {ad.hasCampaignIssues && ad.campaignIssues && ad.campaignIssues.length > 0 && (
+        <div className={`mt-2 pt-2 border-t ${ad.campaignScoringStatus === 'needs_attention' ? 'border-red-100' : 'border-amber-100'}`}>
+          <p className="text-xs text-gray-500 mb-1 font-medium">Campaign issues:</p>
+          {ad.campaignIssues.map((issue, idx) => (
+            <div key={idx} className={`flex items-center gap-2 text-xs ${ad.campaignScoringStatus === 'needs_attention' ? 'text-red-500' : 'text-amber-600'}`}>
               <AlertTriangle className="w-3 h-3 flex-shrink-0" />
               <span>{issue}</span>
             </div>

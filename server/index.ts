@@ -3350,6 +3350,16 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       };
     }) : [];
     
+    // Build a lookup map for campaign data to inherit into ads
+    const campaignDataMap = new Map<string, { issues: string[], scoringStatus: string, negativeScore: number }>();
+    for (const campaign of campaigns) {
+      campaignDataMap.set(campaign.id, {
+        issues: campaign.issues || [],
+        scoringStatus: campaign.scoringStatus,
+        negativeScore: campaign.negativeScore || 0
+      });
+    }
+    
     // Build ads in the expected format (AdItem)
     const ads = hasCurrentPeriod ? Array.from(currentPeriodCreatives.values()).map(c => {
       const prev = hasPreviousPeriod ? previousPeriodCreatives.get(c.creativeId) : null;
@@ -3357,6 +3367,9 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
       const hasPreviousData = prev && prev.impressions >= 100;
       const ctrChange = hasPreviousData && prevCtr > 0 ? pctChange(currentCtr, prevCtr) : null;
+      
+      // Get parent campaign data
+      const parentCampaign = campaignDataMap.get(c.campaignId);
       
       // Average Dwell Time for ads (weighted by impressions)
       const averageDwellTime = c.averageDwellTimeCount > 0 
@@ -3405,6 +3418,10 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       
       const isPerformingWell = scoringStatus === 'performing_well';
       
+      // Inherit campaign issues for context (but keep ad's own status separate)
+      const campaignIssues = parentCampaign?.issues || [];
+      const campaignScoringStatus = parentCampaign?.scoringStatus || 'performing_well';
+      
       return {
         id: c.creativeId,
         name: c.creativeName || `Ad ${c.creativeId}`,
@@ -3428,7 +3445,11 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         dwellTimeChange,
         scoringStatus,
         isPerformingWell,
-        issues
+        issues,
+        // Inherited campaign context
+        campaignIssues,
+        campaignScoringStatus,
+        hasCampaignIssues: campaignIssues.length > 0
       };
     }) : [];
     
