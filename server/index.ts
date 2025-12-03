@@ -2644,16 +2644,28 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       
       const response = await linkedinApiRequest(sessionId, '/adAnalytics', {}, currentPeriodQuery);
       console.log(`[Audit] Got ${response.elements?.length || 0} current period TOTAL analytics rows`);
+      
+      // Log raw first element to see exact field names
+      if (response.elements?.[0]) {
+        console.log(`[Audit] Raw TOTAL element sample:`, JSON.stringify(response.elements[0], null, 2));
+      }
+      
       for (const elem of (response.elements || [])) {
         const campaignId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
         if (campaignId) {
+          // Use explicit null checks instead of falsy || operator (0 is valid)
+          const penetrationValue = elem.audiencePenetration !== null && elem.audiencePenetration !== undefined 
+            ? elem.audiencePenetration : null;
+          const reachValue = elem.approximateMemberReach !== null && elem.approximateMemberReach !== undefined 
+            ? elem.approximateMemberReach : null;
+          
           currentPeriodPenetration.set(campaignId, {
-            penetration: elem.audiencePenetration || null,
-            reach: elem.approximateMemberReach || null
+            penetration: penetrationValue,
+            reach: reachValue
           });
           // Debug log for first few
           if (currentPeriodPenetration.size <= 3) {
-            console.log(`[Audit] Campaign ${campaignId} TOTAL penetration: ${elem.audiencePenetration}, reach: ${elem.approximateMemberReach}`);
+            console.log(`[Audit] Campaign ${campaignId} TOTAL penetration: ${penetrationValue}, reach: ${reachValue}`);
           }
         }
       }
@@ -2666,11 +2678,24 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       for (const elem of (prevResponse.elements || [])) {
         const campaignId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
         if (campaignId) {
+          // Use explicit null checks instead of falsy || operator
+          const penetrationValue = elem.audiencePenetration !== null && elem.audiencePenetration !== undefined 
+            ? elem.audiencePenetration : null;
+          const reachValue = elem.approximateMemberReach !== null && elem.approximateMemberReach !== undefined 
+            ? elem.approximateMemberReach : null;
+          
           prevPeriodPenetration.set(campaignId, {
-            penetration: elem.audiencePenetration || null,
-            reach: elem.approximateMemberReach || null
+            penetration: penetrationValue,
+            reach: reachValue
           });
         }
+      }
+      
+      // Log map sizes and sample keys for debugging
+      console.log(`[Audit] Penetration maps populated: current=${currentPeriodPenetration.size}, prev=${prevPeriodPenetration.size}`);
+      if (currentPeriodPenetration.size > 0) {
+        const sampleKeys = Array.from(currentPeriodPenetration.keys()).slice(0, 3);
+        console.log(`[Audit] Sample penetration map keys: ${sampleKeys.join(', ')}`);
       }
     } catch (err: any) {
       console.warn('[Audit] Could not fetch TOTAL granularity penetration:', err.message);
@@ -2896,6 +2921,14 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       // c.campaignId is already normalized to numeric ID via extractId
       const totalPenetrationData = currentPeriodPenetration.get(c.campaignId);
       const prevTotalPenetrationData = prevPeriodPenetration.get(c.campaignId);
+      
+      // Debug first few lookups (use a simple counter)
+      const debugIndex = Array.from(currentPeriodCampaigns.values()).indexOf(c);
+      if (debugIndex < 3) {
+        console.log(`[Audit] Looking up penetration for campaignId="${c.campaignId}" (type: ${typeof c.campaignId})`);
+        console.log(`[Audit] Found in currentPeriodPenetration: ${totalPenetrationData !== undefined}`);
+      }
+      
       const audiencePenetration = totalPenetrationData?.penetration ?? null;
       const prevAudiencePenetration = prevTotalPenetrationData?.penetration ?? null;
       const audiencePenetrationChange = audiencePenetration !== null && prevAudiencePenetration !== null && prevAudiencePenetration > 0
