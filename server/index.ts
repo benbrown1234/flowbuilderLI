@@ -2466,6 +2466,14 @@ app.post('/api/audit/refresh/:accountId', requireAuth, async (req, res) => {
 
 // Get stored audit analytics data
 app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
+  // Helper to extract numeric ID from URN
+  const extractId = (urn: any): string => {
+    if (urn === null || urn === undefined) return '';
+    const urnStr = String(urn);
+    const match = urnStr.match(/:(\d+)$/);
+    return match ? match[1] : urnStr;
+  };
+  
   try {
     const sessionId = (req as any).sessionId;
     const { accountId } = req.params;
@@ -2537,13 +2545,15 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       const impressions = parseInt(m.impressions) || 0;
       const clicks = parseInt(m.clicks) || 0;
       const conversions = parseInt(m.conversions) || 0;
+      // Normalize campaign ID to numeric string (extract from URN if needed)
+      const weekCampaignKey = extractId(m.campaign_id);
       
       // Current week (last 7 days)
       if (metricDate >= currentWeekStart && metricDate <= windowEnd) {
-        if (!currentWeekByCampaign.has(m.campaign_id)) {
-          currentWeekByCampaign.set(m.campaign_id, initWeekMetrics());
+        if (!currentWeekByCampaign.has(weekCampaignKey)) {
+          currentWeekByCampaign.set(weekCampaignKey, initWeekMetrics());
         }
-        const curr = currentWeekByCampaign.get(m.campaign_id)!;
+        const curr = currentWeekByCampaign.get(weekCampaignKey)!;
         curr.spend += spend;
         curr.impressions += impressions;
         curr.clicks += clicks;
@@ -2557,10 +2567,10 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       }
       // Previous week (8-14 days ago)
       if (metricDate >= previousWeekStart && metricDate < currentWeekStart) {
-        if (!previousWeekByCampaign.has(m.campaign_id)) {
-          previousWeekByCampaign.set(m.campaign_id, initWeekMetrics());
+        if (!previousWeekByCampaign.has(weekCampaignKey)) {
+          previousWeekByCampaign.set(weekCampaignKey, initWeekMetrics());
         }
-        const prev = previousWeekByCampaign.get(m.campaign_id)!;
+        const prev = previousWeekByCampaign.get(weekCampaignKey)!;
         prev.spend += spend;
         prev.impressions += impressions;
         prev.clicks += clicks;
@@ -2694,9 +2704,11 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       
       if (!targetMap) continue;
       
-      if (!targetMap.has(m.campaign_id)) {
-        targetMap.set(m.campaign_id, {
-          campaignId: m.campaign_id,
+      // Normalize campaign ID to numeric string (extract from URN if needed)
+      const campaignIdKey = extractId(m.campaign_id);
+      if (!targetMap.has(campaignIdKey)) {
+        targetMap.set(campaignIdKey, {
+          campaignId: campaignIdKey,
           campaignName: m.campaign_name,
           campaignGroupId: m.campaign_group_id,
           campaignStatus: m.campaign_status,
@@ -2714,7 +2726,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         });
       }
       
-      const agg = targetMap.get(m.campaign_id)!;
+      const agg = targetMap.get(campaignIdKey)!;
       agg.impressions += parseInt(m.impressions) || 0;
       agg.clicks += parseInt(m.clicks) || 0;
       agg.spend += parseFloat(m.spend) || 0;
@@ -2881,6 +2893,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       // Calculate new metrics from aggregated analytics data
       // Audience Penetration: Use TOTAL granularity values (cumulative over the period)
       // This matches what LinkedIn Campaign Manager shows
+      // c.campaignId is already normalized to numeric ID via extractId
       const totalPenetrationData = currentPeriodPenetration.get(c.campaignId);
       const prevTotalPenetrationData = prevPeriodPenetration.get(c.campaignId);
       const audiencePenetration = totalPenetrationData?.penetration ?? null;
