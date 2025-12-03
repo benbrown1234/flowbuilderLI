@@ -3201,8 +3201,9 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       const avgDailySpend = currentWeekDays > 0 ? currWeek.spend / currentWeekDays : 0;
       const prevAvgDailySpend = previousWeekDays > 0 ? prevWeek.spend / previousWeekDays : 0;
       
-      // Budget utilization (only if campaign ran 7 days)
-      const budgetUtilization = dailyBudget && dailyBudget > 0 && currentWeekDays === 7 
+      // Budget utilization (pro-rated based on days running)
+      // Calculate if campaign has a daily budget and ran at least 1 day
+      const budgetUtilization = dailyBudget && dailyBudget > 0 && currentWeekDays >= 1 
         ? (avgDailySpend / dailyBudget) * 100 
         : undefined;
       
