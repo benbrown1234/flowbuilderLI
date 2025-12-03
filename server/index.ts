@@ -1973,9 +1973,9 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     const prev28End = new Date(current28Start.getTime() - (1 * 24 * 60 * 60 * 1000));
     const prev28Start = new Date(prev28End.getTime() - (28 * 24 * 60 * 60 * 1000));
     
-    // Current 28-day period - TOTAL granularity for cumulative penetration
+    // Current 28-day period - ALL granularity for cumulative penetration (replaces deprecated TOTAL)
     await delay(300);
-    const currentPeriodQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${current28Start.getFullYear()},month:${current28Start.getMonth() + 1},day:${current28Start.getDate()}),end:(year:${current28End.getFullYear()},month:${current28End.getMonth() + 1},day:${current28End.getDate()}))&timeGranularity=TOTAL&accounts=List(${encodedAccountUrn})&fields=impressions,audiencePenetration,approximateMemberReach,pivotValues`;
+    const currentPeriodQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${current28Start.getFullYear()},month:${current28Start.getMonth() + 1},day:${current28Start.getDate()}),end:(year:${current28End.getFullYear()},month:${current28End.getMonth() + 1},day:${current28End.getDate()}))&timeGranularity=ALL&accounts=List(${encodedAccountUrn})&fields=impressions,audiencePenetration,approximateMemberReach,pivotValues`;
     
     let currentPeriodPenetration = new Map<string, { penetration: number | null, reach: number | null }>();
     try {
@@ -1998,9 +1998,9 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
       console.warn('Current period TOTAL analytics fetch error:', err.message);
     }
     
-    // Previous 28-day period - TOTAL granularity for MoM comparison
+    // Previous 28-day period - ALL granularity for MoM comparison (replaces deprecated TOTAL)
     await delay(300);
-    const prevPeriodQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${prev28Start.getFullYear()},month:${prev28Start.getMonth() + 1},day:${prev28Start.getDate()}),end:(year:${prev28End.getFullYear()},month:${prev28End.getMonth() + 1},day:${prev28End.getDate()}))&timeGranularity=TOTAL&accounts=List(${encodedAccountUrn})&fields=impressions,audiencePenetration,approximateMemberReach,pivotValues`;
+    const prevPeriodQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${prev28Start.getFullYear()},month:${prev28Start.getMonth() + 1},day:${prev28Start.getDate()}),end:(year:${prev28End.getFullYear()},month:${prev28End.getMonth() + 1},day:${prev28End.getDate()}))&timeGranularity=ALL&accounts=List(${encodedAccountUrn})&fields=impressions,audiencePenetration,approximateMemberReach,pivotValues`;
     
     let prevPeriodPenetration = new Map<string, { penetration: number | null, reach: number | null }>();
     try {
@@ -2641,10 +2641,10 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
     let prevPeriodPenetration = new Map<string, { penetration: number | null, reach: number | null }>();
     
     try {
-      // Current 28-day period - TOTAL granularity for cumulative penetration
-      const currentPeriodQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${currentPeriodStart.getFullYear()},month:${currentPeriodStart.getMonth() + 1},day:${currentPeriodStart.getDate()}),end:(year:${currentPeriodEnd.getFullYear()},month:${currentPeriodEnd.getMonth() + 1},day:${currentPeriodEnd.getDate()}))&timeGranularity=TOTAL&accounts=List(${encodedAccountUrn})&fields=impressions,audiencePenetration,approximateMemberReach,pivotValues`;
+      // Current 28-day period - ALL granularity for cumulative penetration (replaces deprecated TOTAL)
+      const currentPeriodQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${currentPeriodStart.getFullYear()},month:${currentPeriodStart.getMonth() + 1},day:${currentPeriodStart.getDate()}),end:(year:${currentPeriodEnd.getFullYear()},month:${currentPeriodEnd.getMonth() + 1},day:${currentPeriodEnd.getDate()}))&timeGranularity=ALL&accounts=List(${encodedAccountUrn})&fields=impressions,audiencePenetration,approximateMemberReach,pivotValues`;
       
-      console.log(`[Audit] TOTAL query current period:`, currentPeriodQuery);
+      console.log(`[Audit] ALL query current period:`, currentPeriodQuery);
       console.log(`[Audit] Date range: ${currentPeriodStart.toISOString()} to ${currentPeriodEnd.toISOString()}`);
       
       const response = await linkedinApiRequest(sessionId, '/adAnalytics', {}, currentPeriodQuery);
@@ -2675,8 +2675,8 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         }
       }
       
-      // Previous 28-day period - TOTAL granularity for MoM comparison
-      const prevPeriodQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${previousPeriodStart.getFullYear()},month:${previousPeriodStart.getMonth() + 1},day:${previousPeriodStart.getDate()}),end:(year:${previousPeriodEnd.getFullYear()},month:${previousPeriodEnd.getMonth() + 1},day:${previousPeriodEnd.getDate()}))&timeGranularity=TOTAL&accounts=List(${encodedAccountUrn})&fields=impressions,audiencePenetration,approximateMemberReach,pivotValues`;
+      // Previous 28-day period - ALL granularity for MoM comparison (replaces deprecated TOTAL)
+      const prevPeriodQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${previousPeriodStart.getFullYear()},month:${previousPeriodStart.getMonth() + 1},day:${previousPeriodStart.getDate()}),end:(year:${previousPeriodEnd.getFullYear()},month:${previousPeriodEnd.getMonth() + 1},day:${previousPeriodEnd.getDate()}))&timeGranularity=ALL&accounts=List(${encodedAccountUrn})&fields=impressions,audiencePenetration,approximateMemberReach,pivotValues`;
       
       const prevResponse = await linkedinApiRequest(sessionId, '/adAnalytics', {}, prevPeriodQuery);
       console.log(`[Audit] Got ${prevResponse.elements?.length || 0} previous period TOTAL analytics rows`);
