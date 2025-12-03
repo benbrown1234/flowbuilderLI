@@ -3211,6 +3211,22 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         ? (avgDailySpend / dailyBudget) * 100 
         : undefined;
       
+      // Previous week budget utilization for WoW comparison
+      const prevBudgetUtilization = dailyBudget && dailyBudget > 0 && previousWeekDays >= 1
+        ? (prevAvgDailySpend / dailyBudget) * 100
+        : undefined;
+      const budgetUtilizationChange = budgetUtilization !== undefined && prevBudgetUtilization !== undefined && prevBudgetUtilization > 0
+        ? pctChange(budgetUtilization, prevBudgetUtilization)
+        : undefined;
+      
+      // Volume metrics MoM comparison (28-day on 28-day)
+      const prevImpressions = prev?.impressions || 0;
+      const prevClicks = prev?.clicks || 0;
+      const prevSpend = prev?.spend || 0;
+      const impressionsChange = prev && prevImpressions > 0 ? pctChange(c.impressions, prevImpressions) : undefined;
+      const clicksChange = prev && prevClicks > 0 ? pctChange(c.clicks, prevClicks) : undefined;
+      const spendChange = prev && prevSpend > 0 ? pctChange(c.spend, prevSpend) : undefined;
+      
       // Debug: Log budget calculation for all campaigns with budget
       if (dailyBudget && dailyBudget > 0) {
         console.log(`[Budget] Campaign ${c.campaignId}: weekSpend=${currWeek.spend}, days=${currentWeekDays}, avgDaily=${avgDailySpend.toFixed(2)}, dailyBudget=${dailyBudget}, util=${budgetUtilization?.toFixed(0)}%`);
@@ -3597,8 +3613,30 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       if (hasExpansion) flags.push('Expansion enabled');
       if (hasMaximizeDelivery) flags.push('Maximize Delivery enabled');
       
-      // Underspending flag: flag if < 50% of daily budget (potential bidding issue)
-      const hasUnderspending = budgetUtilization !== undefined && budgetUtilization < 50;
+      // Underspending flag with safeguards:
+      // 1. Must have been live every day this week (currentWeekDays >= 7) to avoid skewed data from pauses
+      // 2. Flag if utilization <50% OR drops by 25% WoW
+      // 3. Must have at least 7 days of history (not a brand new campaign change)
+      const expectedDays = 7; // Full week
+      const wasLiveEveryDay = currentWeekDays >= expectedDays;
+      const hasSufficientHistory = previousWeekDays >= 3; // At least some prior data
+      
+      let hasUnderspending = false;
+      let underspendingReason = '';
+      
+      if (budgetUtilization !== undefined && wasLiveEveryDay && hasSufficientHistory) {
+        // Check for absolute underspend (<50%)
+        if (budgetUtilization < 50) {
+          hasUnderspending = true;
+          underspendingReason = `Spending only ${budgetUtilization.toFixed(0)}% of daily budget - check bidding/targeting`;
+        }
+        // Check for 25% WoW drop in utilization
+        else if (budgetUtilizationChange !== undefined && budgetUtilizationChange < -25) {
+          hasUnderspending = true;
+          underspendingReason = `Utilization dropped ${Math.abs(budgetUtilizationChange).toFixed(0)}% WoW - investigate delivery issues`;
+        }
+      }
+      
       if (hasUnderspending) {
         flags.push('Underspending');
       }
@@ -3615,7 +3653,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       if (hasUnderspending) {
         alerts.push({
           type: 'underspending',
-          message: `${c.campaignName} is underspending (${budgetUtilization?.toFixed(0)}% of budget) - check bidding`,
+          message: `${c.campaignName}: ${underspendingReason}`,
           campaignId: c.campaignId,
           campaignName: c.campaignName
         });
@@ -3637,17 +3675,27 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         impressions: c.impressions,
         clicks: c.clicks,
         spend: c.spend,
+        prevImpressions,
+        prevClicks,
+        prevSpend,
+        impressionsChange,
+        clicksChange,
+        spendChange,
         dailyBudget,
         avgDailySpend,
         budgetUtilization,
+        prevBudgetUtilization,
+        budgetUtilizationChange,
         currentWeekSpend: currWeek.spend,
         previousWeekSpend: prevWeek.spend,
         currentWeekDays,
         previousWeekDays,
+        expectedDays,
         hasLan,
         hasExpansion,
         hasMaximizeDelivery,
         hasUnderspending,
+        underspendingReason,
         // New metrics with MoM comparisons
         frequency,
         frequencyChange,

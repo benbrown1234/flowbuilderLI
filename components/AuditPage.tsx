@@ -73,18 +73,28 @@ interface CampaignItem {
   impressions: number;
   clicks: number;
   spend: number;
+  prevImpressions?: number;
+  prevClicks?: number;
+  prevSpend?: number;
+  impressionsChange?: number;
+  clicksChange?: number;
   dailyBudget?: number;
   avgDailySpend?: number;
   budgetUtilization?: number;
+  prevBudgetUtilization?: number;
+  budgetUtilizationChange?: number;
   currentWeekSpend?: number;
   previousWeekSpend?: number;
   currentWeekDays?: number;
   previousWeekDays?: number;
+  expectedDays?: number;
+  daysSinceChange?: number;
   spendChange?: number;
   hasLan?: boolean;
   hasExpansion?: boolean;
   hasMaximizeDelivery?: boolean;
   hasUnderspending?: boolean;
+  underspendingReason?: string;
   // New metrics with MoM/WoW comparisons
   frequency?: number | null;
   frequencyChange?: number | null;
@@ -637,33 +647,86 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
         
         <div>
           <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-            <Eye className="w-4 h-4" /> Volume Metrics
+            <Eye className="w-4 h-4" /> Volume Metrics (28-day)
           </h5>
-          <div className="bg-gray-50 rounded-lg p-3">
-            <MetricRow 
-              label="Impressions" 
-              current={campaign.impressions} 
-              previous={undefined}
-              change={undefined} 
-              isPositive={true}
-            />
-            <MetricRow 
-              label="Clicks" 
-              current={campaign.clicks} 
-              previous={undefined}
-              change={undefined} 
-              isPositive={true}
-            />
-            <MetricRow 
-              label="Spend" 
-              current={campaign.spend} 
-              previous={undefined}
-              change={undefined} 
-              isPositive={true}
-              format="currency"
-            />
+          <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600">Impressions</span>
+              <div className="text-right">
+                <span className="font-medium text-gray-900">{formatNumber(campaign.impressions)}</span>
+                {campaign.impressionsChange !== null && campaign.impressionsChange !== undefined && (
+                  <span className={`ml-2 text-xs ${campaign.impressionsChange > 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                    {campaign.impressionsChange > 0 ? '+' : ''}{campaign.impressionsChange.toFixed(0)}% MoM
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600">Clicks</span>
+              <div className="text-right">
+                <span className="font-medium text-gray-900">{formatNumber(campaign.clicks)}</span>
+                {campaign.clicksChange !== null && campaign.clicksChange !== undefined && (
+                  <span className={`ml-2 text-xs ${campaign.clicksChange > 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                    {campaign.clicksChange > 0 ? '+' : ''}{campaign.clicksChange.toFixed(0)}% MoM
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600">Spend</span>
+              <div className="text-right">
+                <span className="font-medium text-gray-900">${formatNumber(campaign.spend)}</span>
+                {campaign.spendChange !== null && campaign.spendChange !== undefined && (
+                  <span className={`ml-2 text-xs ${campaign.spendChange > 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                    {campaign.spendChange > 0 ? '+' : ''}{campaign.spendChange.toFixed(0)}% MoM
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
         </div>
+        
+        {campaign.dailyBudget && campaign.dailyBudget > 0 && (
+          <div>
+            <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+              <DollarSign className="w-4 h-4" /> Budget Metrics
+            </h5>
+            <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Daily Budget</span>
+                <span className="font-medium text-gray-900">${campaign.dailyBudget.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Avg Daily Spend</span>
+                <span className="font-medium text-gray-900">${campaign.avgDailySpend?.toFixed(2) || '-'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Utilization</span>
+                <div className="text-right">
+                  <span className={`font-medium ${
+                    (campaign.budgetUtilization || 0) < 50 ? 'text-red-600' :
+                    (campaign.budgetUtilization || 0) < 80 ? 'text-amber-600' : 'text-green-600'
+                  }`}>
+                    {campaign.budgetUtilization?.toFixed(0) || '-'}%
+                  </span>
+                  {campaign.budgetUtilizationChange !== null && campaign.budgetUtilizationChange !== undefined && (
+                    <span className={`ml-2 text-xs ${campaign.budgetUtilizationChange > 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                      {campaign.budgetUtilizationChange > 0 ? '+' : ''}{campaign.budgetUtilizationChange.toFixed(0)}% WoW
+                    </span>
+                  )}
+                </div>
+              </div>
+              {campaign.hasUnderspending && campaign.underspendingReason && (
+                <div className="mt-2 p-2 bg-red-50 rounded border border-red-100">
+                  <div className="flex items-center gap-2 text-red-600 text-xs">
+                    <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                    <span>{campaign.underspendingReason}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         
         {/* Advanced Metrics */}
         {(campaign.frequency !== null || campaign.audiencePenetration !== null || campaign.averageDwellTime !== null || campaign.cpcVsAccount !== null) && (
