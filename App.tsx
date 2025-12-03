@@ -502,6 +502,7 @@ const App: React.FC = () => {
               accountId={selectedAccountId}
               accountName={accounts.find(a => a.id === selectedAccountId)?.name || `Account ${selectedAccountId}`}
               onBack={() => setViewMode('AUDIT')}
+              onNavigateToAudit={() => setViewMode('AUDIT')}
             />
           ) : viewMode === 'AUDIT' ? (
             <AuditPage 

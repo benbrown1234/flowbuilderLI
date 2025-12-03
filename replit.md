@@ -48,6 +48,7 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   **Weekly Sync**: Default sync frequency is weekly; campaigns with LAN/Expansion get daily syncs.
     *   **Manual Refresh**: "Refresh" button to pull latest data on-demand.
 *   **Drilldown (Hourly Performance Analysis)**:
+    *   **Audit Prerequisite**: Drilldown requires audit to be enabled first. Hourly data collection begins when audit is activated.
     *   **Hourly Heatmap**: Visual 7x24 grid showing performance by day of week and hour of day (last 14 days).
     *   **Selectable Metrics**: Toggle between Impressions, Clicks, Spend, CTR, CPC, CPM, and Conversions.
     *   **Color-Coded Intensity**: Darker cells indicate higher activity/performance.

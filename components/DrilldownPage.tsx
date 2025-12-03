@@ -1,10 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronLeft, Filter, Clock, TrendingDown, AlertTriangle, Calendar, RefreshCw, BarChart3 } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { ChevronLeft, Filter, Clock, TrendingDown, AlertTriangle, Calendar, RefreshCw, BarChart3, Loader2, Play, ClipboardCheck } from 'lucide-react';
 
 interface DrilldownPageProps {
   accountId: string;
   accountName: string;
   onBack: () => void;
+  onNavigateToAudit?: () => void;
+}
+
+interface AuditAccountStatus {
+  optedIn: boolean;
+  accountId?: string;
+  accountName?: string;
+  optedInAt?: string;
+  lastSyncAt?: string;
+  syncStatus?: 'pending' | 'syncing' | 'completed' | 'error';
+  syncError?: string;
 }
 
 interface HeatmapCell {
@@ -61,7 +72,7 @@ const METRICS = [
   { key: 'conversions', label: 'Conversions', format: (v: number) => v.toLocaleString() },
 ];
 
-export default function DrilldownPage({ accountId, accountName, onBack }: DrilldownPageProps) {
+export default function DrilldownPage({ accountId, accountName, onBack, onNavigateToAudit }: DrilldownPageProps) {
   const [selectedMetric, setSelectedMetric] = useState('impressions');
   const [selectedCampaign, setSelectedCampaign] = useState<string | undefined>(undefined);
   const [campaigns, setCampaigns] = useState<CampaignWithData[]>([]);
@@ -69,14 +80,61 @@ export default function DrilldownPage({ accountId, accountName, onBack }: Drilld
   const [cutoffData, setCutoffData] = useState<CutoffData | null>(null);
   const [loading, setLoading] = useState(true);
   const [hoveredCell, setHoveredCell] = useState<{ day: number; hour: number } | null>(null);
+  const [auditStatus, setAuditStatus] = useState<AuditAccountStatus | null>(null);
+  const [checkingStatus, setCheckingStatus] = useState(true);
 
-  useEffect(() => {
-    fetchCampaigns();
+  const checkAuditStatus = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/audit/account/${accountId}`, {
+        credentials: 'include'
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setAuditStatus(data);
+        return data;
+      }
+    } catch (error) {
+      console.error('Error checking audit status:', error);
+    }
+    setCheckingStatus(false);
+    return null;
   }, [accountId]);
 
   useEffect(() => {
-    fetchData();
-  }, [accountId, selectedCampaign, selectedMetric]);
+    const init = async () => {
+      setCheckingStatus(true);
+      const status = await checkAuditStatus();
+      setCheckingStatus(false);
+      
+      if (status?.optedIn && status?.syncStatus === 'completed') {
+        fetchCampaigns();
+        fetchData();
+      }
+    };
+    init();
+  }, [accountId, checkAuditStatus]);
+
+  useEffect(() => {
+    if (!auditStatus?.optedIn) return;
+    if (auditStatus.syncStatus !== 'syncing' && auditStatus.syncStatus !== 'pending') return;
+    
+    const pollInterval = setInterval(async () => {
+      const status = await checkAuditStatus();
+      if (status?.syncStatus === 'completed') {
+        fetchCampaigns();
+        fetchData();
+        clearInterval(pollInterval);
+      }
+    }, 3000);
+    
+    return () => clearInterval(pollInterval);
+  }, [auditStatus, checkAuditStatus]);
+
+  useEffect(() => {
+    if (auditStatus?.optedIn && auditStatus?.syncStatus === 'completed') {
+      fetchData();
+    }
+  }, [selectedCampaign, selectedMetric]);
 
   const fetchCampaigns = async () => {
     try {
@@ -164,6 +222,56 @@ export default function DrilldownPage({ accountId, accountName, onBack }: Drilld
   };
 
   const maxValue = getMaxValue();
+
+  if (checkingStatus) {
+    return (
+      <div className="flex items-center justify-center h-full min-h-[400px]">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-4" />
+          <p className="text-gray-500">Checking audit status...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!auditStatus?.optedIn) {
+    return (
+      <div className="flex items-center justify-center h-full min-h-[400px]">
+        <div className="text-center max-w-md">
+          <ClipboardCheck className="w-16 h-16 text-gray-300 mx-auto mb-6" />
+          <h3 className="text-xl font-semibold text-gray-900 mb-3">Enable Audit First</h3>
+          <p className="text-gray-500 mb-6">
+            Drilldown analysis requires audit data. Start the audit to begin collecting 
+            hourly performance data for this account.
+          </p>
+          <button
+            onClick={onNavigateToAudit || onBack}
+            className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Play className="w-5 h-5" />
+            Go to Audit
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (auditStatus.syncStatus === 'syncing' || auditStatus.syncStatus === 'pending') {
+    return (
+      <div className="flex items-center justify-center h-full min-h-[400px]">
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 text-blue-500 animate-spin mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-gray-900 mb-2">Sync In Progress</h3>
+          <p className="text-gray-500 mb-2">
+            Collecting hourly performance data...
+          </p>
+          <p className="text-sm text-gray-400">
+            This may take a few minutes for large accounts.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
