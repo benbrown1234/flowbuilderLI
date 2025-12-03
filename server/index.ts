@@ -1948,6 +1948,18 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     try {
       campaignAnalytics = await linkedinApiRequest(sessionId, '/adAnalytics', {}, campaignAnalyticsQuery);
       console.log(`Got ${campaignAnalytics.elements?.length || 0} campaign analytics rows`);
+      // Debug: Log first element to check if new metrics are returned
+      if (campaignAnalytics.elements?.length > 0) {
+        const sample = campaignAnalytics.elements[0];
+        console.log('Sample analytics element fields:', {
+          impressions: sample.impressions,
+          clicks: sample.clicks,
+          approximateMemberReach: sample.approximateMemberReach,
+          audiencePenetration: sample.audiencePenetration,
+          averageDwellTime: sample.averageDwellTime,
+          allKeys: Object.keys(sample)
+        });
+      }
     } catch (err: any) {
       console.warn('Campaign analytics fetch error:', err.message);
     }
