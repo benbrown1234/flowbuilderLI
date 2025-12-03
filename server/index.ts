@@ -1974,7 +1974,7 @@ async function computeAndSaveScoringStatus(accountId: string, campaignMetrics: a
       const c = currentPeriodCampaigns.get(campaignId)!;
       c.impressions += m.impressions || 0;
       c.clicks += m.clicks || 0;
-      c.spend += m.spend || 0;
+      c.spend += parseFloat(m.spend) || 0;
       c.conversions += m.conversions || 0;
       c.activeDays.add(metricDate.toISOString().split('T')[0]);
     }
@@ -1986,7 +1986,7 @@ async function computeAndSaveScoringStatus(accountId: string, campaignMetrics: a
       const c = previousPeriodCampaigns.get(campaignId)!;
       c.impressions += m.impressions || 0;
       c.clicks += m.clicks || 0;
-      c.spend += m.spend || 0;
+      c.spend += parseFloat(m.spend) || 0;
       c.conversions += m.conversions || 0;
       c.activeDays.add(metricDate.toISOString().split('T')[0]);
     }
