@@ -157,9 +157,23 @@ export async function initDatabase() {
         ctr DECIMAL(8,4),
         cpc DECIMAL(10,4),
         cpm DECIMAL(10,4),
+        average_dwell_time DECIMAL(10,4) DEFAULT NULL,
+        scoring_status VARCHAR(50),
+        scoring_issues JSONB DEFAULT '[]',
+        scoring_breakdown JSONB DEFAULT '[]',
+        scoring_positive_signals JSONB DEFAULT '[]',
+        scoring_metadata JSONB DEFAULT '{}',
         created_at TIMESTAMP DEFAULT NOW(),
         UNIQUE(account_id, creative_id, metric_date)
       );
+      
+      -- Add scoring columns to creative_daily if they don't exist (for migration)
+      ALTER TABLE analytics_creative_daily ADD COLUMN IF NOT EXISTS average_dwell_time DECIMAL(10,4) DEFAULT NULL;
+      ALTER TABLE analytics_creative_daily ADD COLUMN IF NOT EXISTS scoring_status VARCHAR(50);
+      ALTER TABLE analytics_creative_daily ADD COLUMN IF NOT EXISTS scoring_issues JSONB DEFAULT '[]';
+      ALTER TABLE analytics_creative_daily ADD COLUMN IF NOT EXISTS scoring_breakdown JSONB DEFAULT '[]';
+      ALTER TABLE analytics_creative_daily ADD COLUMN IF NOT EXISTS scoring_positive_signals JSONB DEFAULT '[]';
+      ALTER TABLE analytics_creative_daily ADD COLUMN IF NOT EXISTS scoring_metadata JSONB DEFAULT '{}';
 
       CREATE INDEX IF NOT EXISTS idx_audit_accounts_account ON audit_accounts(account_id);
       CREATE INDEX IF NOT EXISTS idx_analytics_campaign_daily_account_date ON analytics_campaign_daily(account_id, metric_date DESC);
@@ -1113,18 +1127,21 @@ export async function updateCreativeScoring(
   accountId: string,
   creativeId: string,
   scoringStatus: string,
-  issues: string[]
+  issues: string[],
+  breakdown: { metric: string; value: string; threshold: string; contribution: number; applied: boolean }[] = [],
+  positiveSignals: string[] = [],
+  metadata: { score?: number; negativeScore?: number; positiveScore?: number; rawPositiveScore?: number; peerCount?: number } = {}
 ) {
   // Update the most recent row for this creative in analytics_creative_daily
   await pool.query(
     `UPDATE analytics_creative_daily 
-     SET scoring_status = $1, scoring_issues = $2
-     WHERE account_id = $3 AND creative_id = $4
+     SET scoring_status = $1, scoring_issues = $2, scoring_breakdown = $3, scoring_positive_signals = $4, scoring_metadata = $5
+     WHERE account_id = $6 AND creative_id = $7
      AND metric_date = (
        SELECT MAX(metric_date) FROM analytics_creative_daily 
-       WHERE account_id = $3 AND creative_id = $4
+       WHERE account_id = $6 AND creative_id = $7
      )`,
-    [scoringStatus, JSON.stringify(issues), accountId, creativeId]
+    [scoringStatus, JSON.stringify(issues), JSON.stringify(breakdown), JSON.stringify(positiveSignals), JSON.stringify(metadata), accountId, creativeId]
   );
 }
 
@@ -1146,7 +1163,10 @@ export async function getStructureScoringData(accountId: string) {
     pool.query(
       `SELECT DISTINCT ON (creative_id) 
               creative_id, campaign_id, scoring_status, 
-              COALESCE(scoring_issues, '[]'::jsonb) as scoring_issues 
+              COALESCE(scoring_issues, '[]'::jsonb) as scoring_issues,
+              COALESCE(scoring_breakdown, '[]'::jsonb) as scoring_breakdown,
+              COALESCE(scoring_positive_signals, '[]'::jsonb) as scoring_positive_signals,
+              COALESCE(scoring_metadata, '{}'::jsonb) as scoring_metadata
        FROM analytics_creative_daily 
        WHERE account_id = $1 AND scoring_status IS NOT NULL
        ORDER BY creative_id, metric_date DESC`,

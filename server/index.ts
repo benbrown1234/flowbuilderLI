@@ -2044,21 +2044,7 @@ async function computeAndSaveScoringStatus(accountId: string, campaignMetrics: a
       issues.push(`CTR below 0.4%`);
     }
     
-    // CPC scoring
-    if (accountAvgCpc > 0 && cpc > 0) {
-      const cpcVsAccount = ((cpc - accountAvgCpc) / accountAvgCpc) * 100;
-      if (cpcVsAccount > 30) {
-        negativeScore -= 2;
-        issues.push(`CPC ${cpcVsAccount.toFixed(0)}% above avg`);
-      } else if (cpcVsAccount > 15) {
-        negativeScore -= 1;
-        issues.push(`CPC ${cpcVsAccount.toFixed(0)}% above avg`);
-      } else if (cpcVsAccount <= -10) {
-        positiveScore += 1;
-        positiveSignals.push(`CPC ${Math.abs(cpcVsAccount).toFixed(0)}% below avg`);
-      }
-    }
-    
+    // CPC trend scoring (removed account comparison)
     if (prev && prevCpc > 0) {
       const cpcChange = pctChange(cpc, prevCpc);
       if (cpcChange > 25) {
@@ -2086,7 +2072,7 @@ async function computeAndSaveScoringStatus(accountId: string, campaignMetrics: a
     await updateCampaignScoring(accountId, campaignId, scoringStatus, issues, positiveSignals);
   }
   
-  // Score and save creatives
+  // Score and save creatives with peer comparison within campaigns
   const currentPeriodAds = new Map<string, any>();
   const previousPeriodAds = new Map<string, any>();
   
@@ -2099,7 +2085,10 @@ async function computeAndSaveScoringStatus(accountId: string, campaignMetrics: a
       campaignId,
       impressions: 0,
       clicks: 0,
-      conversions: 0
+      spend: 0,
+      conversions: 0,
+      dwellTimeSum: 0,
+      dwellTimeCount: 0
     });
     
     if (metricDate >= currentPeriodStart && metricDate <= currentPeriodEnd) {
@@ -2109,7 +2098,12 @@ async function computeAndSaveScoringStatus(accountId: string, campaignMetrics: a
       const a = currentPeriodAds.get(creativeId)!;
       a.impressions += m.impressions || 0;
       a.clicks += m.clicks || 0;
+      a.spend += parseFloat(m.spend) || 0;
       a.conversions += m.conversions || 0;
+      if (m.averageDwellTime && m.averageDwellTime > 0) {
+        a.dwellTimeSum += m.averageDwellTime * (m.impressions || 0);
+        a.dwellTimeCount += m.impressions || 0;
+      }
     }
     
     if (metricDate >= previousPeriodStart && metricDate <= previousPeriodEnd) {
@@ -2119,31 +2113,212 @@ async function computeAndSaveScoringStatus(accountId: string, campaignMetrics: a
       const a = previousPeriodAds.get(creativeId)!;
       a.impressions += m.impressions || 0;
       a.clicks += m.clicks || 0;
+      a.spend += parseFloat(m.spend) || 0;
       a.conversions += m.conversions || 0;
+      if (m.averageDwellTime && m.averageDwellTime > 0) {
+        a.dwellTimeSum += m.averageDwellTime * (m.impressions || 0);
+        a.dwellTimeCount += m.impressions || 0;
+      }
     }
   }
   
+  // Calculate campaign-level peer averages for ads
+  const campaignAdStats = new Map<string, {
+    ads: { id: string; ctr: number; cpc: number; cpm: number; dwellTime: number | null; conversions: number }[];
+  }>();
+  
+  for (const [adId, a] of currentPeriodAds) {
+    if (a.impressions < 500 || a.clicks < 10) continue;
+    
+    const ctr = a.impressions > 0 ? (a.clicks / a.impressions) * 100 : 0;
+    const cpc = a.clicks > 0 ? a.spend / a.clicks : 0;
+    const cpm = a.impressions > 0 ? (a.spend / a.impressions) * 1000 : 0;
+    const dwellTime = a.dwellTimeCount > 0 ? a.dwellTimeSum / a.dwellTimeCount : null;
+    
+    if (!campaignAdStats.has(a.campaignId)) {
+      campaignAdStats.set(a.campaignId, { ads: [] });
+    }
+    campaignAdStats.get(a.campaignId)!.ads.push({ id: adId, ctr, cpc, cpm, dwellTime, conversions: a.conversions });
+  }
+  
+  // Now score each ad against campaign peers
   for (const [adId, a] of currentPeriodAds) {
     const prev = previousPeriodAds.get(adId);
     const issues: string[] = [];
+    const positiveSignals: string[] = [];
+    const breakdown: { metric: string; value: string; threshold: string; contribution: number; applied: boolean }[] = [];
+    let negativeScore = 0;
+    let positiveScore = 0;
     
     if (a.impressions < 500 || a.clicks < 10 || !prev || prev.impressions < 100) {
-      await updateCreativeScoring(accountId, adId, 'insufficient_data', []);
+      await updateCreativeScoring(accountId, adId, 'insufficient_data', [], []);
       continue;
     }
     
     const ctr = a.impressions > 0 ? (a.clicks / a.impressions) * 100 : 0;
     const prevCtr = prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
+    const cpc = a.clicks > 0 ? a.spend / a.clicks : 0;
+    const cpm = a.impressions > 0 ? (a.spend / a.impressions) * 1000 : 0;
+    const dwellTime = a.dwellTimeCount > 0 ? a.dwellTimeSum / a.dwellTimeCount : null;
+    const prevDwellTime = prev.dwellTimeCount > 0 ? prev.dwellTimeSum / prev.dwellTimeCount : null;
+    const cvr = a.impressions > 0 ? (a.conversions / a.impressions) * 100 : 0;
+    const prevCvr = prev.impressions > 0 ? (prev.conversions / prev.impressions) * 100 : 0;
     
-    if (prevCtr > 0) {
-      const ctrChange = pctChange(ctr, prevCtr);
-      if (ctrChange < -20) {
-        issues.push(`CTR down ${Math.abs(ctrChange).toFixed(0)}%`);
+    // Get campaign peer stats
+    const campaignStats = campaignAdStats.get(a.campaignId);
+    const peerCount = campaignStats?.ads.length || 0;
+    
+    // Calculate campaign averages (only if there are multiple ads)
+    let campaignAvgCtr = 0, campaignAvgCpc = 0, campaignAvgCpm = 0, campaignAvgDwellTime: number | null = null;
+    if (campaignStats && peerCount > 1) {
+      campaignAvgCtr = campaignStats.ads.reduce((sum, ad) => sum + ad.ctr, 0) / peerCount;
+      campaignAvgCpc = campaignStats.ads.reduce((sum, ad) => sum + ad.cpc, 0) / peerCount;
+      campaignAvgCpm = campaignStats.ads.reduce((sum, ad) => sum + ad.cpm, 0) / peerCount;
+      const dwellAds = campaignStats.ads.filter(ad => ad.dwellTime !== null);
+      if (dwellAds.length > 1) {
+        campaignAvgDwellTime = dwellAds.reduce((sum, ad) => sum + (ad.dwellTime || 0), 0) / dwellAds.length;
       }
     }
     
-    const scoringStatus = issues.length > 0 ? 'needs_attention' : 'performing_well';
-    await updateCreativeScoring(accountId, adId, scoringStatus, issues);
+    // 1. CTR Trend scoring
+    if (prevCtr > 0) {
+      const ctrChange = pctChange(ctr, prevCtr);
+      if (ctrChange < -20) {
+        negativeScore -= 2;
+        issues.push(`CTR down ${Math.abs(ctrChange).toFixed(0)}% MoM`);
+        breakdown.push({ metric: 'CTR Trend', value: `${ctrChange.toFixed(0)}%`, threshold: '< -20%', contribution: -2, applied: true });
+      } else if (ctrChange >= 20) {
+        positiveScore += 1;
+        positiveSignals.push(`CTR up ${ctrChange.toFixed(0)}% MoM`);
+        breakdown.push({ metric: 'CTR Trend', value: `+${ctrChange.toFixed(0)}%`, threshold: '>= +20%', contribution: 1, applied: true });
+      } else {
+        breakdown.push({ metric: 'CTR Trend', value: `${ctrChange > 0 ? '+' : ''}${ctrChange.toFixed(0)}%`, threshold: '-20% to +20%', contribution: 0, applied: false });
+      }
+    }
+    
+    // 2. CTR vs Campaign Peers
+    if (peerCount > 1 && campaignAvgCtr > 0) {
+      const ctrVsPeers = ((ctr - campaignAvgCtr) / campaignAvgCtr) * 100;
+      if (ctrVsPeers < -25) {
+        negativeScore -= 2;
+        issues.push(`CTR ${Math.abs(ctrVsPeers).toFixed(0)}% below campaign avg`);
+        breakdown.push({ metric: 'CTR vs Peers', value: `${ctr.toFixed(2)}% vs ${campaignAvgCtr.toFixed(2)}%`, threshold: '< -25%', contribution: -2, applied: true });
+      } else if (ctrVsPeers < -15) {
+        negativeScore -= 1;
+        issues.push(`CTR ${Math.abs(ctrVsPeers).toFixed(0)}% below campaign avg`);
+        breakdown.push({ metric: 'CTR vs Peers', value: `${ctr.toFixed(2)}% vs ${campaignAvgCtr.toFixed(2)}%`, threshold: '-25% to -15%', contribution: -1, applied: true });
+      } else if (ctrVsPeers >= 25) {
+        positiveScore += 1;
+        positiveSignals.push(`CTR ${ctrVsPeers.toFixed(0)}% above campaign avg`);
+        breakdown.push({ metric: 'CTR vs Peers', value: `${ctr.toFixed(2)}% vs ${campaignAvgCtr.toFixed(2)}%`, threshold: '>= +25%', contribution: 1, applied: true });
+      } else {
+        breakdown.push({ metric: 'CTR vs Peers', value: `${ctr.toFixed(2)}% vs ${campaignAvgCtr.toFixed(2)}%`, threshold: '-15% to +25%', contribution: 0, applied: false });
+      }
+    }
+    
+    // 3. CPC vs Campaign Peers
+    if (peerCount > 1 && campaignAvgCpc > 0 && cpc > 0) {
+      const cpcVsPeers = ((cpc - campaignAvgCpc) / campaignAvgCpc) * 100;
+      if (cpcVsPeers > 30) {
+        negativeScore -= 2;
+        issues.push(`CPC ${cpcVsPeers.toFixed(0)}% above campaign avg`);
+        breakdown.push({ metric: 'CPC vs Peers', value: `$${cpc.toFixed(2)} vs $${campaignAvgCpc.toFixed(2)}`, threshold: '> +30%', contribution: -2, applied: true });
+      } else if (cpcVsPeers > 15) {
+        negativeScore -= 1;
+        issues.push(`CPC ${cpcVsPeers.toFixed(0)}% above campaign avg`);
+        breakdown.push({ metric: 'CPC vs Peers', value: `$${cpc.toFixed(2)} vs $${campaignAvgCpc.toFixed(2)}`, threshold: '+15% to +30%', contribution: -1, applied: true });
+      } else if (cpcVsPeers <= -15) {
+        positiveScore += 1;
+        positiveSignals.push(`CPC ${Math.abs(cpcVsPeers).toFixed(0)}% below campaign avg`);
+        breakdown.push({ metric: 'CPC vs Peers', value: `$${cpc.toFixed(2)} vs $${campaignAvgCpc.toFixed(2)}`, threshold: '<= -15%', contribution: 1, applied: true });
+      } else {
+        breakdown.push({ metric: 'CPC vs Peers', value: `$${cpc.toFixed(2)} vs $${campaignAvgCpc.toFixed(2)}`, threshold: '-15% to +15%', contribution: 0, applied: false });
+      }
+    }
+    
+    // 4. CPM vs Campaign Peers  
+    if (peerCount > 1 && campaignAvgCpm > 0 && cpm > 0) {
+      const cpmVsPeers = ((cpm - campaignAvgCpm) / campaignAvgCpm) * 100;
+      if (cpmVsPeers > 30) {
+        negativeScore -= 1;
+        issues.push(`CPM ${cpmVsPeers.toFixed(0)}% above campaign avg`);
+        breakdown.push({ metric: 'CPM vs Peers', value: `$${cpm.toFixed(2)} vs $${campaignAvgCpm.toFixed(2)}`, threshold: '> +30%', contribution: -1, applied: true });
+      } else if (cpmVsPeers <= -20) {
+        positiveScore += 1;
+        positiveSignals.push(`CPM ${Math.abs(cpmVsPeers).toFixed(0)}% below campaign avg`);
+        breakdown.push({ metric: 'CPM vs Peers', value: `$${cpm.toFixed(2)} vs $${campaignAvgCpm.toFixed(2)}`, threshold: '<= -20%', contribution: 1, applied: true });
+      } else {
+        breakdown.push({ metric: 'CPM vs Peers', value: `$${cpm.toFixed(2)} vs $${campaignAvgCpm.toFixed(2)}`, threshold: '-20% to +30%', contribution: 0, applied: false });
+      }
+    }
+    
+    // 5. Dwell Time scoring
+    if (dwellTime !== null) {
+      if (dwellTime < 1.5) {
+        negativeScore -= 1;
+        issues.push(`Low dwell time (${dwellTime.toFixed(1)}s)`);
+        breakdown.push({ metric: 'Dwell Time', value: `${dwellTime.toFixed(1)}s`, threshold: '< 1.5s', contribution: -1, applied: true });
+      } else if (dwellTime >= 4) {
+        positiveScore += 1;
+        positiveSignals.push(`Strong dwell time (${dwellTime.toFixed(1)}s)`);
+        breakdown.push({ metric: 'Dwell Time', value: `${dwellTime.toFixed(1)}s`, threshold: '>= 4s', contribution: 1, applied: true });
+      } else {
+        breakdown.push({ metric: 'Dwell Time', value: `${dwellTime.toFixed(1)}s`, threshold: '1.5s to 4s', contribution: 0, applied: false });
+      }
+      
+      // Dwell Time vs Peers
+      if (peerCount > 1 && campaignAvgDwellTime !== null && campaignAvgDwellTime > 0) {
+        const dwellVsPeers = ((dwellTime - campaignAvgDwellTime) / campaignAvgDwellTime) * 100;
+        if (dwellVsPeers < -25) {
+          negativeScore -= 1;
+          issues.push(`Dwell ${Math.abs(dwellVsPeers).toFixed(0)}% below campaign avg`);
+          breakdown.push({ metric: 'Dwell vs Peers', value: `${dwellTime.toFixed(1)}s vs ${campaignAvgDwellTime.toFixed(1)}s`, threshold: '< -25%', contribution: -1, applied: true });
+        } else if (dwellVsPeers >= 25) {
+          positiveScore += 1;
+          positiveSignals.push(`Dwell ${dwellVsPeers.toFixed(0)}% above campaign avg`);
+          breakdown.push({ metric: 'Dwell vs Peers', value: `${dwellTime.toFixed(1)}s vs ${campaignAvgDwellTime.toFixed(1)}s`, threshold: '>= +25%', contribution: 1, applied: true });
+        } else {
+          breakdown.push({ metric: 'Dwell vs Peers', value: `${dwellTime.toFixed(1)}s vs ${campaignAvgDwellTime.toFixed(1)}s`, threshold: '-25% to +25%', contribution: 0, applied: false });
+        }
+      }
+    }
+    
+    // 6. Conversion Rate decline (if sufficient conversions)
+    if (a.conversions >= 3 && prev.conversions >= 3 && prevCvr > 0) {
+      const cvrChange = pctChange(cvr, prevCvr);
+      if (cvrChange < -20) {
+        negativeScore -= 1;
+        issues.push(`CVR down ${Math.abs(cvrChange).toFixed(0)}% MoM`);
+        breakdown.push({ metric: 'CVR Trend', value: `${cvrChange.toFixed(0)}%`, threshold: '< -20% (3+ conv)', contribution: -1, applied: true });
+      } else if (cvrChange >= 20) {
+        positiveScore += 1;
+        positiveSignals.push(`CVR up ${cvrChange.toFixed(0)}% MoM`);
+        breakdown.push({ metric: 'CVR Trend', value: `+${cvrChange.toFixed(0)}%`, threshold: '>= +20% (3+ conv)', contribution: 1, applied: true });
+      } else {
+        breakdown.push({ metric: 'CVR Trend', value: `${cvrChange > 0 ? '+' : ''}${cvrChange.toFixed(0)}%`, threshold: '-20% to +20%', contribution: 0, applied: false });
+      }
+    }
+    
+    // Cap positive score at +2
+    const effectivePositive = Math.min(positiveScore, 2);
+    const finalScore = negativeScore + effectivePositive;
+    
+    let scoringStatus: string;
+    if (finalScore <= -2) {
+      scoringStatus = 'needs_attention';
+    } else if (finalScore < 0) {
+      scoringStatus = 'mild_issues';  
+    } else {
+      scoringStatus = 'performing_well';
+    }
+    
+    await updateCreativeScoring(accountId, adId, scoringStatus, issues, breakdown, positiveSignals, { 
+      score: finalScore, 
+      negativeScore, 
+      positiveScore: effectivePositive,
+      rawPositiveScore: positiveScore,
+      peerCount 
+    });
   }
   
   console.log(`Saved scoring for ${currentPeriodCampaigns.size} campaigns and ${currentPeriodAds.size} ads`);
@@ -3828,6 +4003,36 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       });
     }
     
+    // Get precomputed scoring data for ads from database
+    const scoringData = await getStructureScoringData(accountId);
+    const adScoringMap = new Map<string, { 
+      scoringStatus: string; 
+      issues: string[]; 
+      scoringBreakdown: any[];
+      positiveSignals: string[];
+      scoringMetadata: any;
+    }>();
+    
+    for (const a of scoringData.creatives) {
+      let issues = a.scoring_issues;
+      let breakdown = a.scoring_breakdown;
+      let positiveSignals = a.scoring_positive_signals;
+      let metadata = a.scoring_metadata;
+      
+      if (typeof issues === 'string') try { issues = JSON.parse(issues); } catch { issues = []; }
+      if (typeof breakdown === 'string') try { breakdown = JSON.parse(breakdown); } catch { breakdown = []; }
+      if (typeof positiveSignals === 'string') try { positiveSignals = JSON.parse(positiveSignals); } catch { positiveSignals = []; }
+      if (typeof metadata === 'string') try { metadata = JSON.parse(metadata); } catch { metadata = {}; }
+      
+      adScoringMap.set(a.creative_id, {
+        scoringStatus: a.scoring_status,
+        issues: Array.isArray(issues) ? issues : [],
+        scoringBreakdown: Array.isArray(breakdown) ? breakdown : [],
+        positiveSignals: Array.isArray(positiveSignals) ? positiveSignals : [],
+        scoringMetadata: metadata || {}
+      });
+    }
+    
     // Build ads in the expected format (AdItem)
     const ads = hasCurrentPeriod ? Array.from(currentPeriodCreatives.values()).map(c => {
       const prev = hasPreviousPeriod ? previousPeriodCreatives.get(c.creativeId) : null;
@@ -3838,6 +4043,9 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       
       // Get parent campaign data
       const parentCampaign = campaignDataMap.get(c.campaignId);
+      
+      // Get precomputed scoring data for this ad
+      const precomputedScoring = adScoringMap.get(c.creativeId);
       
       // Average Dwell Time for ads (weighted by impressions)
       const averageDwellTime = c.averageDwellTimeCount > 0 
@@ -3857,34 +4065,53 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       const hasPrevConversions = prevConversions >= 3;
       const cvrChange = hasPrevConversions && prevCvr > 0 ? pctChange(currentCvr, prevCvr) : null;
       
-      // Determine scoring status and issues
-      const issues: string[] = [];
-      let scoringStatus: 'needs_attention' | 'performing_well' | 'insufficient_data' = 'performing_well';
+      // Calculate CPC and CPM for this ad
+      const cpc = c.clicks > 0 ? c.spend / c.clicks : 0;
+      const cpm = c.impressions > 0 ? (c.spend / c.impressions) * 1000 : 0;
       
-      // Low volume filter - not enough data to score
-      if (c.impressions < 500 || c.clicks < 10) {
-        scoringStatus = 'insufficient_data';
-      } 
-      // No previous data to compare against
-      else if (!hasPreviousData) {
-        scoringStatus = 'insufficient_data';
-      }
-      else {
-        // CTR decline > 20%
-        if (ctrChange !== null && ctrChange < -20) {
-          issues.push(`CTR down ${Math.abs(ctrChange).toFixed(0)}%`);
-        }
+      // Use precomputed scoring if available, otherwise fallback to basic logic
+      let scoringStatus: 'needs_attention' | 'mild_issues' | 'performing_well' | 'insufficient_data';
+      let issues: string[];
+      let positiveSignals: string[] = [];
+      let scoringBreakdown: any[] = [];
+      let scoringMetadata: any = {};
+      
+      if (precomputedScoring) {
+        scoringStatus = precomputedScoring.scoringStatus as any;
+        issues = precomputedScoring.issues;
+        positiveSignals = precomputedScoring.positiveSignals;
+        scoringBreakdown = precomputedScoring.scoringBreakdown;
+        scoringMetadata = precomputedScoring.scoringMetadata;
+      } else {
+        // Fallback: basic scoring logic for ads without precomputed data
+        issues = [];
+        scoringStatus = 'performing_well';
         
-        // Conversion rate decline > 20% (if ≥3 conversions in both periods)
-        if (c.conversions >= 3 && hasPrevConversions && cvrChange !== null && cvrChange < -20) {
-          issues.push(`CVR down ${Math.abs(cvrChange).toFixed(0)}%`);
+        // Low volume filter - not enough data to score
+        if (c.impressions < 500 || c.clicks < 10) {
+          scoringStatus = 'insufficient_data';
+        } 
+        // No previous data to compare against
+        else if (!hasPreviousData) {
+          scoringStatus = 'insufficient_data';
         }
-        
-        // Set status based on issues
-        scoringStatus = issues.length > 0 ? 'needs_attention' : 'performing_well';
+        else {
+          // CTR decline > 20%
+          if (ctrChange !== null && ctrChange < -20) {
+            issues.push(`CTR down ${Math.abs(ctrChange).toFixed(0)}%`);
+          }
+          
+          // Conversion rate decline > 20% (if ≥3 conversions in both periods)
+          if (c.conversions >= 3 && hasPrevConversions && cvrChange !== null && cvrChange < -20) {
+            issues.push(`CVR down ${Math.abs(cvrChange).toFixed(0)}%`);
+          }
+          
+          // Set status based on issues
+          scoringStatus = issues.length > 0 ? 'needs_attention' : 'performing_well';
+        }
       }
       
-      const isPerformingWell = scoringStatus === 'performing_well';
+      const isPerformingWell = scoringStatus === 'performing_well' || scoringStatus === 'mild_issues';
       
       // Inherit campaign issues for context (but keep ad's own status separate)
       const campaignIssues = parentCampaign?.issues || [];
@@ -3909,11 +4136,16 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         prevClicks: prev?.clicks || 0,
         spend: c.spend,
         prevSpend: prev?.spend || 0,
+        cpc,
+        cpm,
         averageDwellTime,
         dwellTimeChange,
         scoringStatus,
         isPerformingWell,
         issues,
+        positiveSignals,
+        scoringBreakdown,
+        scoringMetadata,
         // Inherited campaign context
         campaignIssues,
         campaignScoringStatus,
@@ -4006,13 +4238,29 @@ app.get('/api/audit/structure-summary/:accountId', requireAuth, async (req, res)
     for (const a of scoringData.creatives) {
       // Ensure arrays are properly parsed
       let issues = a.scoring_issues;
+      let breakdown = a.scoring_breakdown;
+      let positiveSignals = a.scoring_positive_signals;
+      let metadata = a.scoring_metadata;
+      
       if (typeof issues === 'string') {
         try { issues = JSON.parse(issues); } catch { issues = []; }
+      }
+      if (typeof breakdown === 'string') {
+        try { breakdown = JSON.parse(breakdown); } catch { breakdown = []; }
+      }
+      if (typeof positiveSignals === 'string') {
+        try { positiveSignals = JSON.parse(positiveSignals); } catch { positiveSignals = []; }
+      }
+      if (typeof metadata === 'string') {
+        try { metadata = JSON.parse(metadata); } catch { metadata = {}; }
       }
       
       adsMap[a.creative_id] = {
         scoringStatus: a.scoring_status,
         issues: Array.isArray(issues) ? issues : [],
+        scoringBreakdown: Array.isArray(breakdown) ? breakdown : [],
+        positiveSignals: Array.isArray(positiveSignals) ? positiveSignals : [],
+        scoringMetadata: metadata || {},
         campaignId: a.campaign_id
       };
     }

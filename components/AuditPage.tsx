@@ -119,7 +119,15 @@ interface CampaignItem {
   flags?: string[];
 }
 
-type AdScoringStatus = 'needs_attention' | 'performing_well' | 'insufficient_data';
+type AdScoringStatus = 'needs_attention' | 'mild_issues' | 'performing_well' | 'insufficient_data';
+
+interface AdBreakdownItem {
+  metric: string;
+  value: string;
+  threshold: string;
+  contribution: number;
+  applied: boolean;
+}
 
 interface AdItem {
   id: string;
@@ -140,11 +148,22 @@ interface AdItem {
   prevClicks?: number;
   spend?: number;
   prevSpend?: number;
+  cpc?: number;
+  cpm?: number;
   averageDwellTime?: number | null;
   dwellTimeChange?: number | null;
   scoringStatus?: AdScoringStatus;
   isPerformingWell: boolean;
   issues: string[];
+  positiveSignals?: string[];
+  scoringBreakdown?: AdBreakdownItem[];
+  scoringMetadata?: {
+    score?: number;
+    negativeScore?: number;
+    positiveScore?: number;
+    rawPositiveScore?: number;
+    peerCount?: number;
+  };
   campaignIssues?: string[];
   campaignScoringStatus?: string;
   hasCampaignIssues?: boolean;
@@ -966,6 +985,9 @@ function AdDetailSidebar({ ad, accountId, onClose }: {
     if (ad.scoringStatus === 'needs_attention') {
       return <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium"><XCircle className="w-3 h-3" /> Needs Attention</span>;
     }
+    if (ad.scoringStatus === 'mild_issues') {
+      return <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-700 rounded text-xs font-medium"><AlertTriangle className="w-3 h-3" /> Mild Issues</span>;
+    }
     if (ad.scoringStatus === 'insufficient_data') {
       return <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium"><Info className="w-3 h-3" /> Insufficient Data</span>;
     }
@@ -998,6 +1020,21 @@ function AdDetailSidebar({ ad, accountId, onClose }: {
           </a>
         </div>
         
+        {ad.positiveSignals && ad.positiveSignals.length > 0 && (
+          <div className="bg-green-50 rounded-lg p-4 border border-green-100">
+            <h5 className="font-medium text-green-800 mb-2 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" /> Positive Signals
+            </h5>
+            <ul className="space-y-1">
+              {ad.positiveSignals.map((signal, idx) => (
+                <li key={idx} className="text-sm text-green-700 flex items-start gap-2">
+                  <span className="text-green-400 mt-1">•</span> {signal}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        
         {ad.issues.length > 0 && (
           <div className="bg-red-50 rounded-lg p-4 border border-red-100">
             <h5 className="font-medium text-red-800 mb-2 flex items-center gap-2">
@@ -1027,6 +1064,73 @@ function AdDetailSidebar({ ad, accountId, onClose }: {
           </div>
         )}
         
+        {ad.scoringBreakdown && ad.scoringBreakdown.length > 0 && (
+          <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+            <h5 className="font-medium text-slate-800 mb-3 flex items-center gap-2">
+              <BarChart3 className="w-4 h-4" /> Scoring Breakdown
+              {ad.scoringMetadata?.peerCount && ad.scoringMetadata.peerCount > 1 && (
+                <span className="text-xs font-normal text-slate-500">
+                  ({ad.scoringMetadata.peerCount} ads in campaign)
+                </span>
+              )}
+            </h5>
+            <div className="space-y-1.5">
+              {ad.scoringBreakdown.map((item, idx) => (
+                <div key={idx} className={`flex justify-between py-1.5 px-2 rounded ${item.applied ? 'bg-white' : ''}`}>
+                  <div className="flex-1">
+                    <span className={item.applied ? 'font-medium text-slate-800' : 'text-slate-500'}>
+                      {item.metric}
+                    </span>
+                    <span className="text-slate-400 ml-1 text-[10px]">({item.threshold})</span>
+                  </div>
+                  <div className="text-right flex items-center gap-2">
+                    <span className="text-slate-600 text-sm">{item.value}</span>
+                    {item.contribution !== 0 ? (
+                      <span className={`font-bold min-w-[30px] text-right ${
+                        item.contribution > 0 ? 'text-green-600' : 'text-red-600'
+                      }`}>
+                        {item.contribution > 0 ? '+' : ''}{item.contribution}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 min-w-[30px] text-right">0</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            {ad.scoringMetadata && (
+              <div className="mt-3 pt-3 border-t border-slate-300 space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Negative Total</span>
+                  <span className="text-red-600 font-medium">{ad.scoringMetadata.negativeScore || 0}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Positive Total</span>
+                  <span className="text-green-600 font-medium">
+                    +{ad.scoringMetadata.positiveScore || 0}
+                    {ad.scoringMetadata.rawPositiveScore && ad.scoringMetadata.rawPositiveScore > 2 && (
+                      <span className="text-slate-400 text-[10px] ml-1">(raw +{ad.scoringMetadata.rawPositiveScore} capped)</span>
+                    )}
+                  </span>
+                </div>
+                <div className="flex justify-between font-medium">
+                  <span className="text-slate-700">Combined Score</span>
+                  <span className={`font-bold ${
+                    (ad.scoringMetadata.score || 0) <= -2 ? 'text-red-600' :
+                    (ad.scoringMetadata.score || 0) < 0 ? 'text-amber-600' : 'text-green-600'
+                  }`}>
+                    {ad.scoringMetadata.score || 0}
+                  </span>
+                </div>
+                <div className="text-slate-400 italic text-[10px] pt-1">
+                  Tiers: ≤-2 Needs Attention | &lt;0 Mild Issues | ≥0 Performing Well
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        
         <div>
           <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
             <BarChart3 className="w-4 h-4" /> Current Period (4 weeks)
@@ -1040,6 +1144,26 @@ function AdDetailSidebar({ ad, accountId, onClose }: {
               isPositive={(ad.ctrChange || 0) > 0}
               format="percent"
             />
+            {ad.cpc !== undefined && ad.cpc > 0 && (
+              <MetricRow 
+                label="CPC" 
+                current={ad.cpc} 
+                previous={undefined}
+                change={undefined} 
+                isPositive={true}
+                format="currency"
+              />
+            )}
+            {ad.cpm !== undefined && ad.cpm > 0 && (
+              <MetricRow 
+                label="CPM" 
+                current={ad.cpm} 
+                previous={undefined}
+                change={undefined} 
+                isPositive={true}
+                format="currency"
+              />
+            )}
             <MetricRow 
               label="Impressions" 
               current={ad.impressions} 
@@ -1090,15 +1214,6 @@ function AdDetailSidebar({ ad, accountId, onClose }: {
               </div>
             )}
           </div>
-        </div>
-        
-        <div className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3">
-          <p className="font-medium mb-1">Scoring Criteria:</p>
-          <ul className="space-y-1">
-            <li>• CTR decline &gt;20% from previous 4 weeks</li>
-            <li>• Conversion rate decline &gt;20% (if 3+ conversions)</li>
-            <li>• Minimum 500 impressions and 10 clicks required</li>
-          </ul>
         </div>
       </div>
     </div>
