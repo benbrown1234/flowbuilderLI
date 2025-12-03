@@ -87,6 +87,7 @@ interface CampaignItem {
   // New metrics
   frequency?: number | null;
   audiencePenetration?: number | null;
+  averageDwellTime?: number | null;
   cpcVsAccount?: number | null;
   cpaVsAccount?: number | null;
   // Scoring breakdown with actual applied contributions

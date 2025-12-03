@@ -17,12 +17,18 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
 *   **Account Audit**:
     *   **Opt-In System**: Audit is opt-in per account. Click "Start Audit" to enable weekly tracking.
     *   **3-Tier Dashboard**: Three color-coded sections - "Needs Attention" (red), "Mild Issues" (amber), and "Performing Well" (green).
-    *   **Point-Based Scoring**: Campaigns scored across ~10 criteria with automatic classification:
-        - CTR: -2 for >20% decline (4w), -1 for >15% decline (WoW), -2 for <0.3%, -1 for <0.4%
-        - CPC: -2 for >25% increase (4w), -1 for >20% increase (WoW)
+    *   **Point-Based Scoring**: Campaigns scored across ~13 criteria with automatic classification:
+        - CTR: -2 for >20% decline (4w), -2 for <0.3%, -1 for <0.4%; +1 for ≥20% improvement, +2 for ≥35% improvement
+        - CPC: -2 for >25% increase (4w), -1 for >20% increase (WoW); vs Account: -2 for >30%, -1 for >15%, +1 for ≤-10%
         - CPM: -2 for >25% increase (4w), -1 for >20% increase (WoW)
-        - Budget: -10 (auto flag) for <50% utilization, -1 for <80% utilization
+        - Budget: -10 (hard failure) for <50% utilization, -1 for <80% utilization
         - Conversions: -2 for >25% decline, -2 for CPA up >25% (if ≥5 conversions)
+        - CPA vs Account: +2 for ≤-25% (≥15 conv), +1 for ≤-15% (≥5 conv)
+        - Frequency (impressions/reach): -2 for >6x, -1 for >4x, +1 for 1.5-3x with stable CTR
+        - Audience Penetration: -2 for <10%, -1 for <20%, +1 for >60% with stable CTR
+        - Avg Dwell Time: -1 for <1.5s, +1 for ≥4s (engagement quality)
+        - Positive scoring capped at +2 per campaign, disabled on hard failures (budget <50%)
+        - Negative scoring capped at -10
         - Score thresholds: ≤-3 = needs_attention, <0 = mild_issues, ≥0 = performing_well
     *   **4-Week Comparison**: Uses 4-week on 4-week comparison to save API bandwidth.
     *   **Special Flags**: LAN, Expansion, and Maximize Delivery shown as colored badges.

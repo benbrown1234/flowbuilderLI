@@ -125,9 +125,17 @@ export async function initDatabase() {
         ctr DECIMAL(8,4),
         cpc DECIMAL(10,4),
         cpm DECIMAL(10,4),
+        approximate_member_reach BIGINT DEFAULT NULL,
+        audience_penetration DECIMAL(10,6) DEFAULT NULL,
+        average_dwell_time BIGINT DEFAULT NULL,
         created_at TIMESTAMP DEFAULT NOW(),
         UNIQUE(account_id, campaign_id, metric_date)
       );
+      
+      -- Add columns if they don't exist (for migration)
+      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS approximate_member_reach BIGINT DEFAULT NULL;
+      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS audience_penetration DECIMAL(10,6) DEFAULT NULL;
+      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS average_dwell_time BIGINT DEFAULT NULL;
 
       -- Daily analytics for ads/creatives
       CREATE TABLE IF NOT EXISTS analytics_creative_daily (
@@ -642,6 +650,9 @@ export async function saveCampaignDailyMetrics(
     conversions?: number;
     videoViews?: number;
     leads?: number;
+    approximateMemberReach?: number | null;
+    audiencePenetration?: number | null;
+    averageDwellTime?: number | null;
   }>
 ) {
   const accId = String(accountId);
@@ -655,8 +666,8 @@ export async function saveCampaignDailyMetrics(
     
     await pool.query(
       `INSERT INTO analytics_campaign_daily 
-       (account_id, campaign_id, campaign_name, campaign_group_id, campaign_status, metric_date, impressions, clicks, spend, conversions, video_views, leads, ctr, cpc, cpm)
-       VALUES ($1::text, $2::text, $3::text, $4::text, $5::text, $6::date, $7::bigint, $8::bigint, $9::numeric, $10::integer, $11::bigint, $12::integer, $13::numeric, $14::numeric, $15::numeric)
+       (account_id, campaign_id, campaign_name, campaign_group_id, campaign_status, metric_date, impressions, clicks, spend, conversions, video_views, leads, ctr, cpc, cpm, approximate_member_reach, audience_penetration, average_dwell_time)
+       VALUES ($1::text, $2::text, $3::text, $4::text, $5::text, $6::date, $7::bigint, $8::bigint, $9::numeric, $10::integer, $11::bigint, $12::integer, $13::numeric, $14::numeric, $15::numeric, $16::bigint, $17::numeric, $18::bigint)
        ON CONFLICT (account_id, campaign_id, metric_date) DO UPDATE SET
          campaign_name = EXCLUDED.campaign_name,
          campaign_group_id = EXCLUDED.campaign_group_id,
@@ -669,7 +680,10 @@ export async function saveCampaignDailyMetrics(
          leads = EXCLUDED.leads,
          ctr = EXCLUDED.ctr,
          cpc = EXCLUDED.cpc,
-         cpm = EXCLUDED.cpm`,
+         cpm = EXCLUDED.cpm,
+         approximate_member_reach = EXCLUDED.approximate_member_reach,
+         audience_penetration = EXCLUDED.audience_penetration,
+         average_dwell_time = EXCLUDED.average_dwell_time`,
       [
         accId,
         String(m.campaignId),
@@ -685,7 +699,10 @@ export async function saveCampaignDailyMetrics(
         m.leads || 0,
         ctr,
         cpc,
-        cpm
+        cpm,
+        m.approximateMemberReach || null,
+        m.audiencePenetration || null,
+        m.averageDwellTime || null
       ]
     );
   }

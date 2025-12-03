@@ -1941,7 +1941,8 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     const encodedAccountUrn = encodeURIComponent(accountUrn);
     
     // Fetch campaign-level analytics with daily granularity
-    const campaignAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,dateRange,pivotValues`;
+    // Include approximateMemberReach, audiencePenetration for frequency/penetration scoring
+    const campaignAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,approximateMemberReach,audiencePenetration,dateRange,pivotValues`;
     
     let campaignAnalytics: any = { elements: [] };
     try {
@@ -1953,7 +1954,7 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     
     // Step 4: Fetch creative-level analytics (with delay)
     await delay(300);
-    const creativeAnalyticsQuery = `q=analytics&pivot=CREATIVE&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,dateRange,pivotValues`;
+    const creativeAnalyticsQuery = `q=analytics&pivot=CREATIVE&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,approximateMemberReach,audiencePenetration,dateRange,pivotValues`;
     
     let creativeAnalytics: any = { elements: [] };
     try {
@@ -2013,7 +2014,10 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
         spend: parseFloat(elem.costInLocalCurrency || '0'),
         conversions: elem.externalWebsiteConversions || 0,
         videoViews: elem.videoViews || 0,
-        leads: elem.oneClickLeads || 0
+        leads: elem.oneClickLeads || 0,
+        approximateMemberReach: elem.approximateMemberReach || null,
+        audiencePenetration: elem.audiencePenetration || null,
+        averageDwellTime: elem.averageDwellTime || null
       });
     }
     
@@ -2153,7 +2157,8 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     const encodedAccountUrn = encodeURIComponent(accountUrn);
     
     // Fetch campaign-level analytics with daily granularity
-    const campaignAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,dateRange,pivotValues`;
+    // Include approximateMemberReach, audiencePenetration for frequency/penetration scoring
+    const campaignAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,approximateMemberReach,audiencePenetration,dateRange,pivotValues`;
     
     let campaignAnalytics: any = { elements: [] };
     try {
@@ -2165,7 +2170,7 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     
     // Step 4: Fetch creative-level analytics (with delay)
     await delay(300);
-    const creativeAnalyticsQuery = `q=analytics&pivot=CREATIVE&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,dateRange,pivotValues`;
+    const creativeAnalyticsQuery = `q=analytics&pivot=CREATIVE&dateRange=(start:(year:${threeMonthsAgo.getFullYear()},month:${threeMonthsAgo.getMonth() + 1},day:1),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=DAILY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,oneClickLeads,videoViews,averageDwellTime,approximateMemberReach,audiencePenetration,dateRange,pivotValues`;
     
     let creativeAnalytics: any = { elements: [] };
     try {
@@ -2225,7 +2230,10 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
         spend: parseFloat(elem.costInLocalCurrency || '0'),
         conversions: elem.externalWebsiteConversions || 0,
         videoViews: elem.videoViews || 0,
-        leads: elem.oneClickLeads || 0
+        leads: elem.oneClickLeads || 0,
+        approximateMemberReach: elem.approximateMemberReach || null,
+        audiencePenetration: elem.audiencePenetration || null,
+        averageDwellTime: elem.averageDwellTime || null
       });
     }
     
@@ -2560,7 +2568,13 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
           spend: 0,
           conversions: 0,
           videoViews: 0,
-          leads: 0
+          leads: 0,
+          approximateMemberReach: 0,
+          audiencePenetrationSum: 0,
+          audiencePenetrationCount: 0,
+          averageDwellTimeSum: 0,
+          averageDwellTimeCount: 0,
+          activeDays: 0
         });
       }
       
@@ -2571,6 +2585,22 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       agg.conversions += parseInt(m.conversions) || 0;
       agg.videoViews += parseInt(m.video_views) || 0;
       agg.leads += parseInt(m.leads) || 0;
+      agg.activeDays += 1;
+      
+      // Track reach for frequency calculation (sum unique members)
+      if (m.approximate_member_reach) {
+        agg.approximateMemberReach += parseInt(m.approximate_member_reach) || 0;
+      }
+      // Track audience penetration (average over days with data)
+      if (m.audience_penetration !== null && m.audience_penetration !== undefined) {
+        agg.audiencePenetrationSum += parseFloat(m.audience_penetration) || 0;
+        agg.audiencePenetrationCount += 1;
+      }
+      // Track average dwell time (weighted by impressions)
+      if (m.average_dwell_time !== null && m.average_dwell_time !== undefined && m.impressions > 0) {
+        agg.averageDwellTimeSum += (parseInt(m.average_dwell_time) || 0) * (parseInt(m.impressions) || 0);
+        agg.averageDwellTimeCount += parseInt(m.impressions) || 0;
+      }
     }
     
     for (const m of creativeMetrics) {
@@ -2695,13 +2725,20 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
       const hasExpansion = liveSettings.hasExpansion || false;
       const hasMaximizeDelivery = liveSettings.hasMaximizeDelivery || false;
       
-      // New metrics from live settings
-      const audiencePenetration = liveSettings.audiencePenetration || null;
-      const approximateMemberReach = liveSettings.approximateMemberReach || null;
+      // Calculate new metrics from aggregated analytics data
+      // Audience Penetration: average of daily values (already as decimal 0-1)
+      const audiencePenetration = c.audiencePenetrationCount > 0 
+        ? c.audiencePenetrationSum / c.audiencePenetrationCount 
+        : null;
       
-      // Calculate Frequency (impressions / reach)
-      const frequency = approximateMemberReach && approximateMemberReach > 0 
-        ? c.impressions / approximateMemberReach 
+      // Frequency: impressions / unique reach
+      const frequency = c.approximateMemberReach > 0 
+        ? c.impressions / c.approximateMemberReach 
+        : null;
+      
+      // Average Dwell Time: weighted by impressions (in seconds)
+      const averageDwellTime = c.averageDwellTimeCount > 0 
+        ? c.averageDwellTimeSum / c.averageDwellTimeCount 
         : null;
       
       // Calculate cost efficiency vs account average
@@ -2921,6 +2958,24 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
           scoringBreakdown.push({ metric: 'Audience Penetration', value: 'N/A', contribution: 0, threshold: 'No data', applied: false });
         }
         
+        // === AVERAGE DWELL TIME ===
+        let dwellTimeContrib = 0;
+        if (averageDwellTime !== null) {
+          // Dwell time is in seconds. Good engagement: >3s, Poor: <1.5s
+          if (averageDwellTime < 1.5) {
+            dwellTimeContrib = -1;
+            negativeScore -= 1;
+            issues.push(`Low dwell time (${averageDwellTime.toFixed(1)}s) - ads may not be engaging`);
+          } else if (averageDwellTime >= 4) {
+            dwellTimeContrib = 1;
+            positiveScore += 1;
+            positiveSignals.push(`High dwell time (${averageDwellTime.toFixed(1)}s) - strong engagement`);
+          }
+          scoringBreakdown.push({ metric: 'Avg Dwell Time', value: `${averageDwellTime.toFixed(1)}s`, contribution: dwellTimeContrib, threshold: '<1.5s = -1, ≥4s = +1', applied: dwellTimeContrib !== 0 });
+        } else {
+          scoringBreakdown.push({ metric: 'Avg Dwell Time', value: 'N/A', contribution: 0, threshold: 'No data', applied: false });
+        }
+        
         // === Budget ===
         let budgetContrib = 0;
         if (budgetUtilization !== undefined && budgetUtilization < 50) {
@@ -3051,7 +3106,8 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
         hasMaximizeDelivery,
         // New metrics
         frequency,
-        audiencePenetration: audiencePenetration ? audiencePenetration * 100 : null,
+        audiencePenetration: audiencePenetration !== null ? audiencePenetration * 100 : null,
+        averageDwellTime,
         cpcVsAccount,
         cpaVsAccount,
         // Scoring breakdown with actual applied contributions
