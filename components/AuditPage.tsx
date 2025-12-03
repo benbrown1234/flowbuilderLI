@@ -84,10 +84,14 @@ interface CampaignItem {
   hasLan?: boolean;
   hasExpansion?: boolean;
   hasMaximizeDelivery?: boolean;
-  // New metrics
+  // New metrics with MoM/WoW comparisons
   frequency?: number | null;
+  frequencyChange?: number | null;
   audiencePenetration?: number | null;
+  audiencePenetrationChange?: number | null;
   averageDwellTime?: number | null;
+  dwellTimeChange?: number | null;
+  dwellTimeChangeWoW?: number | null;
   cpcVsAccount?: number | null;
   cpaVsAccount?: number | null;
   // Scoring breakdown with actual applied contributions
@@ -125,6 +129,8 @@ interface AdItem {
   prevClicks?: number;
   spend?: number;
   prevSpend?: number;
+  averageDwellTime?: number | null;
+  dwellTimeChange?: number | null;
   scoringStatus?: AdScoringStatus;
   isPerformingWell: boolean;
   issues: string[];
@@ -614,42 +620,68 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
         {(campaign.frequency !== null || campaign.audiencePenetration !== null || campaign.averageDwellTime !== null || campaign.cpcVsAccount !== null) && (
           <div>
             <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
-              <Target className="w-4 h-4" /> Advanced Metrics
+              <Target className="w-4 h-4" /> Advanced Metrics (28-day)
             </h5>
             <div className="bg-gray-50 rounded-lg p-3 space-y-2">
               {campaign.frequency !== null && campaign.frequency !== undefined && (
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600">Frequency</span>
-                  <span className={`font-medium ${
-                    campaign.frequency > 6 ? 'text-red-600' :
-                    campaign.frequency > 4 ? 'text-amber-600' :
-                    campaign.frequency >= 1.5 && campaign.frequency <= 3 ? 'text-green-600' : 'text-gray-900'
-                  }`}>
-                    {campaign.frequency.toFixed(1)}x
-                  </span>
+                  <div className="text-right">
+                    <span className={`font-medium ${
+                      campaign.frequency > 6 ? 'text-red-600' :
+                      campaign.frequency > 4 ? 'text-amber-600' :
+                      campaign.frequency >= 1.5 && campaign.frequency <= 3 ? 'text-green-600' : 'text-gray-900'
+                    }`}>
+                      {campaign.frequency.toFixed(1)}x
+                    </span>
+                    {campaign.frequencyChange !== null && campaign.frequencyChange !== undefined && (
+                      <span className={`ml-2 text-xs ${campaign.frequencyChange > 0 ? 'text-amber-600' : 'text-green-600'}`}>
+                        {campaign.frequencyChange > 0 ? '+' : ''}{campaign.frequencyChange.toFixed(0)}% MoM
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
               {campaign.audiencePenetration !== null && campaign.audiencePenetration !== undefined && (
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600">Audience Penetration</span>
-                  <span className={`font-medium ${
-                    campaign.audiencePenetration < 10 ? 'text-red-600' :
-                    campaign.audiencePenetration < 20 ? 'text-amber-600' :
-                    campaign.audiencePenetration > 60 ? 'text-green-600' : 'text-gray-900'
-                  }`}>
-                    {campaign.audiencePenetration.toFixed(0)}%
-                  </span>
+                  <div className="text-right">
+                    <span className={`font-medium ${
+                      campaign.audiencePenetration < 10 ? 'text-red-600' :
+                      campaign.audiencePenetration < 20 ? 'text-amber-600' :
+                      campaign.audiencePenetration > 60 ? 'text-green-600' : 'text-gray-900'
+                    }`}>
+                      {campaign.audiencePenetration.toFixed(1)}%
+                    </span>
+                    {campaign.audiencePenetrationChange !== null && campaign.audiencePenetrationChange !== undefined && (
+                      <span className={`ml-2 text-xs ${campaign.audiencePenetrationChange > 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                        {campaign.audiencePenetrationChange > 0 ? '+' : ''}{campaign.audiencePenetrationChange.toFixed(0)}% MoM
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
               {campaign.averageDwellTime !== null && campaign.averageDwellTime !== undefined && (
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600">Avg Dwell Time</span>
-                  <span className={`font-medium ${
-                    campaign.averageDwellTime < 1.5 ? 'text-red-600' :
-                    campaign.averageDwellTime >= 4 ? 'text-green-600' : 'text-gray-900'
-                  }`}>
-                    {campaign.averageDwellTime.toFixed(1)}s
-                  </span>
+                  <div className="text-right">
+                    <span className={`font-medium ${
+                      campaign.averageDwellTime < 1.5 ? 'text-red-600' :
+                      campaign.averageDwellTime >= 4 ? 'text-green-600' : 'text-gray-900'
+                    }`}>
+                      {campaign.averageDwellTime.toFixed(1)}s
+                    </span>
+                    {campaign.dwellTimeChange !== null && campaign.dwellTimeChange !== undefined && (
+                      <span className={`ml-2 text-xs ${campaign.dwellTimeChange > 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                        {campaign.dwellTimeChange > 0 ? '+' : ''}{campaign.dwellTimeChange.toFixed(0)}% MoM
+                      </span>
+                    )}
+                    {campaign.dwellTimeChangeWoW !== null && campaign.dwellTimeChangeWoW !== undefined && (
+                      <span className={`ml-1 text-xs ${campaign.dwellTimeChangeWoW > 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                        ({campaign.dwellTimeChangeWoW > 0 ? '+' : ''}{campaign.dwellTimeChangeWoW.toFixed(0)}% WoW)
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
               {campaign.cpcVsAccount !== null && campaign.cpcVsAccount !== undefined && (
@@ -926,6 +958,24 @@ function AdDetailSidebar({ ad, accountId, onClose }: {
                 isPositive={(ad.cvrChange || 0) > 0}
                 format="percent"
               />
+            )}
+            {ad.averageDwellTime !== null && ad.averageDwellTime !== undefined && (
+              <div className="flex justify-between py-1.5 border-t border-gray-200 mt-2 pt-2">
+                <span className="text-sm text-gray-600">Avg Dwell Time</span>
+                <div className="text-right">
+                  <span className={`text-sm font-medium ${
+                    ad.averageDwellTime < 1.5 ? 'text-red-600' :
+                    ad.averageDwellTime >= 4 ? 'text-green-600' : 'text-gray-900'
+                  }`}>
+                    {ad.averageDwellTime.toFixed(1)}s
+                  </span>
+                  {ad.dwellTimeChange !== null && ad.dwellTimeChange !== undefined && (
+                    <span className={`ml-2 text-xs ${ad.dwellTimeChange > 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                      {ad.dwellTimeChange > 0 ? '+' : ''}{ad.dwellTimeChange.toFixed(0)}% MoM
+                    </span>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         </div>
