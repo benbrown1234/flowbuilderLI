@@ -12,7 +12,7 @@ import DrilldownPage from './components/DrilldownPage';
 import { IdeateCanvas } from './components/IdeateCanvas';
 import LandingPage from './components/LandingPage';
 import ErrorBoundary from './components/ErrorBoundary';
-import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, ClipboardCheck, Lightbulb, Eye, BarChart3, Clock, Users, Building2 } from 'lucide-react';
+import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, ClipboardCheck, Lightbulb, Eye, BarChart3, Clock, Users, Building2, Award } from 'lucide-react';
 
 // Audit summary type for Structure view
 interface AuditSummary {
@@ -39,7 +39,7 @@ const App: React.FC = () => {
   const visualizeDropdownRef = useRef<HTMLDivElement>(null);
   const [drilldownDropdownOpen, setDrilldownDropdownOpen] = useState(false);
   const drilldownDropdownRef = useRef<HTMLDivElement>(null);
-  const [drilldownSubView, setDrilldownSubView] = useState<'hourly' | 'job-titles' | 'companies'>('hourly');
+  const [drilldownSubView, setDrilldownSubView] = useState<'hourly' | 'job-titles' | 'companies' | 'seniorities'>('hourly');
   const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
   const [showAuditView, setShowAuditView] = useState<boolean>(true); // Default to audit view when available
 
@@ -500,7 +500,7 @@ const App: React.FC = () => {
                   >
                     <BarChart3 size={16} />
                     {viewMode === 'DRILLDOWN' 
-                      ? (drilldownSubView === 'hourly' ? 'Hourly' : drilldownSubView === 'job-titles' ? 'Job Titles' : 'Companies') 
+                      ? (drilldownSubView === 'hourly' ? 'Hourly' : drilldownSubView === 'job-titles' ? 'Job Titles' : drilldownSubView === 'companies' ? 'Companies' : 'Seniorities') 
                       : 'Drilldown'}
                     <ChevronDown size={14} className={`transition-transform ${drilldownDropdownOpen ? 'rotate-180' : ''}`} />
                   </button>
@@ -527,6 +527,13 @@ const App: React.FC = () => {
                       >
                         <Building2 size={16} />
                         Companies
+                      </button>
+                      <button 
+                        onClick={() => { setViewMode('DRILLDOWN'); setDrilldownSubView('seniorities'); setDrilldownDropdownOpen(false); }}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50 ${viewMode === 'DRILLDOWN' && drilldownSubView === 'seniorities' ? 'text-blue-600 bg-blue-50' : 'text-gray-700'}`}
+                      >
+                        <Award size={16} />
+                        Seniorities
                       </button>
                     </div>
                   )}
