@@ -2968,382 +2968,8 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
       await saveCreativeDailyMetrics(accountId, creativeMetrics);
     }
     
-    // Step 6: Fetch hourly analytics for drilldown (last 14 days only)
-    console.log('=== SYNC CHECKPOINT: Starting Hourly + JobTitles fetch ===');
-    console.log('[Hourly] Fetching hourly analytics for drilldown...');
-    await delay(300);
-    
-    const fourteenDaysAgo = new Date(now.getTime() - (14 * 24 * 60 * 60 * 1000));
-    const hourlyAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${fourteenDaysAgo.getFullYear()},month:${fourteenDaysAgo.getMonth() + 1},day:${fourteenDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=HOURLY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,dateRange,pivotValues`;
-    console.log('[Hourly] Query:', hourlyAnalyticsQuery);
-    
-    let hourlyAnalytics: any = { elements: [] };
-    try {
-      hourlyAnalytics = await linkedinApiRequest(sessionId, '/adAnalytics', {}, hourlyAnalyticsQuery);
-      console.log(`[Hourly] Got ${hourlyAnalytics.elements?.length || 0} hourly analytics rows`);
-      if (hourlyAnalytics.elements?.length > 0) {
-        console.log('[Hourly] First element sample:', JSON.stringify(hourlyAnalytics.elements[0], null, 2));
-      } else {
-        console.log('[Hourly] Response structure:', JSON.stringify(hourlyAnalytics, null, 2).substring(0, 500));
-      }
-    } catch (err: any) {
-      console.error('[Hourly] Fetch error:', err.message);
-      if (err.response?.data) {
-        console.error('[Hourly] Error response:', JSON.stringify(err.response.data, null, 2));
-      }
-    }
-    
-    // Process and save hourly metrics
-    const hourlyMetrics: any[] = [];
-    let skippedNoCampaignId = 0;
-    let skippedNoDateRange = 0;
-    
-    for (const elem of (hourlyAnalytics.elements || [])) {
-      const campaignId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
-      if (!campaignId) {
-        skippedNoCampaignId++;
-        continue;
-      }
-      
-      const dateRange = elem.dateRange?.start;
-      if (!dateRange) {
-        skippedNoDateRange++;
-        continue;
-      }
-      
-      // LinkedIn returns hour in UTC
-      const metricDate = new Date(dateRange.year, dateRange.month - 1, dateRange.day);
-      const metricHour = dateRange.hour !== undefined ? dateRange.hour : 0;
-      const campaignInfo = campaignMap.get(campaignId) || {};
-      
-      hourlyMetrics.push({
-        campaignId,
-        campaignName: campaignInfo.name,
-        metricDate,
-        metricHour,
-        impressions: elem.impressions || 0,
-        clicks: elem.clicks || 0,
-        spend: parseFloat(elem.costInLocalCurrency || '0'),
-        conversions: elem.externalWebsiteConversions || 0
-      });
-    }
-    
-    console.log(`[Hourly] Processed: ${hourlyMetrics.length} valid, skipped ${skippedNoCampaignId} (no campaign), ${skippedNoDateRange} (no dateRange)`);
-    
-    if (hourlyMetrics.length > 0) {
-      console.log(`[Hourly] Saving ${hourlyMetrics.length} campaign hourly metrics...`);
-      await saveCampaignHourlyMetrics(accountId, hourlyMetrics);
-      console.log('[Hourly] Save completed');
-    } else {
-      console.log('[Hourly] No hourly metrics to save');
-    }
-    
-    // Fetch Job Title analytics per campaign for multiple date ranges (7, 30, 90 days)
-    console.log('[JobTitles] Fetching job title analytics per campaign for 7, 30, and 90 day periods...');
-    
-    // Get list of active campaigns to fetch job titles for
-    const activeCampaignIds = campaigns
-      .filter((c: any) => c.status === 'ACTIVE')
-      .map((c: any) => extractId(c.id || c.campaignUrn || ''))
-      .filter((id: string) => id);
-    
-    console.log(`[JobTitles] Will fetch job titles for ${activeCampaignIds.length} active campaigns`);
-    
-    // Define date ranges to fetch
-    const periods: Array<{ days: number; period: '7' | '30' | '90' }> = [
-      { days: 7, period: '7' },
-      { days: 30, period: '30' },
-      { days: 90, period: '90' }
-    ];
-    
-    let totalJobTitlesSaved = 0;
-    const allTitleUrns = new Set<string>();
-    const allJobTitleDataByPeriod: Record<string, Array<{ campaignId: string; titleUrn: string; impressions: number; clicks: number }>> = {
-      '7': [],
-      '30': [],
-      '90': []
-    };
-    
-    // Fetch job titles for each period
-    for (const { days, period } of periods) {
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - days);
-      
-      console.log(`[JobTitles] Fetching ${period}-day data...`);
-      
-      for (const campaignId of activeCampaignIds) {
-        await delay(300);
-        
-        const encodedCampaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`);
-        const jobTitleAnalyticsQuery = `q=analytics&pivot=MEMBER_JOB_TITLE&dateRange=(start:(year:${startDate.getFullYear()},month:${startDate.getMonth() + 1},day:${startDate.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&campaigns=List(${encodedCampaignUrn})&fields=impressions,clicks,pivotValues`;
-        
-        let jobTitleAnalytics: any = { elements: [] };
-        try {
-          jobTitleAnalytics = await linkedinApiRequest(sessionId, `/adAnalytics`, {}, jobTitleAnalyticsQuery);
-        } catch (err: any) {
-          continue;
-        }
-        
-        // Collect job title data and URNs
-        for (const elem of (jobTitleAnalytics.elements || [])) {
-          const titleUrn = elem.pivotValues?.[0];
-          if (!titleUrn || !titleUrn.includes('title:')) continue;
-          
-          allTitleUrns.add(titleUrn);
-          allJobTitleDataByPeriod[period].push({
-            campaignId,
-            titleUrn,
-            impressions: elem.impressions || 0,
-            clicks: elem.clicks || 0
-          });
-        }
-      }
-      
-      console.log(`[JobTitles] ${period}-day: collected ${allJobTitleDataByPeriod[period].length} entries`);
-    }
-    
-    console.log(`[JobTitles] Total unique job titles to resolve: ${allTitleUrns.size}`);
-    
-    // Resolve all job title URNs to their actual names (once for all periods)
-    const resolvedTitles: Record<string, string> = {};
-    const urnsToResolve = Array.from(allTitleUrns).filter(urn => !urnCache[urn]);
-    
-    console.log(`[JobTitles] Need to resolve ${urnsToResolve.length} new job title URNs (${allTitleUrns.size - urnsToResolve.length} already cached)`);
-    
-    if (urnsToResolve.length > 0) {
-      const batchSize = 50;
-      for (let i = 0; i < urnsToResolve.length; i += batchSize) {
-        const batch = urnsToResolve.slice(i, i + batchSize);
-        const urnList = batch.map(u => encodeURIComponent(u)).join(',');
-        
-        await delay(300);
-        
-        try {
-          const response = await linkedinApiRequest(
-            sessionId, 
-            '/adTargetingEntities',
-            {},
-            `q=urns&queryVersion=QUERY_USES_URNS&urns=List(${urnList})&locale=(language:en,country:US)`
-          );
-          
-          if (response.results) {
-            Object.entries(response.results).forEach(([urn, entity]: [string, any]) => {
-              if (entity && entity.name) {
-                resolvedTitles[urn] = entity.name;
-                urnCache[urn] = entity.name;
-              } else if (entity && entity.value) {
-                resolvedTitles[urn] = entity.value;
-                urnCache[urn] = entity.value;
-              }
-            });
-          }
-          if (response.elements && Array.isArray(response.elements)) {
-            response.elements.forEach((entity: any) => {
-              if (entity.urn && entity.name) {
-                resolvedTitles[entity.urn] = entity.name;
-                urnCache[entity.urn] = entity.name;
-              }
-            });
-          }
-          
-          console.log(`[JobTitles] Resolved batch ${Math.floor(i / batchSize) + 1}: ${Object.keys(resolvedTitles).length} titles so far`);
-        } catch (batchErr: any) {
-          console.warn(`[JobTitles] URN batch resolution failed: ${batchErr.message}`);
-        }
-      }
-      
-      if (Object.keys(resolvedTitles).length > 0) {
-        saveUrnCache();
-        console.log(`[JobTitles] Saved ${Object.keys(resolvedTitles).length} new job title names to cache`);
-      }
-    }
-    
-    // Process and save data for each period
-    for (const { period } of periods) {
-      const allJobTitleData = allJobTitleDataByPeriod[period];
-      
-      const { byCampaign, stats, fallbacksAddedToCache } = processJobTitleDataWithFallbacks(allJobTitleData, resolvedTitles);
-      
-      if (fallbacksAddedToCache) {
-        saveUrnCache();
-      }
-      
-      console.log(`[JobTitles] ${period}-day resolution: ${stats.resolvedFromApi} API, ${stats.resolvedFromCache} cache, ${stats.resolvedFromFallback} fallback, ${stats.unresolvedCount} unresolved`);
-      
-      // Save each campaign's data with the period
-      for (const [campaignId, metrics] of Object.entries(byCampaign)) {
-        await saveJobTitleAnalytics(accountId, campaignId, metrics, period);
-        totalJobTitlesSaved += metrics.length;
-      }
-      
-      console.log(`[JobTitles] ${period}-day: saved ${Object.values(byCampaign).reduce((sum, m) => sum + m.length, 0)} entries across ${Object.keys(byCampaign).length} campaigns`);
-    }
-    
-    console.log(`[JobTitles] Completed: saved ${totalJobTitlesSaved} total job title entries across all periods`);
-    
-    // Fetch Company analytics per campaign for multiple date ranges (7, 30, 90 days)
-    console.log('[Companies] Fetching company analytics per campaign for 7, 30, and 90 day periods...');
-    
-    let totalCompaniesSaved = 0;
-    const allCompanyUrns = new Set<string>();
-    const allCompanyDataByPeriod: Record<string, Array<{ campaignId: string; companyUrn: string; impressions: number; clicks: number }>> = {
-      '7': [],
-      '30': [],
-      '90': []
-    };
-    
-    // Fetch companies for each period
-    for (const { days, period } of periods) {
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - days);
-      
-      console.log(`[Companies] Fetching ${period}-day data...`);
-      
-      for (const campaignId of activeCampaignIds) {
-        await delay(300);
-        
-        const encodedCampaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`);
-        const companyAnalyticsQuery = `q=analytics&pivot=MEMBER_COMPANY&dateRange=(start:(year:${startDate.getFullYear()},month:${startDate.getMonth() + 1},day:${startDate.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&campaigns=List(${encodedCampaignUrn})&fields=impressions,clicks,pivotValues`;
-        
-        let companyAnalytics: any = { elements: [] };
-        try {
-          companyAnalytics = await linkedinApiRequest(sessionId, `/adAnalytics`, {}, companyAnalyticsQuery);
-        } catch (err: any) {
-          continue;
-        }
-        
-        // Collect company data and URNs
-        for (const elem of (companyAnalytics.elements || [])) {
-          const companyUrn = elem.pivotValues?.[0];
-          if (!companyUrn || !companyUrn.includes('organization:')) continue;
-          
-          allCompanyUrns.add(companyUrn);
-          allCompanyDataByPeriod[period].push({
-            campaignId,
-            companyUrn,
-            impressions: elem.impressions || 0,
-            clicks: elem.clicks || 0
-          });
-        }
-      }
-      
-      console.log(`[Companies] ${period}-day: collected ${allCompanyDataByPeriod[period].length} entries`);
-    }
-    
-    console.log(`[Companies] Total unique companies to resolve: ${allCompanyUrns.size}`);
-    
-    // Resolve all company URNs to their names and URLs
-    const resolvedCompanies: Record<string, { name: string; url?: string }> = {};
-    const companyUrnsToResolve = Array.from(allCompanyUrns).filter(urn => !urnCache[urn]);
-    
-    console.log(`[Companies] Need to resolve ${companyUrnsToResolve.length} new company URNs (${allCompanyUrns.size - companyUrnsToResolve.length} already cached)`);
-    
-    if (companyUrnsToResolve.length > 0) {
-      const batchSize = 50;
-      for (let i = 0; i < companyUrnsToResolve.length; i += batchSize) {
-        const batch = companyUrnsToResolve.slice(i, i + batchSize);
-        
-        await delay(300);
-        
-        for (const companyUrn of batch) {
-          try {
-            // Extract organization ID from URN (urn:li:organization:12345)
-            const orgId = companyUrn.match(/:(\d+)$/)?.[1];
-            if (orgId) {
-              const orgResponse = await linkedinApiRequest(
-                sessionId,
-                `/organizations/${orgId}`,
-                {}
-              );
-              
-              if (orgResponse) {
-                const name = orgResponse.localizedName || `Company ${orgId}`;
-                const vanityName = orgResponse.vanityName;
-                const url = vanityName ? `https://www.linkedin.com/company/${vanityName}` : null;
-                resolvedCompanies[companyUrn] = { name, url: url || undefined };
-                urnCache[companyUrn] = name;
-              }
-            }
-          } catch (orgErr: any) {
-            // If organization API fails, try to get name from adTargetingEntities
-            try {
-              const entityResponse = await linkedinApiRequest(
-                sessionId,
-                '/adTargetingEntities',
-                {},
-                `q=urns&queryVersion=QUERY_USES_URNS&urns=List(${encodeURIComponent(companyUrn)})&locale=(language:en,country:US)`
-              );
-              
-              if (entityResponse.results?.[companyUrn]) {
-                const entity = entityResponse.results[companyUrn];
-                const name = entity.name || entity.value || `Company ${companyUrn.split(':').pop()}`;
-                resolvedCompanies[companyUrn] = { name };
-                urnCache[companyUrn] = name;
-              }
-            } catch (entityErr: any) {
-              // Fallback: use organization ID as name
-              const orgId = companyUrn.match(/:(\d+)$/)?.[1] || 'Unknown';
-              resolvedCompanies[companyUrn] = { name: `Company ${orgId}` };
-            }
-          }
-          
-          await delay(100); // Extra delay for organization API
-        }
-        
-        console.log(`[Companies] Resolved batch ${Math.floor(i / batchSize) + 1}: ${Object.keys(resolvedCompanies).length} companies so far`);
-      }
-      
-      if (Object.keys(resolvedCompanies).length > 0) {
-        saveUrnCache();
-        console.log(`[Companies] Saved ${Object.keys(resolvedCompanies).length} new company names to cache`);
-      }
-    }
-    
-    // Process and save data for each period
-    for (const { period } of periods) {
-      const allCompanyData = allCompanyDataByPeriod[period];
-      
-      // Group by campaign and aggregate
-      const byCampaign: Record<string, Array<{ companyUrn: string; companyName: string; companyUrl?: string; impressions: number; clicks: number }>> = {};
-      
-      for (const item of allCompanyData) {
-        if (!byCampaign[item.campaignId]) {
-          byCampaign[item.campaignId] = [];
-        }
-        
-        // Get resolved name or fallback
-        let companyName: string;
-        let companyUrl: string | undefined;
-        
-        if (resolvedCompanies[item.companyUrn]) {
-          companyName = resolvedCompanies[item.companyUrn].name;
-          companyUrl = resolvedCompanies[item.companyUrn].url;
-        } else if (urnCache[item.companyUrn]) {
-          companyName = urnCache[item.companyUrn];
-        } else {
-          const orgId = item.companyUrn.match(/:(\d+)$/)?.[1] || 'Unknown';
-          companyName = `Company ${orgId}`;
-        }
-        
-        byCampaign[item.campaignId].push({
-          companyUrn: item.companyUrn,
-          companyName,
-          companyUrl,
-          impressions: item.impressions,
-          clicks: item.clicks
-        });
-      }
-      
-      // Save each campaign's data with the period
-      for (const [campaignId, companies] of Object.entries(byCampaign)) {
-        await saveCompanyAnalytics(accountId, campaignId, companies, period);
-        totalCompaniesSaved += companies.length;
-      }
-      
-      console.log(`[Companies] ${period}-day: saved ${Object.values(byCampaign).reduce((sum, c) => sum + c.length, 0)} entries across ${Object.keys(byCampaign).length} campaigns`);
-    }
-    
-    console.log(`[Companies] Completed: saved ${totalCompaniesSaved} total company entries across all periods`);
+    // NOTE: Drilldown data (hourly, job titles, companies) is now synced separately
+    // via the Drilldown page sync buttons, not as part of the main audit refresh
     
     // Compute and save scoring status for Structure view caching
     console.log('Computing and saving scoring status...');
@@ -3352,7 +2978,7 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     await updateAuditAccountSyncStatus(accountId, 'completed');
     console.log(`=== Audit sync completed for account ${accountId} ===\n`);
     
-    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length, hourlyMetrics: hourlyMetrics.length, jobTitleMetrics: totalJobTitlesSaved, companyMetrics: totalCompaniesSaved };
+    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length };
     
   } catch (err: any) {
     console.error(`Audit sync error for account ${accountId}:`, err.message);
@@ -3370,6 +2996,10 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     throw err;
   }
 }
+
+// REMOVED: Old drilldown sync code that used to be here has been moved to
+// the dedicated runDrilldownSync function and is triggered separately via
+// the Drilldown page sync buttons.
 
 // Token-based version for background sync (session may be gone after response is sent)
 async function runAuditSyncWithToken(accessToken: string, accountId: string, accountName: string) {
@@ -3484,31 +3114,40 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
       console.warn('Creative analytics fetch error:', err.message);
     }
     
-    // Build campaign lookup map with settings
+    // Step 5: Process and save metrics
+    console.log('Processing metrics...');
+    
+    // Build campaign lookup map
     const campaignMap = new Map<string, any>();
     for (const c of campaigns) {
       const id = extractId(c.id);
-      // LinkedIn API returns budget in dollars directly (NOT cents)
-      const dailyBudget = c.dailyBudget?.amount ? parseFloat(c.dailyBudget.amount) : null;
-      campaignMap.set(id, {
+      const status = c.status;
+      const runSchedule = c.runSchedule;
+      const dailyBudget = c.dailyBudget;
+      const totalBudget = c.totalBudget;
+      const costType = c.costType;
+      
+      // Parse budget amounts (LinkedIn returns in minor currency units for most currencies)
+      let dailyBudgetAmount = null;
+      let totalBudgetAmount = null;
+      
+      if (dailyBudget?.amount) {
+        // Convert from minor units (cents) to major units (dollars/euros)
+        dailyBudgetAmount = parseFloat(dailyBudget.amount) / 100;
+      }
+      if (totalBudget?.amount) {
+        totalBudgetAmount = parseFloat(totalBudget.amount) / 100;
+      }
+      
+      campaignMap.set(id, { 
         name: c.name || `Campaign ${id}`,
         groupId: extractId(c.campaignGroup),
-        status: c.status,
-        dailyBudget,
-        hasLan: c.offsiteDeliveryEnabled === true,
-        hasExpansion: c.audienceExpansionEnabled === true
-      });
-    }
-    
-    // Build creative lookup map
-    const creativeMap = new Map<string, any>();
-    for (const c of creatives) {
-      const id = extractId(c.id);
-      creativeMap.set(id, {
-        name: c.name || `Creative ${id}`,
-        campaignId: extractId(c.campaign),
-        status: c.status,
-        type: c.type || 'SPONSORED_UPDATE'
+        status,
+        startDate: runSchedule?.start ? new Date(runSchedule.start) : null,
+        endDate: runSchedule?.end ? new Date(runSchedule.end) : null,
+        dailyBudget: dailyBudgetAmount,
+        totalBudget: totalBudgetAmount,
+        costType
       });
     }
     
@@ -3536,15 +3175,45 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
         conversions: elem.externalWebsiteConversions || 0,
         videoViews: elem.videoViews || 0,
         leads: elem.oneClickLeads || 0,
+        averageDwellTime: elem.averageDwellTime || null,
         approximateMemberReach: elem.approximateMemberReach || null,
         audiencePenetration: elem.audiencePenetration || null,
-        averageDwellTime: elem.averageDwellTime || null
+        dailyBudget: campaignInfo.dailyBudget,
+        totalBudget: campaignInfo.totalBudget
       });
     }
     
     if (campaignMetrics.length > 0) {
       console.log(`Saving ${campaignMetrics.length} campaign daily metrics...`);
       await saveCampaignDailyMetrics(accountId, campaignMetrics);
+    }
+    
+    // Build creative lookup map
+    const creativeMap = new Map<string, any>();
+    for (const cr of creatives) {
+      // Handle different creative ID formats
+      let creativeId: string;
+      if (typeof cr.id === 'string' && cr.id.startsWith('urn:li:sponsoredCreative:')) {
+        creativeId = extractId(cr.id);
+      } else {
+        creativeId = String(cr.id);
+      }
+      
+      let campaignId: string;
+      if (typeof cr.campaign === 'string') {
+        campaignId = extractId(cr.campaign);
+      } else if (cr.campaignId) {
+        campaignId = extractId(cr.campaignId);
+      } else {
+        campaignId = '';
+      }
+      
+      creativeMap.set(creativeId, {
+        name: cr.name || `Creative ${creativeId}`,
+        campaignId,
+        status: cr.intendedStatus || cr.status,
+        type: cr.type || (cr.content?.reference?.includes('ugcPost') ? 'SPONSORED_UPDATE' : 'UNKNOWN')
+      });
     }
     
     // Process and save creative daily metrics
@@ -3580,382 +3249,8 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
       await saveCreativeDailyMetrics(accountId, creativeMetrics);
     }
     
-    // Step 6: Fetch hourly analytics for drilldown (last 14 days only)
-    console.log('=== SYNC CHECKPOINT: Starting Hourly + JobTitles fetch ===');
-    console.log('[Hourly] Fetching hourly analytics for drilldown...');
-    await delay(300);
-    
-    const fourteenDaysAgo = new Date(now.getTime() - (14 * 24 * 60 * 60 * 1000));
-    const hourlyAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${fourteenDaysAgo.getFullYear()},month:${fourteenDaysAgo.getMonth() + 1},day:${fourteenDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=HOURLY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,dateRange,pivotValues`;
-    console.log('[Hourly] Query:', hourlyAnalyticsQuery);
-    
-    let hourlyAnalytics: any = { elements: [] };
-    try {
-      hourlyAnalytics = await linkedinApiRequestWithToken(accessToken, '/adAnalytics', {}, hourlyAnalyticsQuery);
-      console.log(`[Hourly] Got ${hourlyAnalytics.elements?.length || 0} hourly analytics rows`);
-      if (hourlyAnalytics.elements?.length > 0) {
-        console.log('[Hourly] First element sample:', JSON.stringify(hourlyAnalytics.elements[0], null, 2));
-      } else {
-        console.log('[Hourly] Response structure:', JSON.stringify(hourlyAnalytics, null, 2).substring(0, 500));
-      }
-    } catch (err: any) {
-      console.error('[Hourly] Fetch error:', err.message);
-      if (err.response?.data) {
-        console.error('[Hourly] Error response:', JSON.stringify(err.response.data, null, 2));
-      }
-    }
-    
-    // Process and save hourly metrics
-    const hourlyMetrics: any[] = [];
-    let skippedNoCampaignId = 0;
-    let skippedNoDateRange = 0;
-    
-    for (const elem of (hourlyAnalytics.elements || [])) {
-      const campaignId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
-      if (!campaignId) {
-        skippedNoCampaignId++;
-        continue;
-      }
-      
-      const dateRange = elem.dateRange?.start;
-      if (!dateRange) {
-        skippedNoDateRange++;
-        continue;
-      }
-      
-      // LinkedIn returns hour in UTC
-      const metricDate = new Date(dateRange.year, dateRange.month - 1, dateRange.day);
-      const metricHour = dateRange.hour !== undefined ? dateRange.hour : 0;
-      const campaignInfo = campaignMap.get(campaignId) || {};
-      
-      hourlyMetrics.push({
-        campaignId,
-        campaignName: campaignInfo.name,
-        metricDate,
-        metricHour,
-        impressions: elem.impressions || 0,
-        clicks: elem.clicks || 0,
-        spend: parseFloat(elem.costInLocalCurrency || '0'),
-        conversions: elem.externalWebsiteConversions || 0
-      });
-    }
-    
-    console.log(`[Hourly] Processed: ${hourlyMetrics.length} valid, skipped ${skippedNoCampaignId} (no campaign), ${skippedNoDateRange} (no dateRange)`);
-    
-    if (hourlyMetrics.length > 0) {
-      console.log(`[Hourly] Saving ${hourlyMetrics.length} campaign hourly metrics...`);
-      await saveCampaignHourlyMetrics(accountId, hourlyMetrics);
-      console.log('[Hourly] Save completed');
-    } else {
-      console.log('[Hourly] No hourly metrics to save');
-    }
-    
-    // Fetch Job Title analytics per campaign for multiple date ranges (7, 30, 90 days)
-    console.log('[JobTitles] Fetching job title analytics per campaign for 7, 30, and 90 day periods...');
-    
-    // Get list of active campaigns to fetch job titles for
-    const activeCampaignIds = campaigns
-      .filter((c: any) => c.status === 'ACTIVE')
-      .map((c: any) => extractId(c.id || c.campaignUrn || ''))
-      .filter((id: string) => id);
-    
-    console.log(`[JobTitles] Will fetch job titles for ${activeCampaignIds.length} active campaigns`);
-    
-    // Define date ranges to fetch
-    const periods: Array<{ days: number; period: '7' | '30' | '90' }> = [
-      { days: 7, period: '7' },
-      { days: 30, period: '30' },
-      { days: 90, period: '90' }
-    ];
-    
-    let totalJobTitlesSaved = 0;
-    const allTitleUrns = new Set<string>();
-    const allJobTitleDataByPeriod: Record<string, Array<{ campaignId: string; titleUrn: string; impressions: number; clicks: number }>> = {
-      '7': [],
-      '30': [],
-      '90': []
-    };
-    
-    // Fetch job titles for each period
-    for (const { days, period } of periods) {
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - days);
-      
-      console.log(`[JobTitles] Fetching ${period}-day data...`);
-      
-      for (const campaignId of activeCampaignIds) {
-        await delay(300);
-        
-        const encodedCampaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`);
-        const jobTitleAnalyticsQuery = `q=analytics&pivot=MEMBER_JOB_TITLE&dateRange=(start:(year:${startDate.getFullYear()},month:${startDate.getMonth() + 1},day:${startDate.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&campaigns=List(${encodedCampaignUrn})&fields=impressions,clicks,pivotValues`;
-        
-        let jobTitleAnalytics: any = { elements: [] };
-        try {
-          jobTitleAnalytics = await linkedinApiRequestWithToken(accessToken, `/adAnalytics`, {}, jobTitleAnalyticsQuery);
-        } catch (err: any) {
-          continue;
-        }
-        
-        // Collect job title data and URNs
-        for (const elem of (jobTitleAnalytics.elements || [])) {
-          const titleUrn = elem.pivotValues?.[0];
-          if (!titleUrn || !titleUrn.includes('title:')) continue;
-          
-          allTitleUrns.add(titleUrn);
-          allJobTitleDataByPeriod[period].push({
-            campaignId,
-            titleUrn,
-            impressions: elem.impressions || 0,
-            clicks: elem.clicks || 0
-          });
-        }
-      }
-      
-      console.log(`[JobTitles] ${period}-day: collected ${allJobTitleDataByPeriod[period].length} entries`);
-    }
-    
-    console.log(`[JobTitles] Total unique job titles to resolve: ${allTitleUrns.size}`);
-    
-    // Resolve all job title URNs to their actual names (once for all periods)
-    const resolvedTitles: Record<string, string> = {};
-    const urnsToResolve = Array.from(allTitleUrns).filter(urn => !urnCache[urn]);
-    
-    console.log(`[JobTitles] Need to resolve ${urnsToResolve.length} new job title URNs (${allTitleUrns.size - urnsToResolve.length} already cached)`);
-    
-    if (urnsToResolve.length > 0) {
-      const batchSize = 50;
-      for (let i = 0; i < urnsToResolve.length; i += batchSize) {
-        const batch = urnsToResolve.slice(i, i + batchSize);
-        const urnList = batch.map(u => encodeURIComponent(u)).join(',');
-        
-        await delay(300);
-        
-        try {
-          const response = await linkedinApiRequestWithToken(
-            accessToken, 
-            '/adTargetingEntities',
-            {},
-            `q=urns&queryVersion=QUERY_USES_URNS&urns=List(${urnList})&locale=(language:en,country:US)`
-          );
-          
-          if (response.results) {
-            Object.entries(response.results).forEach(([urn, entity]: [string, any]) => {
-              if (entity && entity.name) {
-                resolvedTitles[urn] = entity.name;
-                urnCache[urn] = entity.name;
-              } else if (entity && entity.value) {
-                resolvedTitles[urn] = entity.value;
-                urnCache[urn] = entity.value;
-              }
-            });
-          }
-          if (response.elements && Array.isArray(response.elements)) {
-            response.elements.forEach((entity: any) => {
-              if (entity.urn && entity.name) {
-                resolvedTitles[entity.urn] = entity.name;
-                urnCache[entity.urn] = entity.name;
-              }
-            });
-          }
-          
-          console.log(`[JobTitles] Resolved batch ${Math.floor(i / batchSize) + 1}: ${Object.keys(resolvedTitles).length} titles so far`);
-        } catch (batchErr: any) {
-          console.warn(`[JobTitles] URN batch resolution failed: ${batchErr.message}`);
-        }
-      }
-      
-      if (Object.keys(resolvedTitles).length > 0) {
-        saveUrnCache();
-        console.log(`[JobTitles] Saved ${Object.keys(resolvedTitles).length} new job title names to cache`);
-      }
-    }
-    
-    // Process and save data for each period
-    for (const { period } of periods) {
-      const allJobTitleData = allJobTitleDataByPeriod[period];
-      
-      const { byCampaign, stats, fallbacksAddedToCache } = processJobTitleDataWithFallbacks(allJobTitleData, resolvedTitles);
-      
-      if (fallbacksAddedToCache) {
-        saveUrnCache();
-      }
-      
-      console.log(`[JobTitles] ${period}-day resolution: ${stats.resolvedFromApi} API, ${stats.resolvedFromCache} cache, ${stats.resolvedFromFallback} fallback, ${stats.unresolvedCount} unresolved`);
-      
-      // Save each campaign's data with the period
-      for (const [campaignId, metrics] of Object.entries(byCampaign)) {
-        await saveJobTitleAnalytics(accountId, campaignId, metrics, period);
-        totalJobTitlesSaved += metrics.length;
-      }
-      
-      console.log(`[JobTitles] ${period}-day: saved ${Object.values(byCampaign).reduce((sum, m) => sum + m.length, 0)} entries across ${Object.keys(byCampaign).length} campaigns`);
-    }
-    
-    console.log(`[JobTitles] Completed: saved ${totalJobTitlesSaved} total job title entries across all periods`);
-    
-    // Fetch Company analytics per campaign for multiple date ranges (7, 30, 90 days)
-    console.log('[Companies] Fetching company analytics per campaign for 7, 30, and 90 day periods...');
-    
-    let totalCompaniesSaved = 0;
-    const allCompanyUrns = new Set<string>();
-    const allCompanyDataByPeriod: Record<string, Array<{ campaignId: string; companyUrn: string; impressions: number; clicks: number }>> = {
-      '7': [],
-      '30': [],
-      '90': []
-    };
-    
-    // Fetch companies for each period
-    for (const { days, period } of periods) {
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - days);
-      
-      console.log(`[Companies] Fetching ${period}-day data...`);
-      
-      for (const campaignId of activeCampaignIds) {
-        await delay(300);
-        
-        const encodedCampaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`);
-        const companyAnalyticsQuery = `q=analytics&pivot=MEMBER_COMPANY&dateRange=(start:(year:${startDate.getFullYear()},month:${startDate.getMonth() + 1},day:${startDate.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&campaigns=List(${encodedCampaignUrn})&fields=impressions,clicks,pivotValues`;
-        
-        let companyAnalytics: any = { elements: [] };
-        try {
-          companyAnalytics = await linkedinApiRequestWithToken(accessToken, `/adAnalytics`, {}, companyAnalyticsQuery);
-        } catch (err: any) {
-          continue;
-        }
-        
-        // Collect company data and URNs
-        for (const elem of (companyAnalytics.elements || [])) {
-          const companyUrn = elem.pivotValues?.[0];
-          if (!companyUrn || !companyUrn.includes('organization:')) continue;
-          
-          allCompanyUrns.add(companyUrn);
-          allCompanyDataByPeriod[period].push({
-            campaignId,
-            companyUrn,
-            impressions: elem.impressions || 0,
-            clicks: elem.clicks || 0
-          });
-        }
-      }
-      
-      console.log(`[Companies] ${period}-day: collected ${allCompanyDataByPeriod[period].length} entries`);
-    }
-    
-    console.log(`[Companies] Total unique companies to resolve: ${allCompanyUrns.size}`);
-    
-    // Resolve all company URNs to their names and URLs
-    const resolvedCompanies: Record<string, { name: string; url?: string }> = {};
-    const companyUrnsToResolve = Array.from(allCompanyUrns).filter(urn => !urnCache[urn]);
-    
-    console.log(`[Companies] Need to resolve ${companyUrnsToResolve.length} new company URNs (${allCompanyUrns.size - companyUrnsToResolve.length} already cached)`);
-    
-    if (companyUrnsToResolve.length > 0) {
-      const batchSize = 50;
-      for (let i = 0; i < companyUrnsToResolve.length; i += batchSize) {
-        const batch = companyUrnsToResolve.slice(i, i + batchSize);
-        
-        await delay(300);
-        
-        for (const companyUrn of batch) {
-          try {
-            // Extract organization ID from URN (urn:li:organization:12345)
-            const orgId = companyUrn.match(/:(\d+)$/)?.[1];
-            if (orgId) {
-              const orgResponse = await linkedinApiRequestWithToken(
-                accessToken,
-                `/organizations/${orgId}`,
-                {}
-              );
-              
-              if (orgResponse) {
-                const name = orgResponse.localizedName || `Company ${orgId}`;
-                const vanityName = orgResponse.vanityName;
-                const url = vanityName ? `https://www.linkedin.com/company/${vanityName}` : null;
-                resolvedCompanies[companyUrn] = { name, url: url || undefined };
-                urnCache[companyUrn] = name;
-              }
-            }
-          } catch (orgErr: any) {
-            // If organization API fails, try to get name from adTargetingEntities
-            try {
-              const entityResponse = await linkedinApiRequestWithToken(
-                accessToken,
-                '/adTargetingEntities',
-                {},
-                `q=urns&queryVersion=QUERY_USES_URNS&urns=List(${encodeURIComponent(companyUrn)})&locale=(language:en,country:US)`
-              );
-              
-              if (entityResponse.results?.[companyUrn]) {
-                const entity = entityResponse.results[companyUrn];
-                const name = entity.name || entity.value || `Company ${companyUrn.split(':').pop()}`;
-                resolvedCompanies[companyUrn] = { name };
-                urnCache[companyUrn] = name;
-              }
-            } catch (entityErr: any) {
-              // Fallback: use organization ID as name
-              const orgId = companyUrn.match(/:(\d+)$/)?.[1] || 'Unknown';
-              resolvedCompanies[companyUrn] = { name: `Company ${orgId}` };
-            }
-          }
-          
-          await delay(100); // Extra delay for organization API
-        }
-        
-        console.log(`[Companies] Resolved batch ${Math.floor(i / batchSize) + 1}: ${Object.keys(resolvedCompanies).length} companies so far`);
-      }
-      
-      if (Object.keys(resolvedCompanies).length > 0) {
-        saveUrnCache();
-        console.log(`[Companies] Saved ${Object.keys(resolvedCompanies).length} new company names to cache`);
-      }
-    }
-    
-    // Process and save data for each period
-    for (const { period } of periods) {
-      const allCompanyData = allCompanyDataByPeriod[period];
-      
-      // Group by campaign and aggregate
-      const companiesByCampaign: Record<string, Array<{ companyUrn: string; companyName: string; companyUrl?: string; impressions: number; clicks: number }>> = {};
-      
-      for (const item of allCompanyData) {
-        if (!companiesByCampaign[item.campaignId]) {
-          companiesByCampaign[item.campaignId] = [];
-        }
-        
-        // Get resolved name or fallback
-        let companyName: string;
-        let companyUrl: string | undefined;
-        
-        if (resolvedCompanies[item.companyUrn]) {
-          companyName = resolvedCompanies[item.companyUrn].name;
-          companyUrl = resolvedCompanies[item.companyUrn].url;
-        } else if (urnCache[item.companyUrn]) {
-          companyName = urnCache[item.companyUrn];
-        } else {
-          const orgId = item.companyUrn.match(/:(\d+)$/)?.[1] || 'Unknown';
-          companyName = `Company ${orgId}`;
-        }
-        
-        companiesByCampaign[item.campaignId].push({
-          companyUrn: item.companyUrn,
-          companyName,
-          companyUrl,
-          impressions: item.impressions,
-          clicks: item.clicks
-        });
-      }
-      
-      // Save each campaign's data with the period
-      for (const [campaignId, companies] of Object.entries(companiesByCampaign)) {
-        await saveCompanyAnalytics(accountId, campaignId, companies, period);
-        totalCompaniesSaved += companies.length;
-      }
-      
-      console.log(`[Companies] ${period}-day: saved ${Object.values(companiesByCampaign).reduce((sum, c) => sum + c.length, 0)} entries across ${Object.keys(companiesByCampaign).length} campaigns`);
-    }
-    
-    console.log(`[Companies] Completed: saved ${totalCompaniesSaved} total company entries across all periods`);
+    // NOTE: Drilldown data (hourly, job titles, companies) is now synced separately
+    // via the Drilldown page sync buttons, not as part of the main audit refresh
     
     // Compute and save scoring status for Structure view caching
     console.log('Computing and saving scoring status...');
@@ -3964,7 +3259,7 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     await updateAuditAccountSyncStatus(accountId, 'completed');
     console.log(`=== Audit sync completed for account ${accountId} ===\n`);
     
-    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length, hourlyMetrics: hourlyMetrics.length, jobTitleMetrics: totalJobTitlesSaved, companyMetrics: totalCompaniesSaved };
+    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length };
     
   } catch (err: any) {
     console.error(`Audit sync error for account ${accountId}:`, err.message);
