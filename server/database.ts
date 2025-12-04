@@ -1356,7 +1356,7 @@ export async function getCanvasWithOwnership(canvasId: string, userId: string): 
   return result.rows[0] || null;
 }
 
-// Save job title analytics (one row per job title per campaign per sync date)
+// Save job title analytics (one row per job title per campaign per period)
 export async function saveJobTitleAnalytics(
   accountId: string,
   campaignId: string | null,
@@ -1365,7 +1365,8 @@ export async function saveJobTitleAnalytics(
     jobTitleName: string;
     impressions: number;
     clicks: number;
-  }>
+  }>,
+  period: '7' | '30' | '90' = '90'
 ) {
   const accId = String(accountId);
   const campId = campaignId ? String(campaignId) : '';
@@ -1376,13 +1377,14 @@ export async function saveJobTitleAnalytics(
     
     await pool.query(
       `INSERT INTO analytics_job_titles 
-       (account_id, campaign_id, job_title_urn, job_title_name, impressions, clicks, ctr, sync_date)
-       VALUES ($1::text, NULLIF($2::text, ''), $3::text, $4::text, $5::bigint, $6::bigint, $7::numeric, $8::date)
-       ON CONFLICT (account_id, COALESCE(campaign_id, ''), job_title_urn, sync_date) DO UPDATE SET
+       (account_id, campaign_id, job_title_urn, job_title_name, impressions, clicks, ctr, sync_date, period)
+       VALUES ($1::text, NULLIF($2::text, ''), $3::text, $4::text, $5::bigint, $6::bigint, $7::numeric, $8::date, $9::text)
+       ON CONFLICT (account_id, campaign_id, job_title_urn, period) DO UPDATE SET
          job_title_name = EXCLUDED.job_title_name,
          impressions = EXCLUDED.impressions,
          clicks = EXCLUDED.clicks,
-         ctr = EXCLUDED.ctr`,
+         ctr = EXCLUDED.ctr,
+         sync_date = EXCLUDED.sync_date`,
       [
         accId,
         campId,
@@ -1391,7 +1393,8 @@ export async function saveJobTitleAnalytics(
         jt.impressions || 0,
         jt.clicks || 0,
         ctr,
-        syncDate
+        syncDate,
+        period
       ]
     );
   }
@@ -1431,24 +1434,18 @@ export async function getJobTitleAnalytics(
   const sortDir = options.sortDir || 'desc';
   const offset = (page - 1) * pageSize;
   const campaignId = options.campaignId ? String(options.campaignId) : null;
-  const dateRange = options.dateRange || '90';
+  const period = options.dateRange || '90';
   
-  // Calculate date cutoff based on dateRange
-  const daysAgo = parseInt(dateRange);
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - daysAgo);
-  const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
-  
-  // Build WHERE clause based on whether we're filtering by campaign
-  let whereClause = 'account_id = $1 AND sync_date >= $2';
-  let params: any[] = [accId, cutoffDateStr];
+  // Build WHERE clause filtering by period
+  let whereClause = 'account_id = $1 AND period = $2';
+  let params: any[] = [accId, period];
   
   if (campaignId) {
     whereClause += ' AND campaign_id = $3';
     params.push(campaignId);
   }
   
-  // Check if we have any data in the date range
+  // Check if we have any data for this period
   const dataCheckResult = await pool.query(
     `SELECT EXISTS(SELECT 1 FROM analytics_job_titles WHERE ${whereClause}) as has_data`,
     params
@@ -1466,7 +1463,7 @@ export async function getJobTitleAnalytics(
     };
   }
   
-  // Use whereClause directly (date range filter is already included)
+  // Use whereClause directly (period filter is already included)
   const fullWhereClause = whereClause;
   const fullParams = params;
   
