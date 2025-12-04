@@ -363,7 +363,7 @@ app.use((req, res, next) => {
   }
   
   // Skip CSRF for audit endpoints that are already protected by requireAuth + requireAccountAccess
-  if (req.path.startsWith('/api/audit/refresh/') || req.path.startsWith('/api/audit/start/')) {
+  if (req.path.startsWith('/api/audit/refresh/') || req.path.startsWith('/api/audit/start/') || req.path.startsWith('/api/audit/drilldown/sync/')) {
     return next();
   }
   
