@@ -15,6 +15,65 @@ const api = axios.create({
   withCredentials: true,
 });
 
+export { api };
+
+let csrfToken: string | null = null;
+
+export const fetchCsrfToken = async (): Promise<string> => {
+  const response = await api.get('/csrf-token');
+  csrfToken = response.data.csrfToken;
+  return csrfToken;
+};
+
+export const clearCsrfToken = (): void => {
+  csrfToken = null;
+};
+
+api.interceptors.request.use((config) => {
+  if (csrfToken && config.method && ['post', 'put', 'patch', 'delete'].includes(config.method.toLowerCase())) {
+    config.headers['X-CSRF-Token'] = csrfToken;
+  }
+  return config;
+});
+
+let isRefreshingCsrf = false;
+let csrfRefreshPromise: Promise<string> | null = null;
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    
+    if (
+      error.response?.status === 403 &&
+      error.response?.data?.error?.includes?.('CSRF') &&
+      !originalRequest._csrfRetry
+    ) {
+      originalRequest._csrfRetry = true;
+      
+      if (!isRefreshingCsrf) {
+        isRefreshingCsrf = true;
+        csrfRefreshPromise = fetchCsrfToken().finally(() => {
+          isRefreshingCsrf = false;
+          csrfRefreshPromise = null;
+        });
+      }
+      
+      try {
+        await (csrfRefreshPromise || fetchCsrfToken());
+        if (csrfToken) {
+          originalRequest.headers['X-CSRF-Token'] = csrfToken;
+        }
+        return api(originalRequest);
+      } catch (refreshError) {
+        return Promise.reject(error);
+      }
+    }
+    
+    return Promise.reject(error);
+  }
+);
+
 export interface AuthStatus {
   isAuthenticated: boolean;
 }

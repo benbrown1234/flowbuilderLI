@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
+import { api } from '../services/linkedinApi';
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -1357,7 +1357,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
     if (!accountId) return;
     
     try {
-      const response = await axios.get(`/api/audit/account/${accountId}`);
+      const response = await api.get(`/audit/account/${accountId}`);
       setAuditStatus(response.data);
       return response.data;
     } catch (err) {
@@ -1370,7 +1370,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
     if (!accountId) return;
     
     try {
-      const response = await axios.get(`/api/audit/data/${accountId}?comparisonMode=${mode}`);
+      const response = await api.get(`/audit/data/${accountId}?comparisonMode=${mode}`);
       const rawData = response.data;
       
       setData({
@@ -1427,7 +1427,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
   const handleStartAudit = async () => {
     setIsStarting(true);
     try {
-      await axios.post(`/api/audit/start/${accountId}`, { accountName });
+      await api.post(`/audit/start/${accountId}`, { accountName });
       await checkAuditStatus();
     } catch (err) {
       console.error('Failed to start audit:', err);
@@ -1440,7 +1440,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      await axios.post(`/api/audit/refresh/${accountId}`);
+      await api.post(`/audit/refresh/${accountId}`);
       await checkAuditStatus();
     } catch (err) {
       console.error('Failed to refresh:', err);

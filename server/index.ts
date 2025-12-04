@@ -259,6 +259,11 @@ app.use((req, res, next) => {
     return next();
   }
   
+  // Skip CSRF for read-only POST endpoints that use POST for payload convenience
+  if (req.path === '/api/linkedin/resolve-targeting') {
+    return next();
+  }
+  
   // Apply CSRF validation
   return validateCsrf(req, res, next);
 });

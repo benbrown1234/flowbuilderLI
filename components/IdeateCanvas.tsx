@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Plus, Minus, Maximize, Move, Trash2, Sparkles, Download, Copy, Folder, LayoutGrid, FileImage, Lightbulb, Send, X, GripVertical, Edit2, Check, ChevronDown, ChevronRight, Target, Settings, Image, Users, Percent, ArrowRight, Save, Share2, MessageSquare, Clock, FolderOpen, Link2, ExternalLink, CheckCircle, XCircle, Hand, MousePointer2 } from 'lucide-react';
-import axios from 'axios';
+import { api } from '../services/linkedinApi';
 
 export interface IdeateNode {
   id: string;
@@ -344,21 +344,21 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
     const initCanvas = async () => {
       try {
         if (shareToken) {
-          const response = await axios.get(`/api/canvas/share/${shareToken}`);
+          const response = await api.get(`/canvas/share/${shareToken}`);
           setCanvas(response.data);
           setNodes(response.data.nodes || createDefaultFunnel());
           setIsReadOnly(true);
           lastSavedNodesRef.current = JSON.stringify(response.data.nodes || []);
           loadComments(response.data.id);
         } else if (propCanvasId) {
-          const response = await axios.get(`/api/canvas/${propCanvasId}`);
+          const response = await api.get(`/canvas/${propCanvasId}`);
           setCanvas(response.data);
           setCanvasId(response.data.id);
           setNodes(response.data.nodes || createDefaultFunnel());
           lastSavedNodesRef.current = JSON.stringify(response.data.nodes || []);
           loadComments(response.data.id);
         } else {
-          const response = await axios.post('/api/canvas', { title: 'Untitled Canvas' });
+          const response = await api.post('/canvas', { title: 'Untitled Canvas' });
           setCanvas(response.data);
           setCanvasId(response.data.id);
           lastSavedNodesRef.current = JSON.stringify(createDefaultFunnel());
@@ -401,7 +401,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
 
   const loadCanvasList = async () => {
     try {
-      const response = await axios.get('/api/canvas');
+      const response = await api.get('/canvas');
       setCanvasList(response.data);
     } catch (err) {
       console.error('Failed to load canvas list:', err);
@@ -410,7 +410,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
 
   const loadComments = async (id: string) => {
     try {
-      const response = await axios.get(`/api/canvas/${id}/comments`);
+      const response = await api.get(`/canvas/${id}/comments`);
       setComments(response.data);
     } catch (err) {
       console.error('Failed to load comments:', err);
@@ -420,7 +420,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   const saveCanvas = async (id: string, nodesToSave: IdeateNode[]) => {
     try {
       setSaveStatus('saving');
-      await axios.post(`/api/canvas/${id}/save`, { 
+      await api.post(`/canvas/${id}/save`, { 
         nodes: nodesToSave,
         connections: [],
         settings: { transform }
@@ -436,7 +436,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
 
   const createNewCanvas = async () => {
     try {
-      const response = await axios.post('/api/canvas', { title: 'Untitled Canvas' });
+      const response = await api.post('/canvas', { title: 'Untitled Canvas' });
       setCanvas(response.data);
       setCanvasId(response.data.id);
       setNodes(createDefaultFunnel());
@@ -452,7 +452,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
 
   const loadCanvas = async (id: string) => {
     try {
-      const response = await axios.get(`/api/canvas/${id}`);
+      const response = await api.get(`/canvas/${id}`);
       setCanvas(response.data);
       setCanvasId(response.data.id);
       setNodes(response.data.nodes || createDefaultFunnel());
@@ -504,7 +504,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   const deleteCanvasItem = async (id: string) => {
     if (!confirm('Are you sure you want to delete this canvas?')) return;
     try {
-      await axios.delete(`/api/canvas/${id}`);
+      await api.delete(`/canvas/${id}`);
       loadCanvasList();
       if (canvasId === id) {
         createNewCanvas();
@@ -517,7 +517,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   const updateCanvasTitle = async (newTitle: string) => {
     if (isReadOnly || !canvasId) return;
     try {
-      const response = await axios.put(`/api/canvas/${canvasId}`, { title: newTitle });
+      const response = await api.put(`/canvas/${canvasId}`, { title: newTitle });
       setCanvas(response.data);
       loadCanvasList();
     } catch (err) {
@@ -528,7 +528,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   const togglePublic = async () => {
     if (isReadOnly || !canvasId || !canvas) return;
     try {
-      const response = await axios.put(`/api/canvas/${canvasId}`, { is_public: !canvas.is_public });
+      const response = await api.put(`/canvas/${canvasId}`, { is_public: !canvas.is_public });
       setCanvas(response.data);
     } catch (err) {
       console.error('Failed to toggle public:', err);
@@ -538,7 +538,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   const regenerateShareLink = async () => {
     if (isReadOnly || !canvasId) return;
     try {
-      const response = await axios.post(`/api/canvas/${canvasId}/regenerate-token`);
+      const response = await api.post(`/canvas/${canvasId}/regenerate-token`);
       setCanvas(response.data);
     } catch (err) {
       console.error('Failed to regenerate link:', err);
@@ -548,7 +548,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   const addCommentHandler = async () => {
     if (!canvasId || !newComment.trim()) return;
     try {
-      const response = await axios.post(`/api/canvas/${canvasId}/comments`, {
+      const response = await api.post(`/canvas/${canvasId}/comments`, {
         content: newComment,
         nodeId: selectedNode,
         authorName: commenterName || 'Anonymous'
@@ -563,7 +563,7 @@ export const IdeateCanvas: React.FC<Props> = ({ onExport, canvasId: propCanvasId
   const resolveCommentHandler = async (commentId: number, resolved: boolean) => {
     if (isReadOnly) return; // Only owner can resolve comments
     try {
-      await axios.put(`/api/canvas/comments/${commentId}/resolve`, { resolved });
+      await api.put(`/canvas/comments/${commentId}/resolve`, { resolved });
       setComments(prev => prev.map(c => c.id === commentId ? { ...c, is_resolved: resolved } : c));
     } catch (err) {
       console.error('Failed to resolve comment:', err);

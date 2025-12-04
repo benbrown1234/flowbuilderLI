@@ -1,8 +1,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import axios from 'axios';
 import { AccountStructure, NodeType, TargetingSummary, CreativeNode, AccountSummary } from './types';
-import { getAuthStatus, getAuthUrl, logout, getAvailableAccountsFromApi, buildAccountHierarchyFromApi } from './services/linkedinApi';
+import { api, getAuthStatus, getAuthUrl, logout, getAvailableAccountsFromApi, buildAccountHierarchyFromApi, fetchCsrfToken, clearCsrfToken } from './services/linkedinApi';
 import { transformAccountToIdeateNodes, createTofAudiencesFromTargeting } from './services/ideateTransformer';
 import { StructureTree } from './components/StructureTree';
 import { AudienceFlow } from './components/AudienceFlow';
@@ -90,6 +89,15 @@ const App: React.FC = () => {
         
         const status = await getAuthStatus();
         setIsAuthenticated(status.isAuthenticated);
+        
+        // Fetch CSRF token for authenticated sessions
+        if (status.isAuthenticated) {
+          try {
+            await fetchCsrfToken();
+          } catch (csrfErr) {
+            console.warn('CSRF token fetch failed:', csrfErr);
+          }
+        }
       } catch (err) {
         console.error('Auth check failed:', err);
       } finally {
@@ -187,7 +195,7 @@ const App: React.FC = () => {
       }
       
       try {
-        const response = await axios.get(`/api/audit/structure-summary/${selectedAccountId}`, {
+        const response = await api.get(`/audit/structure-summary/${selectedAccountId}`, {
           signal: abortController.signal
         });
         if (!abortController.signal.aborted) {
@@ -232,6 +240,15 @@ const App: React.FC = () => {
           const status = await getAuthStatus();
           setIsAuthenticated(status.isAuthenticated);
           setError(null);
+          
+          // Fetch CSRF token for authenticated sessions after popup login
+          if (status.isAuthenticated) {
+            try {
+              await fetchCsrfToken();
+            } catch (csrfErr) {
+              console.warn('CSRF token fetch failed after login:', csrfErr);
+            }
+          }
         } catch (err) {
           console.error('Failed to refresh auth status:', err);
         }
@@ -247,6 +264,7 @@ const App: React.FC = () => {
   const handleLogout = async () => {
     try {
       await logout();
+      clearCsrfToken();
       setIsAuthenticated(false);
       setData(null);
       setAccounts([]);
@@ -288,12 +306,12 @@ const App: React.FC = () => {
       const audienceNodes = createTofAudiencesFromTargeting(baseNodes);
       const allNodes = [...baseNodes, ...audienceNodes];
       
-      const canvasResponse = await axios.post('/api/canvas', { 
+      const canvasResponse = await api.post('/canvas', { 
         title: `Import: ${accountData.name}` 
       });
       const newCanvasId = canvasResponse.data.id;
       
-      await axios.post(`/api/canvas/${newCanvasId}/save`, {
+      await api.post(`/canvas/${newCanvasId}/save`, {
         nodes: allNodes,
         connections: [],
         settings: { transform: { x: 50, y: 30, scale: 0.85 } }
