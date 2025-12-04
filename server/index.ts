@@ -743,12 +743,16 @@ const requireAccountAccess = async (req: express.Request, res: express.Response,
     return res.status(400).json({ error: 'Account ID required' });
   }
   
+  console.log(`[AccountAccess] Checking access for account ${accountId}, authorized accounts:`, session.authorizedAccounts);
+  
   // If we have cached authorized accounts, check against them
   if (session.authorizedAccounts && session.authorizedAccounts.length > 0) {
     if (!session.authorizedAccounts.includes(accountId)) {
+      console.log(`[AccountAccess] DENIED: ${accountId} not in [${session.authorizedAccounts.join(', ')}]`);
       logger.warn({ accountId, sessionId: ((req as any).sessionId as string).substring(0, 8) }, 'Account access denied');
       return res.status(403).json({ error: 'You do not have access to this account' });
     }
+    console.log(`[AccountAccess] ALLOWED: ${accountId} found in authorized accounts`);
     return next();
   }
   
