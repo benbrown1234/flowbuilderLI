@@ -695,7 +695,7 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
                 Job Titles Breakdown
               </h2>
               <p className="text-sm text-gray-500 mt-1">
-                Performance metrics by job title from the last 90 days
+                Account-wide performance metrics by job title from the last 90 days
               </p>
             </div>
 
@@ -704,7 +704,7 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
                 <div className="animate-spin w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full mx-auto mb-4" />
                 <p className="text-gray-500">Loading job titles data...</p>
               </div>
-            ) : !jobTitlesData || jobTitlesData.jobTitles.length === 0 ? (
+            ) : !jobTitlesData || jobTitlesData.data.length === 0 ? (
               <div className="p-12 text-center">
                 <Users className="w-12 h-12 text-gray-300 mx-auto mb-4" />
                 <p className="text-gray-500 text-lg font-medium">No job titles data available</p>
@@ -755,10 +755,10 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
                       </tr>
                     </thead>
                     <tbody>
-                      {jobTitlesData.jobTitles.map((item, idx) => (
+                      {jobTitlesData.data.map((item, idx) => (
                         <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
                           <td className="py-3 px-4">
-                            <div className="font-medium text-gray-900">{item.jobTitle}</div>
+                            <div className="font-medium text-gray-900">{item.jobTitleName}</div>
                           </td>
                           <td className="py-3 px-4 text-right text-gray-700">
                             {item.impressions.toLocaleString()}
@@ -780,10 +780,10 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
                   </table>
                 </div>
 
-                {jobTitlesData.totalCount > 25 && (
+                {jobTitlesData.total > 25 && (
                   <div className="mt-4 flex items-center justify-between">
                     <div className="text-sm text-gray-500">
-                      Showing {((jobTitlesPage - 1) * 25) + 1} - {Math.min(jobTitlesPage * 25, jobTitlesData.totalCount)} of {jobTitlesData.totalCount} job titles
+                      Showing {((jobTitlesPage - 1) * 25) + 1} - {Math.min(jobTitlesPage * 25, jobTitlesData.total)} of {jobTitlesData.total} job titles
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -794,11 +794,11 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
                         Previous
                       </button>
                       <span className="text-sm text-gray-600">
-                        Page {jobTitlesPage} of {Math.ceil(jobTitlesData.totalCount / 25)}
+                        Page {jobTitlesPage} of {Math.ceil(jobTitlesData.total / 25)}
                       </span>
                       <button
                         onClick={() => setJobTitlesPage(prev => prev + 1)}
-                        disabled={jobTitlesPage >= Math.ceil(jobTitlesData.totalCount / 25)}
+                        disabled={jobTitlesPage >= Math.ceil(jobTitlesData.total / 25)}
                         className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
                       >
                         Next

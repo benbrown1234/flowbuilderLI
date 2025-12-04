@@ -1381,6 +1381,7 @@ export async function getJobTitleAnalytics(
     pageSize?: number;
     sortBy?: 'impressions' | 'clicks' | 'ctr' | 'job_title_name';
     sortDir?: 'asc' | 'desc';
+    campaignId?: string;
   } = {}
 ): Promise<{
   data: Array<{
