@@ -415,7 +415,7 @@ const ensureSession = async (req: express.Request, res: express.Response): Promi
   });
   
   await createDbSession(sessionId, csrfToken);
-  sessionCache.set(sessionId, { accessToken: null, expiresAt: null, state: null, userId: null, userName: null, csrfToken });
+  sessionCache.set(sessionId, { accessToken: null, expiresAt: null, state: null, userId: null, userName: null, csrfToken, authorizedAccounts: [] });
   return sessionId;
 };
 
@@ -2866,28 +2866,46 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     }
     
     // Step 6: Fetch hourly analytics for drilldown (last 14 days only)
-    console.log('Fetching hourly analytics for drilldown...');
+    console.log('[Hourly] Fetching hourly analytics for drilldown...');
     await delay(300);
     
     const fourteenDaysAgo = new Date(now.getTime() - (14 * 24 * 60 * 60 * 1000));
     const hourlyAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${fourteenDaysAgo.getFullYear()},month:${fourteenDaysAgo.getMonth() + 1},day:${fourteenDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=HOURLY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,dateRange,pivotValues`;
+    console.log('[Hourly] Query:', hourlyAnalyticsQuery);
     
     let hourlyAnalytics: any = { elements: [] };
     try {
       hourlyAnalytics = await linkedinApiRequest(sessionId, '/adAnalytics', {}, hourlyAnalyticsQuery);
-      console.log(`Got ${hourlyAnalytics.elements?.length || 0} hourly analytics rows`);
+      console.log(`[Hourly] Got ${hourlyAnalytics.elements?.length || 0} hourly analytics rows`);
+      if (hourlyAnalytics.elements?.length > 0) {
+        console.log('[Hourly] First element sample:', JSON.stringify(hourlyAnalytics.elements[0], null, 2));
+      } else {
+        console.log('[Hourly] Response structure:', JSON.stringify(hourlyAnalytics, null, 2).substring(0, 500));
+      }
     } catch (err: any) {
-      console.warn('Hourly analytics fetch error:', err.message);
+      console.error('[Hourly] Fetch error:', err.message);
+      if (err.response?.data) {
+        console.error('[Hourly] Error response:', JSON.stringify(err.response.data, null, 2));
+      }
     }
     
     // Process and save hourly metrics
     const hourlyMetrics: any[] = [];
+    let skippedNoCampaignId = 0;
+    let skippedNoDateRange = 0;
+    
     for (const elem of (hourlyAnalytics.elements || [])) {
       const campaignId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
-      if (!campaignId) continue;
+      if (!campaignId) {
+        skippedNoCampaignId++;
+        continue;
+      }
       
       const dateRange = elem.dateRange?.start;
-      if (!dateRange) continue;
+      if (!dateRange) {
+        skippedNoDateRange++;
+        continue;
+      }
       
       // LinkedIn returns hour in UTC
       const metricDate = new Date(dateRange.year, dateRange.month - 1, dateRange.day);
@@ -2906,9 +2924,14 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
       });
     }
     
+    console.log(`[Hourly] Processed: ${hourlyMetrics.length} valid, skipped ${skippedNoCampaignId} (no campaign), ${skippedNoDateRange} (no dateRange)`);
+    
     if (hourlyMetrics.length > 0) {
-      console.log(`Saving ${hourlyMetrics.length} campaign hourly metrics...`);
+      console.log(`[Hourly] Saving ${hourlyMetrics.length} campaign hourly metrics...`);
       await saveCampaignHourlyMetrics(accountId, hourlyMetrics);
+      console.log('[Hourly] Save completed');
+    } else {
+      console.log('[Hourly] No hourly metrics to save');
     }
     
     // Compute and save scoring status for Structure view caching
@@ -3147,28 +3170,46 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     }
     
     // Step 6: Fetch hourly analytics for drilldown (last 14 days only)
-    console.log('Fetching hourly analytics for drilldown...');
+    console.log('[Hourly] Fetching hourly analytics for drilldown...');
     await delay(300);
     
     const fourteenDaysAgo = new Date(now.getTime() - (14 * 24 * 60 * 60 * 1000));
     const hourlyAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${fourteenDaysAgo.getFullYear()},month:${fourteenDaysAgo.getMonth() + 1},day:${fourteenDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=HOURLY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,dateRange,pivotValues`;
+    console.log('[Hourly] Query:', hourlyAnalyticsQuery);
     
     let hourlyAnalytics: any = { elements: [] };
     try {
       hourlyAnalytics = await linkedinApiRequestWithToken(accessToken, '/adAnalytics', {}, hourlyAnalyticsQuery);
-      console.log(`Got ${hourlyAnalytics.elements?.length || 0} hourly analytics rows`);
+      console.log(`[Hourly] Got ${hourlyAnalytics.elements?.length || 0} hourly analytics rows`);
+      if (hourlyAnalytics.elements?.length > 0) {
+        console.log('[Hourly] First element sample:', JSON.stringify(hourlyAnalytics.elements[0], null, 2));
+      } else {
+        console.log('[Hourly] Response structure:', JSON.stringify(hourlyAnalytics, null, 2).substring(0, 500));
+      }
     } catch (err: any) {
-      console.warn('Hourly analytics fetch error:', err.message);
+      console.error('[Hourly] Fetch error:', err.message);
+      if (err.response?.data) {
+        console.error('[Hourly] Error response:', JSON.stringify(err.response.data, null, 2));
+      }
     }
     
     // Process and save hourly metrics
     const hourlyMetrics: any[] = [];
+    let skippedNoCampaignId = 0;
+    let skippedNoDateRange = 0;
+    
     for (const elem of (hourlyAnalytics.elements || [])) {
       const campaignId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
-      if (!campaignId) continue;
+      if (!campaignId) {
+        skippedNoCampaignId++;
+        continue;
+      }
       
       const dateRange = elem.dateRange?.start;
-      if (!dateRange) continue;
+      if (!dateRange) {
+        skippedNoDateRange++;
+        continue;
+      }
       
       // LinkedIn returns hour in UTC
       const metricDate = new Date(dateRange.year, dateRange.month - 1, dateRange.day);
@@ -3187,9 +3228,14 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
       });
     }
     
+    console.log(`[Hourly] Processed: ${hourlyMetrics.length} valid, skipped ${skippedNoCampaignId} (no campaign), ${skippedNoDateRange} (no dateRange)`);
+    
     if (hourlyMetrics.length > 0) {
-      console.log(`Saving ${hourlyMetrics.length} campaign hourly metrics...`);
+      console.log(`[Hourly] Saving ${hourlyMetrics.length} campaign hourly metrics...`);
       await saveCampaignHourlyMetrics(accountId, hourlyMetrics);
+      console.log('[Hourly] Save completed');
+    } else {
+      console.log('[Hourly] No hourly metrics to save');
     }
     
     // Compute and save scoring status for Structure view caching

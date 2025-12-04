@@ -348,11 +348,22 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
             <div className="p-12 text-center">
               <Clock className="w-12 h-12 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500 text-lg font-medium">No hourly data available yet</p>
-              <p className="text-gray-400 text-sm mt-2">
-                Hourly data will be collected during the next audit sync.
-                <br />
-                Run a refresh on the Audit page to start collecting hourly performance data.
+              <p className="text-gray-400 text-sm mt-2 mb-6 max-w-md mx-auto">
+                Hourly performance data is collected when you run an audit sync. This data shows 
+                when your ads are delivering throughout the day and helps identify budget exhaustion patterns.
               </p>
+              <div className="flex flex-col items-center gap-3">
+                <button
+                  onClick={() => { if (onNavigateToAudit) onNavigateToAudit(); else onBack(); }}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Go to Audit and Refresh Data
+                </button>
+                <p className="text-xs text-gray-400">
+                  Click "Refresh" on the Audit page to collect hourly data (last 14 days)
+                </p>
+              </div>
             </div>
           ) : (
             <div className="p-6">
