@@ -2874,6 +2874,7 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     }
     
     // Step 6: Fetch hourly analytics for drilldown (last 14 days only)
+    console.log('=== SYNC CHECKPOINT: Starting Hourly + JobTitles fetch ===');
     console.log('[Hourly] Fetching hourly analytics for drilldown...');
     await delay(300);
     
@@ -3223,6 +3224,7 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     }
     
     // Step 6: Fetch hourly analytics for drilldown (last 14 days only)
+    console.log('=== SYNC CHECKPOINT: Starting Hourly + JobTitles fetch ===');
     console.log('[Hourly] Fetching hourly analytics for drilldown...');
     await delay(300);
     
@@ -3303,17 +3305,33 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
       jobTitleAnalytics = await linkedinApiRequestWithToken(accessToken, `/adAnalytics`, {}, jobTitleAnalyticsQuery);
       console.log(`[JobTitles] Got ${jobTitleAnalytics.elements?.length || 0} job title rows`);
       if (jobTitleAnalytics.elements?.length > 0) {
-        console.log(`[JobTitles] Sample element:`, JSON.stringify(jobTitleAnalytics.elements[0], null, 2).substring(0, 300));
+        console.log(`[JobTitles] Sample element:`, JSON.stringify(jobTitleAnalytics.elements[0], null, 2).substring(0, 500));
+      } else {
+        console.log('[JobTitles] Response structure:', JSON.stringify(jobTitleAnalytics, null, 2).substring(0, 500));
       }
     } catch (err: any) {
       console.warn('[JobTitles] Fetch error:', err.message);
+      if (err.response?.data) {
+        console.warn('[JobTitles] Error response:', JSON.stringify(err.response.data, null, 2));
+      }
     }
     
     // Process and save job title analytics
     const jobTitleMetrics: Array<{ jobTitleUrn: string; jobTitleName: string; impressions: number; clicks: number; }> = [];
+    let skippedNoUrn = 0;
+    let skippedNoTitle = 0;
+    
     for (const elem of (jobTitleAnalytics.elements || [])) {
       const titleUrn = elem.pivotValues?.[0];
-      if (!titleUrn || !titleUrn.includes('title:')) continue;
+      if (!titleUrn) {
+        skippedNoUrn++;
+        continue;
+      }
+      if (!titleUrn.includes('title:')) {
+        skippedNoTitle++;
+        console.log('[JobTitles] Skipping non-title URN:', titleUrn);
+        continue;
+      }
       
       // Get title name from URN cache or use a placeholder
       const titleName = urnCache[titleUrn] || titleUrn.split(':').pop() || 'Unknown Title';
@@ -3326,7 +3344,7 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
       });
     }
     
-    console.log(`[JobTitles] Processed ${jobTitleMetrics.length} job titles`);
+    console.log(`[JobTitles] Processed ${jobTitleMetrics.length} job titles (skipped: ${skippedNoUrn} no URN, ${skippedNoTitle} non-title)`);
     
     if (jobTitleMetrics.length > 0) {
       console.log(`[JobTitles] Saving ${jobTitleMetrics.length} job title metrics...`);
