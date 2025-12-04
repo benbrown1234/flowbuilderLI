@@ -254,6 +254,27 @@ export async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_analytics_job_titles_impressions ON analytics_job_titles(account_id, impressions DESC);
       CREATE INDEX IF NOT EXISTS idx_analytics_job_titles_campaign ON analytics_job_titles(campaign_id, sync_date DESC);
 
+      -- Seniority analytics table
+      CREATE TABLE IF NOT EXISTS analytics_seniorities (
+        id SERIAL PRIMARY KEY,
+        account_id VARCHAR(50) NOT NULL,
+        campaign_id VARCHAR(50),
+        seniority_urn VARCHAR(255) NOT NULL,
+        seniority_name VARCHAR(500),
+        impressions BIGINT DEFAULT 0,
+        clicks BIGINT DEFAULT 0,
+        ctr DECIMAL(8,4),
+        period VARCHAR(10) NOT NULL DEFAULT '90',
+        sync_date DATE NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_analytics_seniorities_unique 
+        ON analytics_seniorities(account_id, COALESCE(campaign_id, ''), seniority_urn, period, sync_date);
+
+      CREATE INDEX IF NOT EXISTS idx_analytics_seniorities_account ON analytics_seniorities(account_id, sync_date DESC);
+      CREATE INDEX IF NOT EXISTS idx_analytics_seniorities_campaign ON analytics_seniorities(campaign_id, sync_date DESC);
+
       -- Ideate Canvas tables
       CREATE TABLE IF NOT EXISTS ideate_canvases (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1639,6 +1660,246 @@ export async function hasJobTitleData(accountId: string): Promise<boolean> {
   const accId = String(accountId);
   const result = await pool.query(
     `SELECT EXISTS(SELECT 1 FROM analytics_job_titles WHERE account_id = $1) as exists`,
+    [accId]
+  );
+  return result.rows[0]?.exists || false;
+}
+
+// Save seniority analytics (one row per seniority per campaign per period)
+export async function saveSeniorityAnalytics(
+  accountId: string,
+  campaignId: string | null,
+  seniorities: Array<{
+    seniorityUrn: string;
+    seniorityName: string;
+    impressions: number;
+    clicks: number;
+  }>,
+  period: '7' | '30' | '90' = '90'
+) {
+  const accId = String(accountId);
+  const campId = campaignId ? String(campaignId) : '';
+  const syncDate = new Date().toISOString().split('T')[0];
+  
+  for (const s of seniorities) {
+    const ctr = s.impressions > 0 ? (s.clicks / s.impressions) * 100 : 0;
+    
+    await pool.query(
+      `INSERT INTO analytics_seniorities 
+       (account_id, campaign_id, seniority_urn, seniority_name, impressions, clicks, ctr, sync_date, period)
+       VALUES ($1::text, NULLIF($2::text, ''), $3::text, $4::text, $5::bigint, $6::bigint, $7::numeric, $8::date, $9::text)
+       ON CONFLICT (account_id, COALESCE(campaign_id, ''), seniority_urn, period, sync_date) DO UPDATE SET
+         seniority_name = EXCLUDED.seniority_name,
+         impressions = EXCLUDED.impressions,
+         clicks = EXCLUDED.clicks,
+         ctr = EXCLUDED.ctr`,
+      [
+        accId,
+        campId,
+        s.seniorityUrn,
+        s.seniorityName || 'Unknown Seniority',
+        s.impressions || 0,
+        s.clicks || 0,
+        ctr,
+        syncDate,
+        period
+      ]
+    );
+  }
+}
+
+// Get seniority analytics with pagination
+export async function getSeniorityAnalytics(
+  accountId: string,
+  options: {
+    page?: number;
+    pageSize?: number;
+    sortBy?: 'impressions' | 'clicks' | 'ctr' | 'seniority_name';
+    sortDir?: 'asc' | 'desc';
+    campaignId?: string;
+    dateRange?: '7' | '30' | '90';
+  } = {}
+): Promise<{
+  data: Array<{
+    seniorityUrn: string;
+    seniorityName: string;
+    impressions: number;
+    clicks: number;
+    ctr: number;
+    syncDate: string;
+  }>;
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+}> {
+  const accId = String(accountId);
+  const page = options.page || 1;
+  const pageSize = options.pageSize || 25;
+  const sortBy = options.sortBy || 'impressions';
+  const sortDir = options.sortDir || 'desc';
+  const offset = (page - 1) * pageSize;
+  const campaignId = options.campaignId ? String(options.campaignId) : null;
+  const period = options.dateRange || '90';
+  
+  // Build WHERE clause filtering by period
+  let whereClause = 'account_id = $1 AND period = $2';
+  let params: any[] = [accId, period];
+  
+  if (campaignId) {
+    whereClause += ' AND campaign_id = $3';
+    params.push(campaignId);
+  }
+  
+  // Check if we have any data for this period
+  const dataCheckResult = await pool.query(
+    `SELECT EXISTS(SELECT 1 FROM analytics_seniorities WHERE ${whereClause}) as has_data`,
+    params
+  );
+  
+  if (!dataCheckResult.rows[0]?.has_data) {
+    return {
+      data: [],
+      total: 0,
+      page,
+      pageSize,
+      totalPages: 0,
+      hasPrevious: false,
+      hasNext: false
+    };
+  }
+  
+  const fullWhereClause = whereClause;
+  const fullParams = params;
+  
+  // Validate sort column
+  const validSortColumns = ['impressions', 'clicks', 'ctr', 'seniority_name'];
+  const safeSortBy = validSortColumns.includes(sortBy) ? sortBy : 'impressions';
+  const safeSortDir = sortDir === 'asc' ? 'ASC' : 'DESC';
+  
+  // When no campaign filter, aggregate seniorities across all campaigns
+  if (!campaignId) {
+    const countResult = await pool.query(
+      `SELECT COUNT(DISTINCT seniority_urn) as count FROM analytics_seniorities WHERE ${fullWhereClause}`,
+      fullParams
+    );
+    const total = parseInt(countResult.rows[0]?.count || '0');
+    
+    let aggregatedOrderBy: string;
+    switch (safeSortBy) {
+      case 'impressions':
+        aggregatedOrderBy = 'SUM(impressions)';
+        break;
+      case 'clicks':
+        aggregatedOrderBy = 'SUM(clicks)';
+        break;
+      case 'ctr':
+        aggregatedOrderBy = 'CASE WHEN SUM(impressions) > 0 THEN (SUM(clicks)::float / SUM(impressions) * 100) ELSE 0 END';
+        break;
+      case 'seniority_name':
+        aggregatedOrderBy = 'MAX(seniority_name)';
+        break;
+      default:
+        aggregatedOrderBy = 'SUM(impressions)';
+    }
+    
+    const dataResult = await pool.query(
+      `SELECT seniority_urn, 
+              MAX(seniority_name) as seniority_name, 
+              SUM(impressions) as impressions, 
+              SUM(clicks) as clicks,
+              CASE WHEN SUM(impressions) > 0 THEN (SUM(clicks)::float / SUM(impressions) * 100) ELSE 0 END as ctr,
+              MAX(sync_date) as sync_date
+       FROM analytics_seniorities 
+       WHERE ${fullWhereClause}
+       GROUP BY seniority_urn
+       ORDER BY ${aggregatedOrderBy} ${safeSortDir}
+       LIMIT $${fullParams.length + 1} OFFSET $${fullParams.length + 2}`,
+      [...fullParams, pageSize, offset]
+    );
+    
+    const totalPages = Math.ceil(total / pageSize);
+    
+    return {
+      data: dataResult.rows.map(row => ({
+        seniorityUrn: row.seniority_urn,
+        seniorityName: row.seniority_name,
+        impressions: parseInt(row.impressions) || 0,
+        clicks: parseInt(row.clicks) || 0,
+        ctr: parseFloat(row.ctr) || 0,
+        syncDate: row.sync_date
+      })),
+      total,
+      page,
+      pageSize,
+      totalPages,
+      hasPrevious: page > 1,
+      hasNext: page < totalPages
+    };
+  }
+  
+  // Per-campaign mode
+  const countResult = await pool.query(
+    `SELECT COUNT(*) as count FROM analytics_seniorities WHERE ${fullWhereClause}`,
+    fullParams
+  );
+  const total = parseInt(countResult.rows[0]?.count || '0');
+  
+  const dataResult = await pool.query(
+    `SELECT seniority_urn, seniority_name, impressions, clicks, ctr, sync_date
+     FROM analytics_seniorities 
+     WHERE ${fullWhereClause}
+     ORDER BY ${safeSortBy} ${safeSortDir}
+     LIMIT $${fullParams.length + 1} OFFSET $${fullParams.length + 2}`,
+    [...fullParams, pageSize, offset]
+  );
+  
+  const totalPages = Math.ceil(total / pageSize);
+  
+  return {
+    data: dataResult.rows.map(row => ({
+      seniorityUrn: row.seniority_urn,
+      seniorityName: row.seniority_name,
+      impressions: parseInt(row.impressions) || 0,
+      clicks: parseInt(row.clicks) || 0,
+      ctr: parseFloat(row.ctr) || 0,
+      syncDate: row.sync_date
+    })),
+    total,
+    page,
+    pageSize,
+    totalPages,
+    hasPrevious: page > 1,
+    hasNext: page < totalPages
+  };
+}
+
+// Get campaigns that have seniority data
+export async function getCampaignsWithSeniorityData(accountId: string): Promise<Array<{ campaignId: string; campaignName: string }>> {
+  const accId = String(accountId);
+  
+  const result = await pool.query(
+    `SELECT DISTINCT s.campaign_id, 
+       COALESCE((SELECT campaign_name FROM analytics_campaign_daily WHERE campaign_id = s.campaign_id LIMIT 1), 'Campaign ' || s.campaign_id) as campaign_name
+     FROM analytics_seniorities s
+     WHERE s.account_id = $1 AND s.campaign_id IS NOT NULL
+     ORDER BY campaign_name`,
+    [accId]
+  );
+  
+  return result.rows.map(row => ({
+    campaignId: row.campaign_id,
+    campaignName: row.campaign_name
+  }));
+}
+
+// Check if seniority data exists for account
+export async function hasSeniorityData(accountId: string): Promise<boolean> {
+  const accId = String(accountId);
+  const result = await pool.query(
+    `SELECT EXISTS(SELECT 1 FROM analytics_seniorities WHERE account_id = $1) as exists`,
     [accId]
   );
   return result.rows[0]?.exists || false;
