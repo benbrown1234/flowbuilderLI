@@ -1,0 +1,418 @@
+# Critical Fixes Brief - FlowBuilder LinkedIn Ads Tool
+
+**Estimated Effort:** 60-80 hours  
+**Priority:** Complete items 1-12 before production deployment. Items 13-16 should follow shortly after.
+
+---
+
+## CRITICAL (Must Fix Before Launch)
+
+### 1. Replace In-Memory Session Storage
+
+**Location:** `server/index.ts` line 181
+
+**Current Code:**
+```typescript
+const sessions: Map<string, Session> = new Map();
+```
+
+**Issue:** Sessions lost on server restart. Won't work with multiple instances. Memory leak.
+
+**Fix:** 
+- Replace with Redis or database-backed sessions
+- Add session expiry cleanup
+- Implement session rotation on login (generate new session ID after successful auth)
+
+---
+
+### 2. Add Authentication to Canvas Endpoints
+
+**Location:** `server/index.ts` lines ~4040-4270
+
+**Issue:** These routes have NO authentication - anyone can access any canvas:
+- `POST /api/canvas`
+- `GET /api/canvas/:canvasId`
+- `PUT /api/canvas/:canvasId`
+- `DELETE /api/canvas/:canvasId`
+- `POST /api/canvas/:canvasId/save`
+- All `/api/canvas/comments/*` routes
+
+**Fix:** 
+1. Add `requireAuth` middleware to all canvas routes
+2. Verify `owner_user_id` matches the logged-in user before allowing access
+3. Store LinkedIn user ID in session during OAuth callback
+
+---
+
+### 3. Add Canvas Ownership Validation
+
+**Location:** `server/index.ts` canvas endpoints, `server/database.ts`
+
+**Issue:** Even after adding auth (item #2), need to ensure users can only access their OWN canvases, not other users' canvases.
+
+**Fix:**
+1. Store user ID when creating canvas:
+```typescript
+app.post('/api/canvas', requireAuth, async (req, res) => {
+  const userId = req.session.userId; // From LinkedIn OAuth
+  const canvas = await createCanvas(userId, ...);
+});
+```
+
+2. Add ownership check helper in database.ts:
+```typescript
+export async function verifyCanvasOwnership(canvasId: string, userId: string): Promise<boolean> {
+  const result = await pool.query(
+    'SELECT 1 FROM ideate_canvases WHERE id = $1 AND owner_user_id = $2',
+    [canvasId, userId]
+  );
+  return result.rows.length > 0;
+}
+```
+
+3. Validate on every canvas operation:
+```typescript
+app.put('/api/canvas/:canvasId', requireAuth, async (req, res) => {
+  const isOwner = await verifyCanvasOwnership(req.params.canvasId, req.session.userId);
+  if (!isOwner) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  // ... proceed with update
+});
+```
+
+---
+
+### 4. Add LinkedIn Account-Level Authorization
+
+**Location:** `server/index.ts` - all `/api/linkedin/account/:accountId/*` routes
+
+**Issue:** Users can access ANY LinkedIn ad account's data by simply changing the `accountId` in the URL. The `requireAuth` middleware only checks if a user is logged in, not if they have permission for that specific account.
+
+**Affected Routes:**
+- `GET /api/linkedin/account/:accountId/hierarchy`
+- `GET /api/linkedin/account/:accountId/campaigns`
+- `GET /api/linkedin/account/:accountId/analytics`
+- `GET /api/linkedin/account/:accountId/creatives`
+- `GET /api/linkedin/account/:accountId/segments`
+- `POST /api/linkedin/audit/start/:accountId`
+- `GET /api/audit/structure-summary/:accountId`
+- All other routes with `:accountId` parameter
+
+**Fix:**
+1. On successful OAuth login, fetch user's authorized accounts and store in session:
+```typescript
+// In OAuth callback after getting access token
+const accountsResponse = await linkedinApiRequest(sessionId, '/adAccounts', { q: 'search' });
+const authorizedAccountIds = accountsResponse.elements.map(a => extractId(a.id));
+session.authorizedAccounts = authorizedAccountIds;
+```
+
+2. Create middleware to validate account access:
+```typescript
+const requireAccountAccess = (req, res, next) => {
+  const { accountId } = req.params;
+  const session = getSession(req.cookies.session_id);
+  
+  if (!session.authorizedAccounts?.includes(accountId)) {
+    return res.status(403).json({ error: 'You do not have access to this account' });
+  }
+  next();
+};
+```
+
+3. Apply to all account-specific routes:
+```typescript
+app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, requireAccountAccess, async (req, res) => {
+  // ... existing code
+});
+```
+
+---
+
+### 5. Remove Exposed API Key from Frontend Bundle
+
+**Location:** `vite.config.ts` lines 27-29
+
+**Current Code:**
+```typescript
+define: {
+  'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+  'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+}
+```
+
+**Issue:** API key visible in browser dev tools to anyone.
+
+**Fix:** Delete these lines entirely. AI calls already route through backend.
+
+---
+
+### 6. Restrict CORS Origins
+
+**Location:** `server/index.ts` line 160
+
+**Current Code:**
+```typescript
+app.use(cors({ credentials: true, origin: true }));
+```
+
+**Issue:** Accepts requests from ANY website.
+
+**Fix:** Replace with explicit allowlist:
+```typescript
+app.use(cors({ 
+  credentials: true, 
+  origin: ['https://your-production-domain.com']
+}));
+```
+
+---
+
+### 7. Add CSRF Protection
+
+**Location:** `server/index.ts`
+
+**Issue:** No CSRF tokens on state-changing endpoints. OAuth state parameter only protects OAuth flow, not other POST/PUT/DELETE routes.
+
+**Fix:** 
+- Install `csurf` or implement custom CSRF tokens
+- Generate token on session creation
+- Validate token on all non-GET requests
+- Send token to frontend via cookie or response header
+
+---
+
+### 8. Add Rate Limiting
+
+**Location:** `server/index.ts`
+
+**Issue:** No rate limits. Vulnerable to abuse, especially on expensive AI endpoints.
+
+**Fix:** Install `express-rate-limit` and add:
+- General: 100 requests / 15 min
+- AI endpoints (`/api/ai/*`): 10 requests / min  
+- Auth endpoints: 20 requests / 15 min
+
+---
+
+### 9. Validate Environment Variables at Startup
+
+**Location:** `server/index.ts` lines 164-165, 1493-1494
+
+**Issue:** Missing env vars cause runtime failures with unclear errors.
+
+**Required Variables:**
+- `DATABASE_URL`
+- `LINKEDIN_CLIENT_ID`
+- `LINKEDIN_CLIENT_SECRET`
+- `AI_INTEGRATIONS_OPENAI_API_KEY`
+- `AI_INTEGRATIONS_OPENAI_BASE_URL`
+- `NODE_ENV`
+- `REDIS_URL` (after implementing Redis sessions)
+
+**Fix:** Add startup validation using `zod` or `envalid`. Fail immediately with clear message if any are missing. Also create `.env.example` documenting all required variables.
+
+---
+
+### 10. Add React Error Boundaries
+
+**Location:** `App.tsx`
+
+**Issue:** Any error in IdeateCanvas (2,854 lines) or AuditPage (1,684 lines) crashes the entire app with a white screen.
+
+**Fix:** Create an ErrorBoundary component and wrap each major view. Show a user-friendly error message with refresh button.
+
+---
+
+### 11. Add Health Check Endpoints
+
+**Location:** `server/index.ts`
+
+**Issue:** No endpoints for load balancers or orchestrators to verify app health.
+
+**Fix:** Add:
+- `GET /health` - Returns 200 if process is running
+- `GET /ready` - Returns 200 if database (and Redis) connected, 503 if not
+
+---
+
+### 12. Add Security Headers
+
+**Location:** `server/index.ts`
+
+**Issue:** Missing standard security headers (CSP, X-Frame-Options, etc.)
+
+**Fix:** Install and configure `helmet` middleware. Also enforce secure cookies in production:
+```typescript
+res.cookie('session_id', sessionId, { 
+  httpOnly: true, 
+  secure: process.env.NODE_ENV === 'production',  // Always true in prod
+  sameSite: 'strict',  // Upgrade from 'lax'
+  maxAge: 7 * 24 * 60 * 60 * 1000
+});
+```
+
+---
+
+## HIGH PRIORITY (Fix Shortly After Launch)
+
+### 13. Add Request Cancellation in React
+
+**Location:** `App.tsx` useEffect blocks (lines ~140-162)
+
+**Issue:** Fast account switching causes race conditions. Requests aren't cancelled on component unmount.
+
+**Fix:** Use `AbortController` in data fetching useEffects. Cancel pending requests in cleanup function. Update `services/linkedinApi.ts` to accept and pass AbortSignal to axios calls.
+
+---
+
+### 14. Configure Database Connection Pool
+
+**Location:** `server/database.ts` lines 1-5
+
+**Current Code:**
+```typescript
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+```
+
+**Issue:** No pool limits. Can exhaust connections under load. No timeout handling.
+
+**Fix:**
+```typescript
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 20,                       // Maximum connections
+  idleTimeoutMillis: 30000,      // Close idle connections after 30s
+  connectionTimeoutMillis: 5000, // Fail if can't connect in 5s
+});
+```
+
+---
+
+### 15. Add Graceful Shutdown
+
+**Location:** `server/index.ts`
+
+**Issue:** Server doesn't handle SIGTERM. Active requests dropped on deploy/restart.
+
+**Fix:**
+```typescript
+const server = app.listen(PORT, HOST, () => {
+  console.log(`Server running on http://${HOST}:${PORT}`);
+});
+
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  server.close(() => {
+    console.log('HTTP server closed');
+    pool.end(() => {
+      console.log('Database pool closed');
+      process.exit(0);
+    });
+  });
+  
+  // Force shutdown after 30s
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 30000);
+});
+```
+
+---
+
+### 16. Add Structured Logging
+
+**Location:** Throughout `server/index.ts`
+
+**Issue:** 
+- Using `console.log` everywhere
+- Sensitive data logged (full API responses)
+- No log levels
+- Hard to search/filter in production
+
+**Fix:**
+- Install `pino` or `winston`
+- Replace all `console.log/warn/error` calls
+- Add log levels (debug, info, warn, error)
+- Sanitize sensitive data before logging
+- Add request ID to all logs for correlation
+
+Example:
+```typescript
+import pino from 'pino';
+
+const logger = pino({
+  level: process.env.LOG_LEVEL || 'info',
+  redact: ['req.headers.authorization', 'req.headers.cookie']
+});
+
+// Instead of: console.log('Ad accounts response:', JSON.stringify(data, null, 2));
+// Use: logger.debug({ accountCount: data.elements?.length }, 'Ad accounts fetched');
+```
+
+---
+
+## Dependencies to Install
+
+```bash
+npm install express-rate-limit helmet zod ioredis pino csurf
+```
+
+---
+
+## Files That Need Changes
+
+| File | Changes |
+|------|---------|
+| `server/index.ts` | Sessions, auth, account access control, CORS, CSRF, rate limiting, health checks, headers, graceful shutdown, logging |
+| `server/database.ts` | Connection pool config, canvas ownership queries |
+| `vite.config.ts` | Remove API key exposure |
+| `App.tsx` | Error boundaries, request cancellation |
+| `services/linkedinApi.ts` | Accept AbortSignal parameter |
+| NEW: `components/ErrorBoundary.tsx` | Create error boundary component |
+| NEW: `server/config.ts` | Environment validation |
+| NEW: `server/middleware/auth.ts` | Auth and account access middleware |
+| NEW: `server/logger.ts` | Logging configuration |
+| NEW: `.env.example` | Document all required environment variables |
+
+---
+
+## Acceptance Criteria
+
+### Critical (Items 1-12)
+- [ ] Sessions persist across server restarts
+- [ ] Cannot access any canvas without being logged in
+- [ ] Cannot access another user's canvas (returns 403)
+- [ ] Cannot access LinkedIn data for accounts you don't own (returns 403)
+- [ ] No secrets visible in browser network/source tabs
+- [ ] Requests from unknown origins are rejected
+- [ ] State-changing requests require valid CSRF token
+- [ ] Rapid repeated requests return 429 error
+- [ ] App fails to start with clear error if required env vars are missing
+- [ ] Component errors show friendly message instead of white screen
+- [ ] `/health` and `/ready` endpoints respond correctly
+- [ ] Security headers present in all responses (verify at securityheaders.com)
+
+### High Priority (Items 13-16)
+- [ ] Switching accounts rapidly doesn't cause errors or stale data
+- [ ] Database connections don't exhaust under load
+- [ ] Deployments don't drop active requests
+- [ ] Logs are structured JSON with levels and request IDs
+- [ ] No sensitive data (tokens, full responses) in logs
+
+---
+
+## Data Isolation Summary
+
+After implementing items 2, 3, and 4, the authorization model should be:
+
+| Resource | Who Can Access |
+|----------|----------------|
+| Canvas | Only the `owner_user_id` who created it (unless `is_public: true`) |
+| LinkedIn Account Data | Only users whose OAuth grants access to that account |
+| Audit Data | Only users with access to the underlying LinkedIn account |
+| Shared Canvas (via share_token) | Anyone with the link (read-only) |
