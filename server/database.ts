@@ -1379,7 +1379,7 @@ export async function saveJobTitleAnalytics(
       `INSERT INTO analytics_job_titles 
        (account_id, campaign_id, job_title_urn, job_title_name, impressions, clicks, ctr, sync_date, period)
        VALUES ($1::text, NULLIF($2::text, ''), $3::text, $4::text, $5::bigint, $6::bigint, $7::numeric, $8::date, $9::text)
-       ON CONFLICT (account_id, campaign_id, job_title_urn, period) DO UPDATE SET
+       ON CONFLICT (account_id, COALESCE(campaign_id, ''), job_title_urn, period) DO UPDATE SET
          job_title_name = EXCLUDED.job_title_name,
          impressions = EXCLUDED.impressions,
          clicks = EXCLUDED.clicks,
