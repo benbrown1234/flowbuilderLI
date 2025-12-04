@@ -1,0 +1,316 @@
+# Critical Fixes Brief - FlowBuilder LinkedIn Ads Tool
+
+**Estimated Effort:** 55-75 hours  
+**Priority:** Complete items 1-10 before production deployment. Items 11-14 should follow shortly after.
+
+---
+
+## CRITICAL (Must Fix Before Launch)
+
+### 1. Replace In-Memory Session Storage
+
+**Location:** `server/index.ts` line 181
+
+**Current Code:**
+```typescript
+const sessions: Map<string, Session> = new Map();
+```
+
+**Issue:** Sessions lost on server restart. Won't work with multiple instances. Memory leak.
+
+**Fix:** 
+- Replace with Redis or database-backed sessions
+- Add session expiry cleanup
+- Implement session rotation on login (generate new session ID after successful auth)
+
+---
+
+### 2. Add Authentication to Canvas Endpoints
+
+**Location:** `server/index.ts` lines ~4040-4270
+
+**Issue:** These routes have NO authentication - anyone can access any canvas:
+- `POST /api/canvas`
+- `GET /api/canvas/:canvasId`
+- `PUT /api/canvas/:canvasId`
+- `DELETE /api/canvas/:canvasId`
+- `POST /api/canvas/:canvasId/save`
+- All `/api/canvas/comments/*` routes
+
+**Fix:** 
+1. Add `requireAuth` middleware to all canvas routes
+2. Verify `owner_user_id` matches the logged-in user before allowing access
+3. Store LinkedIn user ID in session during OAuth callback
+
+---
+
+### 3. Remove Exposed API Key from Frontend Bundle
+
+**Location:** `vite.config.ts` lines 27-29
+
+**Current Code:**
+```typescript
+define: {
+  'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+  'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+}
+```
+
+**Issue:** API key visible in browser dev tools to anyone.
+
+**Fix:** Delete these lines entirely. AI calls already route through backend.
+
+---
+
+### 4. Restrict CORS Origins
+
+**Location:** `server/index.ts` line 160
+
+**Current Code:**
+```typescript
+app.use(cors({ credentials: true, origin: true }));
+```
+
+**Issue:** Accepts requests from ANY website.
+
+**Fix:** Replace with explicit allowlist:
+```typescript
+app.use(cors({ 
+  credentials: true, 
+  origin: ['https://your-production-domain.com']
+}));
+```
+
+---
+
+### 5. Add CSRF Protection
+
+**Location:** `server/index.ts`
+
+**Issue:** No CSRF tokens on state-changing endpoints. OAuth state parameter only protects OAuth flow, not other POST/PUT/DELETE routes.
+
+**Fix:** 
+- Install `csurf` or implement custom CSRF tokens
+- Generate token on session creation
+- Validate token on all non-GET requests
+- Send token to frontend via cookie or response header
+
+---
+
+### 6. Add Rate Limiting
+
+**Location:** `server/index.ts`
+
+**Issue:** No rate limits. Vulnerable to abuse, especially on expensive AI endpoints.
+
+**Fix:** Install `express-rate-limit` and add:
+- General: 100 requests / 15 min
+- AI endpoints (`/api/ai/*`): 10 requests / min  
+- Auth endpoints: 20 requests / 15 min
+
+---
+
+### 7. Validate Environment Variables at Startup
+
+**Location:** `server/index.ts` lines 164-165, 1493-1494
+
+**Issue:** Missing env vars cause runtime failures with unclear errors.
+
+**Required Variables:**
+- `DATABASE_URL`
+- `LINKEDIN_CLIENT_ID`
+- `LINKEDIN_CLIENT_SECRET`
+- `AI_INTEGRATIONS_OPENAI_API_KEY`
+- `AI_INTEGRATIONS_OPENAI_BASE_URL`
+- `NODE_ENV`
+- `REDIS_URL` (after implementing Redis sessions)
+
+**Fix:** Add startup validation using `zod` or `envalid`. Fail immediately with clear message if any are missing. Also create `.env.example` documenting all required variables.
+
+---
+
+### 8. Add React Error Boundaries
+
+**Location:** `App.tsx`
+
+**Issue:** Any error in IdeateCanvas (2,854 lines) or AuditPage (1,684 lines) crashes the entire app with a white screen.
+
+**Fix:** Create an ErrorBoundary component and wrap each major view. Show a user-friendly error message with refresh button.
+
+---
+
+### 9. Add Health Check Endpoints
+
+**Location:** `server/index.ts`
+
+**Issue:** No endpoints for load balancers or orchestrators to verify app health.
+
+**Fix:** Add:
+- `GET /health` - Returns 200 if process is running
+- `GET /ready` - Returns 200 if database (and Redis) connected, 503 if not
+
+---
+
+### 10. Add Security Headers
+
+**Location:** `server/index.ts`
+
+**Issue:** Missing standard security headers (CSP, X-Frame-Options, etc.)
+
+**Fix:** Install and configure `helmet` middleware. Also enforce secure cookies in production:
+```typescript
+res.cookie('session_id', sessionId, { 
+  httpOnly: true, 
+  secure: process.env.NODE_ENV === 'production',  // Always true in prod
+  sameSite: 'strict',  // Upgrade from 'lax'
+  maxAge: 7 * 24 * 60 * 60 * 1000
+});
+```
+
+---
+
+## HIGH PRIORITY (Fix Shortly After Launch)
+
+### 11. Add Request Cancellation in React
+
+**Location:** `App.tsx` useEffect blocks (lines ~140-162)
+
+**Issue:** Fast account switching causes race conditions. Requests aren't cancelled on component unmount.
+
+**Fix:** Use `AbortController` in data fetching useEffects. Cancel pending requests in cleanup function. Update `services/linkedinApi.ts` to accept and pass AbortSignal to axios calls.
+
+---
+
+### 12. Configure Database Connection Pool
+
+**Location:** `server/database.ts` lines 1-5
+
+**Current Code:**
+```typescript
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+```
+
+**Issue:** No pool limits. Can exhaust connections under load. No timeout handling.
+
+**Fix:**
+```typescript
+const pool = new pg.Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 20,                       // Maximum connections
+  idleTimeoutMillis: 30000,      // Close idle connections after 30s
+  connectionTimeoutMillis: 5000, // Fail if can't connect in 5s
+});
+```
+
+---
+
+### 13. Add Graceful Shutdown
+
+**Location:** `server/index.ts`
+
+**Issue:** Server doesn't handle SIGTERM. Active requests dropped on deploy/restart.
+
+**Fix:**
+```typescript
+const server = app.listen(PORT, HOST, () => {
+  console.log(`Server running on http://${HOST}:${PORT}`);
+});
+
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  server.close(() => {
+    console.log('HTTP server closed');
+    pool.end(() => {
+      console.log('Database pool closed');
+      process.exit(0);
+    });
+  });
+  
+  // Force shutdown after 30s
+  setTimeout(() => {
+    console.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 30000);
+});
+```
+
+---
+
+### 14. Add Structured Logging
+
+**Location:** Throughout `server/index.ts`
+
+**Issue:** 
+- Using `console.log` everywhere
+- Sensitive data logged (full API responses)
+- No log levels
+- Hard to search/filter in production
+
+**Fix:**
+- Install `pino` or `winston`
+- Replace all `console.log/warn/error` calls
+- Add log levels (debug, info, warn, error)
+- Sanitize sensitive data before logging
+- Add request ID to all logs for correlation
+
+Example:
+```typescript
+import pino from 'pino';
+
+const logger = pino({
+  level: process.env.LOG_LEVEL || 'info',
+  redact: ['req.headers.authorization', 'req.headers.cookie']
+});
+
+// Instead of: console.log('Ad accounts response:', JSON.stringify(data, null, 2));
+// Use: logger.debug({ accountCount: data.elements?.length }, 'Ad accounts fetched');
+```
+
+---
+
+## Dependencies to Install
+
+```bash
+npm install express-rate-limit helmet zod ioredis pino csurf
+```
+
+---
+
+## Files That Need Changes
+
+| File | Changes |
+|------|---------|
+| `server/index.ts` | Sessions, auth, CORS, CSRF, rate limiting, health checks, headers, graceful shutdown, logging |
+| `server/database.ts` | Connection pool config, user ownership queries |
+| `vite.config.ts` | Remove API key exposure |
+| `App.tsx` | Error boundaries, request cancellation |
+| `services/linkedinApi.ts` | Accept AbortSignal parameter |
+| NEW: `components/ErrorBoundary.tsx` | Create error boundary component |
+| NEW: `server/config.ts` | Environment validation |
+| NEW: `server/logger.ts` | Logging configuration |
+| NEW: `.env.example` | Document all required environment variables |
+
+---
+
+## Acceptance Criteria
+
+### Critical (Items 1-10)
+- [ ] Sessions persist across server restarts
+- [ ] Cannot access another user's canvas without authentication
+- [ ] No secrets visible in browser network/source tabs
+- [ ] Requests from unknown origins are rejected
+- [ ] State-changing requests require valid CSRF token
+- [ ] Rapid repeated requests return 429 error
+- [ ] App fails to start with clear error if required env vars are missing
+- [ ] Component errors show friendly message instead of white screen
+- [ ] `/health` and `/ready` endpoints respond correctly
+- [ ] Security headers present in all responses (verify at securityheaders.com)
+
+### High Priority (Items 11-14)
+- [ ] Switching accounts rapidly doesn't cause errors or stale data
+- [ ] Database connections don't exhaust under load
+- [ ] Deployments don't drop active requests
+- [ ] Logs are structured JSON with levels and request IDs
+- [ ] No sensitive data (tokens, full responses) in logs
