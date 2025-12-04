@@ -49,7 +49,7 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   **Manual Refresh**: "Refresh" button to pull latest data on-demand.
 *   **Drilldown (Performance Analysis)**:
     *   **Audit Prerequisite**: Drilldown requires audit to be enabled first. Data collection begins when audit is activated.
-    *   **Navigation Dropdown**: Switch between Hourly and Job Titles views using the dropdown in the main menu.
+    *   **Navigation Dropdown**: Switch between Hourly, Job Titles, and Companies views using the dropdown in the main menu.
     *   **Hourly Heatmap**: Visual 7x24 grid showing performance by day of week and hour of day (last 14 days).
     *   **Selectable Metrics**: Toggle between Impressions, Clicks, Spend, CTR, CPC, CPM, and Conversions.
     *   **Color-Coded Intensity**: Darker cells indicate higher activity/performance.
@@ -66,6 +66,14 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
         - Sorted by impressions descending to show highest-volume job titles first.
         - Data fetched per-campaign during audit sync with 500ms delays for rate limiting.
         - Database storage: `analytics_job_titles` table with campaign_id for per-campaign data.
+    *   **Companies Breakdown**:
+        - Shows MEMBER_COMPANY data with impressions, clicks, and engagement rate (CTR).
+        - Date range filters: 7, 30, or 90 days for flexible analysis periods.
+        - Per-campaign filtering: Campaign dropdown to view companies for specific campaigns.
+        - Clickable company URLs linking directly to LinkedIn company pages.
+        - Company URN resolution with caching mechanism (API → cache → "Company ID" fallback).
+        - Sorted by impressions descending to show highest-volume companies first.
+        - Database storage: `analytics_companies` table with period support and company_url field.
 *   **Ideate Canvas**:
     *   A visual planning tool for campaigns, featuring a drag-and-drop interface.
     *   **Import from Structure**: One-click import of live LinkedIn campaign data into Ideate canvas. Transforms campaign groups, campaigns, and ads into editable nodes with full targeting data preserved. Auto-generates TOF audience nodes from targeting criteria (industries, company sizes, seniorities).
