@@ -3,6 +3,8 @@ import cors from 'cors';
 import axios from 'axios';
 import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -53,7 +55,13 @@ import {
   getLatestMetricsDate,
   updateCampaignScoring,
   updateCreativeScoring,
-  getStructureScoringData
+  getStructureScoringData,
+  getDbSession,
+  createDbSession,
+  updateDbSession,
+  deleteDbSession,
+  cleanupExpiredSessions,
+  getCanvasWithOwnership
 } from './database.js';
 import { runAuditRules, calculateAccountScore } from './auditRules.js';
 
@@ -162,7 +170,73 @@ const getFallbackName = (urn: string): string | null => {
 const isProduction = process.env.NODE_ENV === 'production';
 const PORT = Number(process.env.PORT) || (isProduction ? 5000 : 3001);
 
-app.use(cors({ credentials: true, origin: true }));
+// Trust proxy for rate limiting (Replit uses reverse proxy)
+app.set('trust proxy', 1);
+
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "cdn.tailwindcss.com"],
+      styleSrc: ["'self'", "'unsafe-inline'", "cdn.tailwindcss.com", "fonts.googleapis.com"],
+      fontSrc: ["'self'", "fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "blob:", "https:"],
+      connectSrc: ["'self'", "https://api.linkedin.com", "https://api.openai.com"],
+      frameSrc: ["'self'", "https://www.linkedin.com"]
+    }
+  },
+  crossOriginEmbedderPolicy: false
+}));
+
+// CORS configuration - restrict origins in production
+const allowedOrigins = isProduction 
+  ? [process.env.REPLIT_DEV_DOMAIN, process.env.REPLIT_DOMAINS].filter(Boolean).map(d => `https://${d}`)
+  : true;
+
+app.use(cors({ 
+  credentials: true, 
+  origin: allowedOrigins
+}));
+
+// Rate limiting
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,
+  message: { error: 'Too many requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10,
+  message: { error: 'Too many AI requests, please slow down' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  message: { error: 'Too many authentication attempts, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// Apply rate limiters - AI and auth routes get their own dedicated limits
+// Skip general limiter for routes that have dedicated limiters
+app.use('/api/ai/', aiLimiter);
+app.use('/api/auth/', authLimiter);
+app.use('/api/ideate', aiLimiter);
+app.use('/api/', (req, res, next) => {
+  // Skip general limiter for routes already handled by specialized limiters
+  if (req.path.startsWith('/ai/') || req.path.startsWith('/auth/') || req.path.startsWith('/ideate')) {
+    return next();
+  }
+  return generalLimiter(req, res, next);
+});
+
 app.use(express.json());
 app.use(cookieParser());
 
@@ -181,15 +255,54 @@ interface Session {
   accessToken: string | null;
   expiresAt: number | null;
   state: string | null;
+  userId: string | null;
+  userName: string | null;
 }
 
-const sessions: Map<string, Session> = new Map();
+// In-memory cache for sessions (backed by database for persistence)
+const sessionCache: Map<string, Session> = new Map();
 
-const getSession = (sessionId: string): Session => {
-  if (!sessions.has(sessionId)) {
-    sessions.set(sessionId, { accessToken: null, expiresAt: null, state: null });
+const getSession = async (sessionId: string): Promise<Session> => {
+  // Check cache first
+  if (sessionCache.has(sessionId)) {
+    return sessionCache.get(sessionId)!;
   }
-  return sessions.get(sessionId)!;
+  
+  // Load from database
+  const dbSession = await getDbSession(sessionId);
+  if (dbSession) {
+    const session: Session = {
+      accessToken: dbSession.access_token,
+      expiresAt: dbSession.expires_at ? dbSession.expires_at.getTime() : null,
+      state: dbSession.state,
+      userId: dbSession.user_id,
+      userName: dbSession.user_name
+    };
+    sessionCache.set(sessionId, session);
+    return session;
+  }
+  
+  // Create new session
+  const newSession: Session = { accessToken: null, expiresAt: null, state: null, userId: null, userName: null };
+  sessionCache.set(sessionId, newSession);
+  await createDbSession(sessionId);
+  return newSession;
+};
+
+const updateSession = async (sessionId: string, updates: Partial<Session>): Promise<void> => {
+  // Update cache
+  const current = sessionCache.get(sessionId) || { accessToken: null, expiresAt: null, state: null, userId: null, userName: null };
+  const updated = { ...current, ...updates };
+  sessionCache.set(sessionId, updated);
+  
+  // Persist to database
+  await updateDbSession(sessionId, {
+    access_token: updated.accessToken,
+    expires_at: updated.expiresAt ? new Date(updated.expiresAt) : null,
+    state: updated.state,
+    user_id: updated.userId,
+    user_name: updated.userName
+  });
 };
 
 const generateSessionId = (): string => {
@@ -200,27 +313,35 @@ const isSecure = (req: express.Request): boolean => {
   return req.secure || req.get('x-forwarded-proto') === 'https';
 };
 
-const ensureSession = (req: express.Request, res: express.Response): string => {
+const ensureSession = async (req: express.Request, res: express.Response): Promise<string> => {
   let sessionId = req.cookies?.session_id;
-  if (!sessionId || !sessions.has(sessionId)) {
-    sessionId = generateSessionId();
-    res.cookie('session_id', sessionId, { 
-      httpOnly: true, 
-      secure: isSecure(req),
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-    sessions.set(sessionId, { accessToken: null, expiresAt: null, state: null });
+  
+  if (sessionId) {
+    // Validate session exists in database
+    const dbSession = await getDbSession(sessionId);
+    if (dbSession) {
+      return sessionId;
+    }
   }
+  
+  // Create new session
+  sessionId = generateSessionId();
+  res.cookie('session_id', sessionId, { 
+    httpOnly: true, 
+    secure: isSecure(req),
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000
+  });
+  await createDbSession(sessionId);
+  sessionCache.set(sessionId, { accessToken: null, expiresAt: null, state: null, userId: null, userName: null });
   return sessionId;
 };
 
-app.get('/api/auth/url', (req, res) => {
-  const sessionId = ensureSession(req, res);
-  const session = getSession(sessionId);
+app.get('/api/auth/url', async (req, res) => {
+  const sessionId = await ensureSession(req, res);
   
   const state = crypto.randomBytes(16).toString('hex');
-  session.state = state;
+  await updateSession(sessionId, { state });
   
   const scope = 'rw_ads r_ads_reporting r_basicprofile r_organization_social';
   const redirectUri = getRedirectUri(req);
@@ -316,14 +437,14 @@ app.get('/api/auth/callback', async (req, res) => {
     return res.send(sendAuthResultHtml(false, 'no_session'));
   }
   
-  const session = getSession(sessionId);
+  const session = await getSession(sessionId);
   
   if (!state || state !== session.state) {
     console.error('State mismatch:', { received: state, expected: session.state });
     return res.send(sendAuthResultHtml(false, 'state_mismatch'));
   }
   
-  session.state = null;
+  await updateSession(sessionId, { state: null });
   
   try {
     const redirectUri = getRedirectUri(req);
@@ -345,8 +466,10 @@ app.get('/api/auth/callback', async (req, res) => {
       }
     );
     
-    session.accessToken = tokenResponse.data.access_token;
-    session.expiresAt = Date.now() + (tokenResponse.data.expires_in * 1000);
+    await updateSession(sessionId, {
+      accessToken: tokenResponse.data.access_token,
+      expiresAt: Date.now() + (tokenResponse.data.expires_in * 1000)
+    });
     
     res.send(sendAuthResultHtml(true));
   } catch (err: any) {
@@ -355,25 +478,26 @@ app.get('/api/auth/callback', async (req, res) => {
   }
 });
 
-app.get('/api/auth/status', (req, res) => {
+app.get('/api/auth/status', async (req, res) => {
   const sessionId = req.cookies?.session_id;
   
   if (!sessionId) {
     return res.json({ isAuthenticated: false });
   }
   
-  const session = getSession(sessionId);
+  const session = await getSession(sessionId);
   const isAuthenticated = session.accessToken !== null && 
     (session.expiresAt === null || Date.now() < session.expiresAt);
   
   res.json({ isAuthenticated });
 });
 
-app.post('/api/auth/logout', (req, res) => {
+app.post('/api/auth/logout', async (req, res) => {
   const sessionId = req.cookies?.session_id;
   
   if (sessionId) {
-    sessions.delete(sessionId);
+    sessionCache.delete(sessionId);
+    await deleteDbSession(sessionId);
   }
   
   res.clearCookie('session_id');
@@ -394,7 +518,7 @@ async function throttledDelay(): Promise<void> {
 }
 
 async function linkedinApiRequest(sessionId: string, endpoint: string, params: Record<string, any> = {}, rawQueryString?: string) {
-  const session = getSession(sessionId);
+  const session = await getSession(sessionId);
   
   if (!session.accessToken) {
     throw new Error('Not authenticated');
@@ -480,14 +604,14 @@ async function linkedinApiRequestPaginated(sessionId: string, endpoint: string, 
   return allElements;
 }
 
-const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+const requireAuth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const sessionId = req.cookies?.session_id;
   
   if (!sessionId) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
   
-  const session = getSession(sessionId);
+  const session = await getSession(sessionId);
   
   if (!session.accessToken) {
     return res.status(401).json({ error: 'Not authenticated' });
@@ -498,6 +622,7 @@ const requireAuth = (req: express.Request, res: express.Response, next: express.
   }
   
   (req as any).sessionId = sessionId;
+  (req as any).session = session;
   next();
 };
 
@@ -2941,12 +3066,11 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
 
 // Start audit (opt-in and sync)
 app.post('/api/audit/start/:accountId', requireAuth, async (req, res) => {
-  const sessionId = (req as any).sessionId;
   const { accountId } = req.params;
   const { accountName } = req.body;
   
   // Capture access token BEFORE sending response (session may be cleaned up after response)
-  const session = getSession(sessionId);
+  const session = (req as any).session as Session;
   const accessToken = session.accessToken;
   
   if (!accessToken) {
@@ -2983,11 +3107,10 @@ app.post('/api/audit/start/:accountId', requireAuth, async (req, res) => {
 
 // Refresh/resync audit data
 app.post('/api/audit/refresh/:accountId', requireAuth, async (req, res) => {
-  const sessionId = (req as any).sessionId;
   const { accountId } = req.params;
   
   // Capture access token BEFORE sending response
-  const session = getSession(sessionId);
+  const session = (req as any).session as Session;
   const accessToken = session.accessToken;
   
   if (!accessToken) {
@@ -4418,12 +4541,12 @@ Example structure:
   }
 });
 
-// Canvas CRUD endpoints
-app.post('/api/canvas', async (req, res) => {
+// Canvas CRUD endpoints - all require authentication
+app.post('/api/canvas', requireAuth, async (req, res) => {
   try {
     const { title, accountId } = req.body;
-    const session = (req as any).session;
-    const ownerUserId = session?.userId || null;
+    const session = (req as any).session as Session;
+    const ownerUserId = session?.userId || (req as any).sessionId;
     
     const canvas = await createCanvas(ownerUserId, accountId || null, title || 'Untitled Canvas');
     res.json(canvas);
@@ -4433,10 +4556,10 @@ app.post('/api/canvas', async (req, res) => {
   }
 });
 
-app.get('/api/canvas', async (req, res) => {
+app.get('/api/canvas', requireAuth, async (req, res) => {
   try {
-    const session = (req as any).session;
-    const ownerUserId = session?.userId || null;
+    const session = (req as any).session as Session;
+    const ownerUserId = session?.userId || (req as any).sessionId;
     const accountId = req.query.accountId as string | undefined;
     
     const canvases = await listCanvases(ownerUserId, accountId || null);
@@ -4476,13 +4599,21 @@ app.get('/api/canvas/share/:shareToken', async (req, res) => {
   }
 });
 
-app.get('/api/canvas/:canvasId', async (req, res) => {
+app.get('/api/canvas/:canvasId', requireAuth, async (req, res) => {
   try {
     const { canvasId } = req.params;
+    const session = (req as any).session as Session;
+    const ownerUserId = session?.userId || (req as any).sessionId;
+    
     const canvas = await getCanvas(canvasId);
     
     if (!canvas) {
       return res.status(404).json({ error: 'Canvas not found' });
+    }
+    
+    // Verify ownership
+    if (canvas.owner_user_id && canvas.owner_user_id !== ownerUserId) {
+      return res.status(403).json({ error: 'Access denied' });
     }
     
     const latestVersion = await getLatestCanvasVersion(canvasId);
@@ -4499,17 +4630,23 @@ app.get('/api/canvas/:canvasId', async (req, res) => {
   }
 });
 
-app.put('/api/canvas/:canvasId', async (req, res) => {
+app.put('/api/canvas/:canvasId', requireAuth, async (req, res) => {
   try {
     const { canvasId } = req.params;
     const { title, is_public, allow_public_comments } = req.body;
+    const session = (req as any).session as Session;
+    const ownerUserId = session?.userId || (req as any).sessionId;
     
-    const canvas = await updateCanvas(canvasId, { title, is_public, allow_public_comments });
-    
-    if (!canvas) {
+    // First check ownership
+    const existingCanvas = await getCanvas(canvasId);
+    if (!existingCanvas) {
       return res.status(404).json({ error: 'Canvas not found' });
     }
+    if (existingCanvas.owner_user_id && existingCanvas.owner_user_id !== ownerUserId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
     
+    const canvas = await updateCanvas(canvasId, { title, is_public, allow_public_comments });
     res.json(canvas);
   } catch (err: any) {
     console.error('Update canvas error:', err.message);
@@ -4517,9 +4654,21 @@ app.put('/api/canvas/:canvasId', async (req, res) => {
   }
 });
 
-app.delete('/api/canvas/:canvasId', async (req, res) => {
+app.delete('/api/canvas/:canvasId', requireAuth, async (req, res) => {
   try {
     const { canvasId } = req.params;
+    const session = (req as any).session as Session;
+    const ownerUserId = session?.userId || (req as any).sessionId;
+    
+    // Check ownership before deleting
+    const canvas = await getCanvas(canvasId);
+    if (!canvas) {
+      return res.status(404).json({ error: 'Canvas not found' });
+    }
+    if (canvas.owner_user_id && canvas.owner_user_id !== ownerUserId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
     await deleteCanvas(canvasId);
     res.json({ success: true });
   } catch (err: any) {
@@ -4528,15 +4677,22 @@ app.delete('/api/canvas/:canvasId', async (req, res) => {
   }
 });
 
-app.post('/api/canvas/:canvasId/regenerate-token', async (req, res) => {
+app.post('/api/canvas/:canvasId/regenerate-token', requireAuth, async (req, res) => {
   try {
     const { canvasId } = req.params;
-    const canvas = await regenerateShareToken(canvasId);
+    const session = (req as any).session as Session;
+    const ownerUserId = session?.userId || (req as any).sessionId;
     
-    if (!canvas) {
+    // Check ownership
+    const existingCanvas = await getCanvas(canvasId);
+    if (!existingCanvas) {
       return res.status(404).json({ error: 'Canvas not found' });
     }
+    if (existingCanvas.owner_user_id && existingCanvas.owner_user_id !== ownerUserId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
     
+    const canvas = await regenerateShareToken(canvasId);
     res.json(canvas);
   } catch (err: any) {
     console.error('Regenerate token error:', err.message);
@@ -4545,14 +4701,23 @@ app.post('/api/canvas/:canvasId/regenerate-token', async (req, res) => {
 });
 
 // Canvas version endpoints
-app.post('/api/canvas/:canvasId/save', async (req, res) => {
+app.post('/api/canvas/:canvasId/save', requireAuth, async (req, res) => {
   try {
     const { canvasId } = req.params;
     const { nodes, connections, settings } = req.body;
-    const session = (req as any).session;
-    const userId = session?.userId || null;
+    const session = (req as any).session as Session;
+    const ownerUserId = session?.userId || (req as any).sessionId;
     
-    const version = await saveCanvasVersion(canvasId, nodes || [], connections || [], settings || {}, userId);
+    // Check ownership
+    const canvas = await getCanvas(canvasId);
+    if (!canvas) {
+      return res.status(404).json({ error: 'Canvas not found' });
+    }
+    if (canvas.owner_user_id && canvas.owner_user_id !== ownerUserId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
+    const version = await saveCanvasVersion(canvasId, nodes || [], connections || [], settings || {}, ownerUserId);
     res.json(version);
   } catch (err: any) {
     console.error('Save canvas version error:', err.message);
@@ -4560,10 +4725,21 @@ app.post('/api/canvas/:canvasId/save', async (req, res) => {
   }
 });
 
-app.get('/api/canvas/:canvasId/versions', async (req, res) => {
+app.get('/api/canvas/:canvasId/versions', requireAuth, async (req, res) => {
   try {
     const { canvasId } = req.params;
+    const session = (req as any).session as Session;
+    const ownerUserId = session?.userId || (req as any).sessionId;
     const limit = parseInt(req.query.limit as string) || 20;
+    
+    // Check ownership
+    const canvas = await getCanvas(canvasId);
+    if (!canvas) {
+      return res.status(404).json({ error: 'Canvas not found' });
+    }
+    if (canvas.owner_user_id && canvas.owner_user_id !== ownerUserId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
     
     const versions = await getCanvasVersions(canvasId, limit);
     res.json(versions);
@@ -4573,9 +4749,21 @@ app.get('/api/canvas/:canvasId/versions', async (req, res) => {
   }
 });
 
-app.get('/api/canvas/:canvasId/version/:versionId', async (req, res) => {
+app.get('/api/canvas/:canvasId/version/:versionId', requireAuth, async (req, res) => {
   try {
-    const { versionId } = req.params;
+    const { canvasId, versionId } = req.params;
+    const session = (req as any).session as Session;
+    const ownerUserId = session?.userId || (req as any).sessionId;
+    
+    // Check ownership
+    const canvas = await getCanvas(canvasId);
+    if (!canvas) {
+      return res.status(404).json({ error: 'Canvas not found' });
+    }
+    if (canvas.owner_user_id && canvas.owner_user_id !== ownerUserId) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
     const version = await getCanvasVersion(parseInt(versionId));
     
     if (!version) {
@@ -4589,16 +4777,26 @@ app.get('/api/canvas/:canvasId/version/:versionId', async (req, res) => {
   }
 });
 
-// Canvas comment endpoints
-app.post('/api/canvas/:canvasId/comments', async (req, res) => {
+// Canvas comment endpoints - require auth for write operations
+app.post('/api/canvas/:canvasId/comments', requireAuth, async (req, res) => {
   try {
     const { canvasId } = req.params;
     const { content, nodeId, authorName } = req.body;
-    const session = (req as any).session;
-    const authorUserId = session?.userId || null;
+    const session = (req as any).session as Session;
+    const authorUserId = session?.userId || (req as any).sessionId;
     
     if (!content) {
       return res.status(400).json({ error: 'Comment content is required' });
+    }
+    
+    // Check canvas exists and user has access (owner or public canvas with comments enabled)
+    const canvas = await getCanvas(canvasId);
+    if (!canvas) {
+      return res.status(404).json({ error: 'Canvas not found' });
+    }
+    const isOwner = canvas.owner_user_id === authorUserId;
+    if (!isOwner && !canvas.allow_public_comments) {
+      return res.status(403).json({ error: 'Comments not allowed on this canvas' });
     }
     
     const latestVersion = await getLatestCanvasVersion(canvasId);
@@ -4618,9 +4816,21 @@ app.post('/api/canvas/:canvasId/comments', async (req, res) => {
   }
 });
 
-app.get('/api/canvas/:canvasId/comments', async (req, res) => {
+app.get('/api/canvas/:canvasId/comments', requireAuth, async (req, res) => {
   try {
     const { canvasId } = req.params;
+    const session = (req as any).session as Session;
+    const ownerUserId = session?.userId || (req as any).sessionId;
+    
+    // Check access
+    const canvas = await getCanvas(canvasId);
+    if (!canvas) {
+      return res.status(404).json({ error: 'Canvas not found' });
+    }
+    if (canvas.owner_user_id && canvas.owner_user_id !== ownerUserId && !canvas.is_public) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    
     const comments = await getComments(canvasId);
     res.json(comments);
   } catch (err: any) {
@@ -4629,7 +4839,7 @@ app.get('/api/canvas/:canvasId/comments', async (req, res) => {
   }
 });
 
-app.put('/api/canvas/comments/:commentId/resolve', async (req, res) => {
+app.put('/api/canvas/comments/:commentId/resolve', requireAuth, async (req, res) => {
   try {
     const { commentId } = req.params;
     const { resolved } = req.body;
@@ -4647,7 +4857,7 @@ app.put('/api/canvas/comments/:commentId/resolve', async (req, res) => {
   }
 });
 
-app.delete('/api/canvas/comments/:commentId', async (req, res) => {
+app.delete('/api/canvas/comments/:commentId', requireAuth, async (req, res) => {
   try {
     const { commentId } = req.params;
     await deleteComment(parseInt(commentId));
@@ -4658,15 +4868,51 @@ app.delete('/api/canvas/comments/:commentId', async (req, res) => {
   }
 });
 
+// Health check endpoints for load balancers and orchestrators
+let dbHealthy = false;
+
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/ready', async (req, res) => {
+  try {
+    // Actually verify DB connectivity on each request
+    const client = await pool.connect();
+    await client.query('SELECT 1');
+    client.release();
+    dbHealthy = true;
+    res.status(200).json({ status: 'ready', database: 'connected' });
+  } catch (err: any) {
+    dbHealthy = false;
+    console.error('Readiness check failed:', err.message);
+    res.status(503).json({ status: 'not_ready', database: 'disconnected' });
+  }
+});
+
 initDatabase()
   .then(async () => {
+    dbHealthy = true;
     const stuckSyncs = await markStuckSyncsAsError();
     if (stuckSyncs.length > 0) {
       console.log(`Marked ${stuckSyncs.length} stuck sync(s) as error - they can be retried via Refresh`);
     }
+    
+    // Cleanup expired sessions periodically (every hour)
+    setInterval(async () => {
+      try {
+        const cleaned = await cleanupExpiredSessions();
+        if (cleaned > 0) {
+          console.log(`Cleaned up ${cleaned} expired session(s)`);
+        }
+      } catch (err: any) {
+        console.error('Session cleanup error:', err.message);
+      }
+    }, 60 * 60 * 1000);
   })
   .catch(err => {
     console.error('Failed to initialize database:', err.message);
+    dbHealthy = false;
   });
 
 if (isProduction) {

@@ -12,6 +12,7 @@ import AuditPage from './components/AuditPage';
 import DrilldownPage from './components/DrilldownPage';
 import { IdeateCanvas } from './components/IdeateCanvas';
 import LandingPage from './components/LandingPage';
+import ErrorBoundary from './components/ErrorBoundary';
 import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, ClipboardCheck, Lightbulb, Eye, BarChart3 } from 'lucide-react';
 
 // Audit summary type for Structure view

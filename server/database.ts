@@ -245,7 +245,27 @@ export async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_canvases_share_token ON ideate_canvases(share_token);
       CREATE INDEX IF NOT EXISTS idx_canvas_versions_canvas ON ideate_canvas_versions(canvas_id);
       CREATE INDEX IF NOT EXISTS idx_canvas_comments_canvas ON ideate_canvas_comments(canvas_id);
+
+      -- Database-backed sessions for persistence across restarts
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        id VARCHAR(64) PRIMARY KEY,
+        access_token TEXT,
+        expires_at TIMESTAMP,
+        state VARCHAR(64),
+        user_id VARCHAR(100),
+        user_name VARCHAR(255),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sessions_expires ON user_sessions(expires_at);
     `);
+
+    // Cleanup expired sessions
+    await client.query(`
+      DELETE FROM user_sessions WHERE expires_at < NOW() - INTERVAL '7 days'
+    `);
+
     console.log('Database tables initialized');
   } finally {
     client.release();
@@ -1178,6 +1198,99 @@ export async function getStructureScoringData(accountId: string) {
     campaigns: campaigns.rows,
     creatives: creatives.rows
   };
+}
+
+// Session management functions
+export interface DbSession {
+  id: string;
+  access_token: string | null;
+  expires_at: Date | null;
+  state: string | null;
+  user_id: string | null;
+  user_name: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export async function getDbSession(sessionId: string): Promise<DbSession | null> {
+  const result = await pool.query(
+    'SELECT * FROM user_sessions WHERE id = $1',
+    [sessionId]
+  );
+  return result.rows[0] || null;
+}
+
+export async function createDbSession(sessionId: string): Promise<DbSession> {
+  const result = await pool.query(
+    `INSERT INTO user_sessions (id) VALUES ($1)
+     ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
+     RETURNING *`,
+    [sessionId]
+  );
+  return result.rows[0];
+}
+
+export async function updateDbSession(
+  sessionId: string, 
+  updates: { 
+    access_token?: string | null; 
+    expires_at?: Date | null; 
+    state?: string | null;
+    user_id?: string | null;
+    user_name?: string | null;
+  }
+): Promise<DbSession | null> {
+  const setClauses: string[] = ['updated_at = NOW()'];
+  const params: any[] = [];
+  
+  if (updates.access_token !== undefined) {
+    params.push(updates.access_token);
+    setClauses.push(`access_token = $${params.length}`);
+  }
+  if (updates.expires_at !== undefined) {
+    params.push(updates.expires_at);
+    setClauses.push(`expires_at = $${params.length}`);
+  }
+  if (updates.state !== undefined) {
+    params.push(updates.state);
+    setClauses.push(`state = $${params.length}`);
+  }
+  if (updates.user_id !== undefined) {
+    params.push(updates.user_id);
+    setClauses.push(`user_id = $${params.length}`);
+  }
+  if (updates.user_name !== undefined) {
+    params.push(updates.user_name);
+    setClauses.push(`user_name = $${params.length}`);
+  }
+  
+  params.push(sessionId);
+  
+  const result = await pool.query(
+    `UPDATE user_sessions SET ${setClauses.join(', ')} WHERE id = $${params.length} RETURNING *`,
+    params
+  );
+  return result.rows[0] || null;
+}
+
+export async function deleteDbSession(sessionId: string): Promise<void> {
+  await pool.query('DELETE FROM user_sessions WHERE id = $1', [sessionId]);
+}
+
+export async function cleanupExpiredSessions(): Promise<number> {
+  const result = await pool.query(
+    `DELETE FROM user_sessions WHERE expires_at < NOW() - INTERVAL '7 days' RETURNING id`
+  );
+  return result.rowCount || 0;
+}
+
+// Get canvas with ownership check
+export async function getCanvasWithOwnership(canvasId: string, userId: string): Promise<any | null> {
+  const result = await pool.query(
+    'SELECT * FROM ideate_canvases WHERE id = $1 AND owner_user_id = $2',
+    [canvasId, userId]
+  );
+  return result.rows[0] || null;
 }
 
 export default pool;
