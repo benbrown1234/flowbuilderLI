@@ -177,7 +177,7 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
   const triggerDrilldownSync = async (dataType: 'hourly' | 'job_titles' | 'companies') => {
     setSyncingType(dataType);
     try {
-      const response = await fetch(`/api/audit/drilldown-sync/${accountId}/${dataType}`, {
+      const response = await fetch(`/api/audit/drilldown/sync/${accountId}/${dataType}`, {
         method: 'POST',
         credentials: 'include'
       });
