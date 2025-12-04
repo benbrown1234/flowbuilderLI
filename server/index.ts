@@ -3251,8 +3251,7 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
               const orgResponse = await linkedinApiRequest(
                 sessionId,
                 `/organizations/${orgId}`,
-                {},
-                'projection=(localizedName,vanityName)'
+                {}
               );
               
               if (orgResponse) {
@@ -3864,8 +3863,7 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
               const orgResponse = await linkedinApiRequestWithToken(
                 accessToken,
                 `/organizations/${orgId}`,
-                {},
-                'projection=(localizedName,vanityName)'
+                {}
               );
               
               if (orgResponse) {
