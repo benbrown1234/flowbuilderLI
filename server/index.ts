@@ -71,7 +71,9 @@ import {
   saveCompanyAnalytics,
   getCompanyAnalytics,
   hasCompanyData,
-  getCampaignsWithCompanyData
+  getCampaignsWithCompanyData,
+  updateDrilldownSyncStatus,
+  getDrilldownSyncStatus
 } from './database.js';
 import { runAuditRules, calculateAccountScore } from './auditRules.js';
 
@@ -3981,6 +3983,429 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
   }
 }
 
+// Separate drilldown sync function for individual data types
+async function runDrilldownSync(
+  accessToken: string, 
+  accountId: string, 
+  dataType: 'hourly' | 'job_titles' | 'companies'
+) {
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  const extractId = (urn: any): string => {
+    if (urn === null || urn === undefined) return '';
+    const urnStr = String(urn);
+    const match = urnStr.match(/:(\d+)$/);
+    return match ? match[1] : urnStr;
+  };
+  
+  console.log(`[DrilldownSync] Starting ${dataType} sync for account ${accountId}`);
+  
+  try {
+    // Fetch campaigns first (needed for all drilldown types)
+    await delay(200);
+    const campaignsResponse = await linkedinApiRequestWithToken(
+      accessToken, 
+      `/adAccounts/${accountId}/adCampaigns`, 
+      {}, 
+      'q=search&search=(status:(values:List(ACTIVE,PAUSED,ARCHIVED,CANCELED,DRAFT)))'
+    );
+    const campaigns = campaignsResponse.elements || [];
+    console.log(`[DrilldownSync] Found ${campaigns.length} campaigns`);
+    
+    const activeCampaignIds = campaigns
+      .filter((c: any) => c.status === 'ACTIVE')
+      .map((c: any) => extractId(c.id || c.campaignUrn || ''))
+      .filter((id: string) => id);
+    
+    console.log(`[DrilldownSync] ${activeCampaignIds.length} active campaigns`);
+    
+    // Build campaign lookup map
+    const campaignMap = new Map<string, any>();
+    for (const c of campaigns) {
+      const id = extractId(c.id);
+      campaignMap.set(id, { name: c.name || `Campaign ${id}` });
+    }
+    
+    const now = new Date();
+    const accountUrn = `urn:li:sponsoredAccount:${accountId}`;
+    const encodedAccountUrn = encodeURIComponent(accountUrn);
+    
+    // Sync based on data type
+    if (dataType === 'hourly') {
+      await syncHourlyData(accessToken, accountId, encodedAccountUrn, campaignMap, now);
+    } else if (dataType === 'job_titles') {
+      await syncJobTitlesData(accessToken, accountId, activeCampaignIds, now);
+    } else if (dataType === 'companies') {
+      await syncCompaniesData(accessToken, accountId, activeCampaignIds, now);
+    }
+    
+    // Update sync status to completed
+    await updateDrilldownSyncStatus(accountId, dataType, 'completed');
+    console.log(`[DrilldownSync] ${dataType} sync completed for account ${accountId}`);
+    
+  } catch (err: any) {
+    console.error(`[DrilldownSync] ${dataType} sync error for account ${accountId}:`, err.message);
+    
+    let errorMessage = err.message;
+    if (err.message?.includes('429') || err.response?.status === 429) {
+      errorMessage = 'Rate limit reached - please try again in a few minutes';
+    }
+    
+    await updateDrilldownSyncStatus(accountId, dataType, 'error');
+    throw err;
+  }
+}
+
+// Sync hourly data only
+async function syncHourlyData(
+  accessToken: string, 
+  accountId: string, 
+  encodedAccountUrn: string, 
+  campaignMap: Map<string, any>,
+  now: Date
+) {
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  const extractId = (urn: any): string => {
+    if (urn === null || urn === undefined) return '';
+    const urnStr = String(urn);
+    const match = urnStr.match(/:(\d+)$/);
+    return match ? match[1] : urnStr;
+  };
+  
+  console.log('[Hourly] Fetching hourly analytics for drilldown (last 14 days)...');
+  await delay(300);
+  
+  const fourteenDaysAgo = new Date(now.getTime() - (14 * 24 * 60 * 60 * 1000));
+  const hourlyAnalyticsQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${fourteenDaysAgo.getFullYear()},month:${fourteenDaysAgo.getMonth() + 1},day:${fourteenDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=HOURLY&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,dateRange,pivotValues`;
+  
+  let hourlyAnalytics: any = { elements: [] };
+  try {
+    hourlyAnalytics = await linkedinApiRequestWithToken(accessToken, '/adAnalytics', {}, hourlyAnalyticsQuery);
+    console.log(`[Hourly] Got ${hourlyAnalytics.elements?.length || 0} hourly analytics rows`);
+  } catch (err: any) {
+    console.error('[Hourly] Fetch error:', err.message);
+    throw err;
+  }
+  
+  // Process and save hourly metrics
+  const hourlyMetrics: any[] = [];
+  for (const elem of (hourlyAnalytics.elements || [])) {
+    const campaignId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
+    if (!campaignId) continue;
+    
+    const dateRange = elem.dateRange?.start;
+    if (!dateRange) continue;
+    
+    const metricDate = new Date(dateRange.year, dateRange.month - 1, dateRange.day);
+    const metricHour = dateRange.hour !== undefined ? dateRange.hour : 0;
+    const campaignInfo = campaignMap.get(campaignId) || {};
+    
+    hourlyMetrics.push({
+      campaignId,
+      campaignName: campaignInfo.name,
+      metricDate,
+      metricHour,
+      impressions: elem.impressions || 0,
+      clicks: elem.clicks || 0,
+      spend: parseFloat(elem.costInLocalCurrency || '0'),
+      conversions: elem.externalWebsiteConversions || 0
+    });
+  }
+  
+  if (hourlyMetrics.length > 0) {
+    console.log(`[Hourly] Saving ${hourlyMetrics.length} hourly metrics...`);
+    await saveCampaignHourlyMetrics(accountId, hourlyMetrics);
+  }
+  
+  console.log(`[Hourly] Completed: saved ${hourlyMetrics.length} hourly entries`);
+}
+
+// Sync job titles data only
+async function syncJobTitlesData(
+  accessToken: string, 
+  accountId: string, 
+  activeCampaignIds: string[],
+  now: Date
+) {
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  
+  console.log('[JobTitles] Fetching job title analytics per campaign for 7, 30, and 90 day periods...');
+  
+  const periods: Array<{ days: number; period: '7' | '30' | '90' }> = [
+    { days: 7, period: '7' },
+    { days: 30, period: '30' },
+    { days: 90, period: '90' }
+  ];
+  
+  let totalJobTitlesSaved = 0;
+  const allTitleUrns = new Set<string>();
+  const allJobTitleDataByPeriod: Record<string, Array<{ campaignId: string; titleUrn: string; impressions: number; clicks: number }>> = {
+    '7': [], '30': [], '90': []
+  };
+  
+  // Fetch job titles for each period
+  for (const { days, period } of periods) {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    
+    console.log(`[JobTitles] Fetching ${period}-day data...`);
+    
+    for (const campaignId of activeCampaignIds) {
+      await delay(500); // Increased delay to avoid rate limits
+      
+      const encodedCampaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`);
+      const jobTitleAnalyticsQuery = `q=analytics&pivot=MEMBER_JOB_TITLE&dateRange=(start:(year:${startDate.getFullYear()},month:${startDate.getMonth() + 1},day:${startDate.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&campaigns=List(${encodedCampaignUrn})&fields=impressions,clicks,pivotValues`;
+      
+      let jobTitleAnalytics: any = { elements: [] };
+      try {
+        jobTitleAnalytics = await linkedinApiRequestWithToken(accessToken, `/adAnalytics`, {}, jobTitleAnalyticsQuery);
+      } catch (err: any) {
+        if (err.response?.status === 429) {
+          console.warn(`[JobTitles] Rate limited, waiting 30s before retry...`);
+          await delay(30000);
+          try {
+            jobTitleAnalytics = await linkedinApiRequestWithToken(accessToken, `/adAnalytics`, {}, jobTitleAnalyticsQuery);
+          } catch (retryErr: any) {
+            console.error(`[JobTitles] Retry failed for campaign ${campaignId}`);
+            continue;
+          }
+        } else {
+          continue;
+        }
+      }
+      
+      // Collect job title data and URNs
+      for (const elem of (jobTitleAnalytics.elements || [])) {
+        const titleUrn = elem.pivotValues?.[0];
+        if (!titleUrn || !titleUrn.includes('title:')) continue;
+        
+        allTitleUrns.add(titleUrn);
+        allJobTitleDataByPeriod[period].push({
+          campaignId,
+          titleUrn,
+          impressions: elem.impressions || 0,
+          clicks: elem.clicks || 0
+        });
+      }
+    }
+    
+    console.log(`[JobTitles] ${period}-day: collected ${allJobTitleDataByPeriod[period].length} entries`);
+  }
+  
+  console.log(`[JobTitles] Total unique job titles: ${allTitleUrns.size}`);
+  
+  // Resolve all title URNs using cache or common titles
+  const resolvedTitles: Record<string, string> = {};
+  for (const titleUrn of allTitleUrns) {
+    if (urnCache[titleUrn]) {
+      resolvedTitles[titleUrn] = urnCache[titleUrn];
+    } else {
+      // Extract ID and use common titles if available
+      const titleIdMatch = titleUrn.match(/title:(\d+)/);
+      if (titleIdMatch) {
+        const titleId = titleIdMatch[1];
+        if (COMMON_TITLES[titleId]) {
+          resolvedTitles[titleUrn] = COMMON_TITLES[titleId];
+          urnCache[titleUrn] = COMMON_TITLES[titleId];
+        } else {
+          resolvedTitles[titleUrn] = `Job Title ${titleId}`;
+        }
+      }
+    }
+  }
+  
+  // Save job titles with resolved names
+  for (const { period } of periods) {
+    const periodData = allJobTitleDataByPeriod[period];
+    const byCampaign: Record<string, Array<{ jobTitleUrn: string; jobTitleName: string; impressions: number; clicks: number }>> = {};
+    
+    for (const item of periodData) {
+      if (!byCampaign[item.campaignId]) byCampaign[item.campaignId] = [];
+      byCampaign[item.campaignId].push({
+        jobTitleUrn: item.titleUrn,
+        jobTitleName: resolvedTitles[item.titleUrn] || 'Unknown Title',
+        impressions: item.impressions,
+        clicks: item.clicks
+      });
+    }
+    
+    for (const [campaignId, titles] of Object.entries(byCampaign)) {
+      await saveJobTitleAnalytics(accountId, campaignId, titles, period);
+      totalJobTitlesSaved += titles.length;
+    }
+  }
+  
+  saveUrnCache();
+  console.log(`[JobTitles] Completed: saved ${totalJobTitlesSaved} total job title entries`);
+}
+
+// Sync companies data only
+async function syncCompaniesData(
+  accessToken: string, 
+  accountId: string, 
+  activeCampaignIds: string[],
+  now: Date
+) {
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  
+  console.log('[Companies] Fetching company analytics per campaign for 7, 30, and 90 day periods...');
+  
+  const periods: Array<{ days: number; period: '7' | '30' | '90' }> = [
+    { days: 7, period: '7' },
+    { days: 30, period: '30' },
+    { days: 90, period: '90' }
+  ];
+  
+  let totalCompaniesSaved = 0;
+  const allCompanyUrns = new Set<string>();
+  const allCompanyDataByPeriod: Record<string, Array<{ campaignId: string; companyUrn: string; impressions: number; clicks: number }>> = {
+    '7': [], '30': [], '90': []
+  };
+  
+  // Fetch companies for each period
+  for (const { days, period } of periods) {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    
+    console.log(`[Companies] Fetching ${period}-day data...`);
+    
+    for (const campaignId of activeCampaignIds) {
+      await delay(500); // Increased delay to avoid rate limits
+      
+      const encodedCampaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`);
+      const companyAnalyticsQuery = `q=analytics&pivot=MEMBER_COMPANY&dateRange=(start:(year:${startDate.getFullYear()},month:${startDate.getMonth() + 1},day:${startDate.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&campaigns=List(${encodedCampaignUrn})&fields=impressions,clicks,pivotValues`;
+      
+      let companyAnalytics: any = { elements: [] };
+      try {
+        companyAnalytics = await linkedinApiRequestWithToken(accessToken, `/adAnalytics`, {}, companyAnalyticsQuery);
+      } catch (err: any) {
+        if (err.response?.status === 429) {
+          console.warn(`[Companies] Rate limited, waiting 30s before retry...`);
+          await delay(30000);
+          try {
+            companyAnalytics = await linkedinApiRequestWithToken(accessToken, `/adAnalytics`, {}, companyAnalyticsQuery);
+          } catch (retryErr: any) {
+            console.error(`[Companies] Retry failed for campaign ${campaignId}`);
+            continue;
+          }
+        } else {
+          continue;
+        }
+      }
+      
+      // Collect company data and URNs
+      for (const elem of (companyAnalytics.elements || [])) {
+        const companyUrn = elem.pivotValues?.[0];
+        if (!companyUrn || !companyUrn.includes('organization:')) continue;
+        
+        allCompanyUrns.add(companyUrn);
+        allCompanyDataByPeriod[period].push({
+          campaignId,
+          companyUrn,
+          impressions: elem.impressions || 0,
+          clicks: elem.clicks || 0
+        });
+      }
+    }
+    
+    console.log(`[Companies] ${period}-day: collected ${allCompanyDataByPeriod[period].length} entries`);
+  }
+  
+  console.log(`[Companies] Total unique companies to resolve: ${allCompanyUrns.size}`);
+  
+  // Resolve all company URNs to their names and URLs
+  const resolvedCompanies: Record<string, { name: string; url?: string }> = {};
+  const companyUrnsToResolve = Array.from(allCompanyUrns).filter(urn => !urnCache[urn]);
+  
+  console.log(`[Companies] Need to resolve ${companyUrnsToResolve.length} new company URNs (${allCompanyUrns.size - companyUrnsToResolve.length} already cached)`);
+  
+  if (companyUrnsToResolve.length > 0) {
+    const batchSize = 50;
+    for (let i = 0; i < companyUrnsToResolve.length; i += batchSize) {
+      const batch = companyUrnsToResolve.slice(i, i + batchSize);
+      
+      await delay(500);
+      
+      for (const companyUrn of batch) {
+        try {
+          // Extract organization ID from URN
+          const orgIdMatch = companyUrn.match(/:(\d+)$/);
+          if (!orgIdMatch) continue;
+          
+          const orgId = orgIdMatch[1];
+          
+          // Try to fetch organization details from LinkedIn API
+          await delay(100);
+          try {
+            const orgResponse = await linkedinApiRequestWithToken(accessToken, `/organizations/${orgId}`);
+            
+            const name = orgResponse.localizedName || orgResponse.name || `Company ${orgId}`;
+            const vanityName = orgResponse.vanityName;
+            const url = vanityName ? `https://www.linkedin.com/company/${vanityName}` : undefined;
+            
+            resolvedCompanies[companyUrn] = { name, url };
+            urnCache[companyUrn] = name;
+          } catch (err: any) {
+            if (err.response?.status === 429) {
+              console.warn('[Companies] Rate limited on org lookup, using fallback');
+              resolvedCompanies[companyUrn] = { name: `Company ${orgId}` };
+            } else {
+              resolvedCompanies[companyUrn] = { name: `Company ${orgId}` };
+            }
+          }
+        } catch (err: any) {
+          // Silently continue on individual lookup failures
+        }
+      }
+    }
+  }
+  
+  // Add cached companies
+  for (const urn of allCompanyUrns) {
+    if (urnCache[urn] && !resolvedCompanies[urn]) {
+      resolvedCompanies[urn] = { name: urnCache[urn] };
+    }
+  }
+  
+  // Save companies with resolved names
+  for (const { period } of periods) {
+    const periodData = allCompanyDataByPeriod[period];
+    const companiesByCampaign: Record<string, Array<{ companyUrn: string; companyName: string; companyUrl?: string; impressions: number; clicks: number }>> = {};
+    
+    for (const item of periodData) {
+      if (!companiesByCampaign[item.campaignId]) companiesByCampaign[item.campaignId] = [];
+      
+      let companyName = 'Unknown Company';
+      let companyUrl: string | undefined;
+      
+      if (resolvedCompanies[item.companyUrn]) {
+        companyName = resolvedCompanies[item.companyUrn].name;
+        companyUrl = resolvedCompanies[item.companyUrn].url;
+      } else if (urnCache[item.companyUrn]) {
+        companyName = urnCache[item.companyUrn];
+      } else {
+        const orgId = item.companyUrn.match(/:(\d+)$/)?.[1] || 'Unknown';
+        companyName = `Company ${orgId}`;
+      }
+      
+      companiesByCampaign[item.campaignId].push({
+        companyUrn: item.companyUrn,
+        companyName,
+        companyUrl,
+        impressions: item.impressions,
+        clicks: item.clicks
+      });
+    }
+    
+    for (const [campaignId, companies] of Object.entries(companiesByCampaign)) {
+      await saveCompanyAnalytics(accountId, campaignId, companies, period);
+      totalCompaniesSaved += companies.length;
+    }
+  }
+  
+  saveUrnCache();
+  console.log(`[Companies] Completed: saved ${totalCompaniesSaved} total company entries`);
+}
+
 // Start audit (opt-in and sync)
 app.post('/api/audit/start/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   const { accountId } = req.params;
@@ -4061,6 +4486,81 @@ app.post('/api/audit/refresh/:accountId', requireAuth, requireAccountAccess, asy
       console.log(`[Audit] Refresh sync completed for ${accountId}`);
     } catch (err: any) {
       console.error(`[Audit] Refresh sync error for ${accountId}:`, err.message);
+    }
+  });
+});
+
+// Get drilldown sync status
+app.get('/api/audit/drilldown-status/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
+  const { accountId } = req.params;
+  
+  try {
+    const status = await getDrilldownSyncStatus(accountId);
+    if (!status) {
+      return res.status(404).json({ error: 'Account not found' });
+    }
+    
+    res.json({
+      hourly: {
+        lastSyncAt: status.hourly_sync_at,
+        status: status.hourly_sync_status || 'pending'
+      },
+      jobTitles: {
+        lastSyncAt: status.job_titles_sync_at,
+        status: status.job_titles_sync_status || 'pending'
+      },
+      companies: {
+        lastSyncAt: status.companies_sync_at,
+        status: status.companies_sync_status || 'pending'
+      }
+    });
+  } catch (err: any) {
+    console.error('[Drilldown] Status fetch error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch sync status' });
+  }
+});
+
+// Sync individual drilldown data type
+app.post('/api/audit/drilldown-sync/:accountId/:dataType', requireAuth, requireAccountAccess, async (req, res) => {
+  const { accountId, dataType } = req.params;
+  
+  if (!['hourly', 'job_titles', 'companies'].includes(dataType)) {
+    return res.status(400).json({ error: 'Invalid data type. Must be hourly, job_titles, or companies' });
+  }
+  
+  const session = (req as any).session as Session;
+  const accessToken = session.accessToken;
+  
+  if (!accessToken) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  
+  try {
+    const auditAccount = await getAuditAccount(accountId);
+    if (!auditAccount) {
+      return res.status(400).json({ error: 'Account not opted into audit' });
+    }
+    
+    // Update status to syncing
+    await updateDrilldownSyncStatus(accountId, dataType as 'hourly' | 'job_titles' | 'companies', 'syncing');
+    
+    res.json({ status: 'started', message: `${dataType} sync started` });
+    
+  } catch (err: any) {
+    console.error(`[Drilldown] ${dataType} sync error:`, err.message);
+    return res.status(500).json({ error: `Failed to start ${dataType} sync` });
+  }
+  
+  // Run sync after response
+  console.log(`[Drilldown] Queuing ${dataType} sync for account ${accountId}...`);
+  process.nextTick(async () => {
+    try {
+      console.log(`[Drilldown] ${dataType} sync starting for ${accountId}...`);
+      await runDrilldownSync(accessToken, accountId, dataType as 'hourly' | 'job_titles' | 'companies');
+      console.log(`[Drilldown] ${dataType} sync completed for ${accountId}`);
+    } catch (err: any) {
+      console.error(`[Drilldown] ${dataType} sync error for ${accountId}:`, err.message);
+      await updateDrilldownSyncStatus(accountId, dataType as 'hourly' | 'job_titles' | 'companies', 'error');
     }
   });
 });
