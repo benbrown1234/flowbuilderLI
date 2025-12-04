@@ -1463,19 +1463,84 @@ export async function getJobTitleAnalytics(
   const fullWhereClause = whereClause + ` AND sync_date = $${params.length + 1}`;
   const fullParams = [...params, latestDate];
   
-  // Get total count
+  // Validate sort column
+  const validSortColumns = ['impressions', 'clicks', 'ctr', 'job_title_name'];
+  const safeSortBy = validSortColumns.includes(sortBy) ? sortBy : 'impressions';
+  const safeSortDir = sortDir === 'asc' ? 'ASC' : 'DESC';
+  
+  // When no campaign filter, aggregate job titles across all campaigns
+  // When campaign filter is applied, show per-campaign data
+  if (!campaignId) {
+    // Aggregate mode: combine same job titles across campaigns
+    const countResult = await pool.query(
+      `SELECT COUNT(DISTINCT job_title_urn) as count FROM analytics_job_titles WHERE ${fullWhereClause}`,
+      fullParams
+    );
+    const total = parseInt(countResult.rows[0]?.count || '0');
+    
+    // Map sort column to aggregated expression for GROUP BY query
+    let aggregatedOrderBy: string;
+    switch (safeSortBy) {
+      case 'impressions':
+        aggregatedOrderBy = 'SUM(impressions)';
+        break;
+      case 'clicks':
+        aggregatedOrderBy = 'SUM(clicks)';
+        break;
+      case 'ctr':
+        aggregatedOrderBy = 'CASE WHEN SUM(impressions) > 0 THEN (SUM(clicks)::float / SUM(impressions) * 100) ELSE 0 END';
+        break;
+      case 'job_title_name':
+        aggregatedOrderBy = 'MAX(job_title_name)';
+        break;
+      default:
+        aggregatedOrderBy = 'SUM(impressions)';
+    }
+    
+    // Get aggregated data grouped by job title
+    const dataResult = await pool.query(
+      `SELECT job_title_urn, 
+              MAX(job_title_name) as job_title_name, 
+              SUM(impressions) as impressions, 
+              SUM(clicks) as clicks,
+              CASE WHEN SUM(impressions) > 0 THEN (SUM(clicks)::float / SUM(impressions) * 100) ELSE 0 END as ctr,
+              MAX(sync_date) as sync_date
+       FROM analytics_job_titles 
+       WHERE ${fullWhereClause}
+       GROUP BY job_title_urn
+       ORDER BY ${aggregatedOrderBy} ${safeSortDir}
+       LIMIT $${fullParams.length + 1} OFFSET $${fullParams.length + 2}`,
+      [...fullParams, pageSize, offset]
+    );
+    
+    const totalPages = Math.ceil(total / pageSize);
+    
+    return {
+      data: dataResult.rows.map(row => ({
+        jobTitleUrn: row.job_title_urn,
+        jobTitleName: row.job_title_name,
+        impressions: parseInt(row.impressions) || 0,
+        clicks: parseInt(row.clicks) || 0,
+        ctr: parseFloat(row.ctr) || 0,
+        syncDate: row.sync_date
+      })),
+      total,
+      page,
+      pageSize,
+      totalPages,
+      hasPrevious: page > 1,
+      hasNext: page < totalPages
+    };
+  }
+  
+  // Per-campaign mode: show individual campaign data
   const countResult = await pool.query(
     `SELECT COUNT(*) as count FROM analytics_job_titles WHERE ${fullWhereClause}`,
     fullParams
   );
   const total = parseInt(countResult.rows[0]?.count || '0');
   
-  // Validate sort column
-  const validSortColumns = ['impressions', 'clicks', 'ctr', 'job_title_name'];
-  const safeSortBy = validSortColumns.includes(sortBy) ? sortBy : 'impressions';
-  const safeSortDir = sortDir === 'asc' ? 'ASC' : 'DESC';
-  
-  // Get paginated data
+  // Get paginated data for specific campaign
   const dataResult = await pool.query(
     `SELECT job_title_urn, job_title_name, impressions, clicks, ctr, sync_date
      FROM analytics_job_titles 
