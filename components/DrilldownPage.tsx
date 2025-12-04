@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, Filter, Clock, TrendingDown, AlertTriangle, Calendar, RefreshCw, BarChart3, Loader2, Play, ClipboardCheck } from 'lucide-react';
+import { ChevronLeft, Filter, Clock, TrendingDown, AlertTriangle, Calendar, RefreshCw, BarChart3, Loader2, Play, ClipboardCheck, Users, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 interface DrilldownPageProps {
   accountId: string;
@@ -62,6 +62,29 @@ interface CampaignWithData {
   days_with_data: number;
 }
 
+interface JobTitleData {
+  jobTitleUrn: string;
+  jobTitleName: string;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  syncDate: string;
+}
+
+interface JobTitlesResponse {
+  data: JobTitleData[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+}
+
+type DrilldownView = 'hourly' | 'job-titles';
+type SortField = 'impressions' | 'clicks' | 'ctr' | 'job_title_name';
+type SortDir = 'asc' | 'desc';
+
 const METRICS = [
   { key: 'impressions', label: 'Impressions', format: (v: number) => v.toLocaleString() },
   { key: 'clicks', label: 'Clicks', format: (v: number) => v.toLocaleString() },
@@ -73,6 +96,7 @@ const METRICS = [
 ];
 
 export default function DrilldownPage({ accountId, accountName, onBack, onNavigateToAudit }: DrilldownPageProps) {
+  const [selectedView, setSelectedView] = useState<DrilldownView>('hourly');
   const [selectedMetric, setSelectedMetric] = useState('impressions');
   const [selectedCampaign, setSelectedCampaign] = useState<string | undefined>(undefined);
   const [campaigns, setCampaigns] = useState<CampaignWithData[]>([]);
@@ -82,6 +106,12 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
   const [hoveredCell, setHoveredCell] = useState<{ day: number; hour: number } | null>(null);
   const [auditStatus, setAuditStatus] = useState<AuditAccountStatus | null>(null);
   const [checkingStatus, setCheckingStatus] = useState(true);
+  
+  const [jobTitlesData, setJobTitlesData] = useState<JobTitlesResponse | null>(null);
+  const [jobTitlesLoading, setJobTitlesLoading] = useState(false);
+  const [jobTitlesPage, setJobTitlesPage] = useState(1);
+  const [jobTitlesSortBy, setJobTitlesSortBy] = useState<SortField>('impressions');
+  const [jobTitlesSortDir, setJobTitlesSortDir] = useState<SortDir>('desc');
 
   const checkAuditStatus = useCallback(async () => {
     try {
@@ -177,6 +207,39 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
       console.error('Error fetching drilldown data:', error);
     }
     setLoading(false);
+  };
+
+  const fetchJobTitles = async (page: number = 1, sortBy: SortField = 'impressions', sortDir: SortDir = 'desc') => {
+    setJobTitlesLoading(true);
+    try {
+      const response = await fetch(
+        `/api/audit/drilldown/job-titles/${accountId}?page=${page}&pageSize=25&sortBy=${sortBy}&sortDir=${sortDir}`,
+        { credentials: 'include' }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setJobTitlesData(data);
+      }
+    } catch (error) {
+      console.error('Error fetching job titles:', error);
+    }
+    setJobTitlesLoading(false);
+  };
+
+  useEffect(() => {
+    if (auditStatus?.optedIn && auditStatus?.syncStatus === 'completed' && selectedView === 'job-titles') {
+      fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir);
+    }
+  }, [selectedView, jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir, auditStatus]);
+
+  const handleJobTitlesSort = (field: SortField) => {
+    if (field === jobTitlesSortBy) {
+      setJobTitlesSortDir(prev => prev === 'desc' ? 'asc' : 'desc');
+    } else {
+      setJobTitlesSortBy(field);
+      setJobTitlesSortDir('desc');
+    }
+    setJobTitlesPage(1);
   };
 
   const getColorForValue = (value: number, maxValue: number, metric: string) => {
@@ -291,55 +354,68 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
             </h1>
             <p className="text-gray-500">{accountName}</p>
           </div>
-          <button
-            onClick={fetchData}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Refresh
-          </button>
+          
+          <div className="flex items-center gap-3">
+            <select
+              value={selectedView}
+              onChange={(e) => setSelectedView(e.target.value as DrilldownView)}
+              className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              <option value="hourly">Hourly</option>
+              <option value="job-titles">Job Titles</option>
+            </select>
+            
+            <button
+              onClick={() => selectedView === 'hourly' ? fetchData() : fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Refresh
+            </button>
+          </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
-          <div className="p-4 border-b border-gray-200">
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Filter className="w-4 h-4 text-gray-500" />
-                <span className="text-sm font-medium text-gray-700">Filters:</span>
-              </div>
-              
-              <select
-                value={selectedCampaign || ''}
-                onChange={(e) => setSelectedCampaign(e.target.value || undefined)}
-                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">All Campaigns</option>
-                {campaigns.map(c => (
-                  <option key={c.campaign_id} value={c.campaign_id}>
-                    {c.campaign_name || `Campaign ${c.campaign_id}`}
-                  </option>
-                ))}
-              </select>
+        {selectedView === 'hourly' && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
+            <div className="p-4 border-b border-gray-200">
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <Filter className="w-4 h-4 text-gray-500" />
+                  <span className="text-sm font-medium text-gray-700">Filters:</span>
+                </div>
+                
+                <select
+                  value={selectedCampaign || ''}
+                  onChange={(e) => setSelectedCampaign(e.target.value || undefined)}
+                  className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">All Campaigns</option>
+                  {campaigns.map(c => (
+                    <option key={c.campaign_id} value={c.campaign_id}>
+                      {c.campaign_name || `Campaign ${c.campaign_id}`}
+                    </option>
+                  ))}
+                </select>
 
-              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-                {METRICS.map(metric => (
-                  <button
-                    key={metric.key}
-                    onClick={() => setSelectedMetric(metric.key)}
-                    className={`px-3 py-1 text-sm rounded-md transition-colors ${
-                      selectedMetric === metric.key
-                        ? 'bg-white shadow text-blue-600 font-medium'
-                        : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    {metric.label}
-                  </button>
-                ))}
+                <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                  {METRICS.map(metric => (
+                    <button
+                      key={metric.key}
+                      onClick={() => setSelectedMetric(metric.key)}
+                      className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                        selectedMetric === metric.key
+                          ? 'bg-white shadow text-blue-600 font-medium'
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      {metric.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
 
-          {loading ? (
+            {loading ? (
             <div className="p-12 text-center">
               <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4" />
               <p className="text-gray-500">Loading hourly data...</p>
@@ -461,9 +537,10 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
               </div>
             </div>
           )}
-        </div>
+          </div>
+        )}
 
-        {cutoffData && cutoffData.cutoffs.length > 0 && (
+        {selectedView === 'hourly' && cutoffData && cutoffData.cutoffs.length > 0 && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200">
             <div className="p-4 border-b border-gray-200">
               <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
@@ -581,7 +658,7 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
           </div>
         )}
 
-        {campaigns.length > 0 && (
+        {selectedView === 'hourly' && campaigns.length > 0 && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 mt-6">
             <div className="p-4 border-b border-gray-200">
               <h2 className="text-lg font-semibold text-gray-900">Campaigns with 7+ Days of Data</h2>
@@ -616,6 +693,130 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
                 ))}
               </div>
             </div>
+          </div>
+        )}
+
+        {selectedView === 'job-titles' && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+            <div className="p-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <Users className="w-5 h-5 text-purple-600" />
+                Job Titles Breakdown
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Performance metrics by job title from the last 90 days
+              </p>
+            </div>
+
+            {jobTitlesLoading ? (
+              <div className="p-12 text-center">
+                <div className="animate-spin w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full mx-auto mb-4" />
+                <p className="text-gray-500">Loading job titles data...</p>
+              </div>
+            ) : !jobTitlesData || jobTitlesData.jobTitles.length === 0 ? (
+              <div className="p-12 text-center">
+                <Users className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-500 text-lg font-medium">No job titles data available</p>
+                <p className="text-gray-400 text-sm mt-2 max-w-md mx-auto">
+                  Job titles data is collected during the audit sync. Run an audit refresh to collect this data.
+                </p>
+              </div>
+            ) : (
+              <div className="p-6">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className="text-left py-3 px-4 font-medium text-gray-600">Job Title</th>
+                        <th 
+                          className="text-right py-3 px-4 font-medium text-gray-600 cursor-pointer hover:text-gray-900"
+                          onClick={() => handleJobTitlesSort('impressions')}
+                        >
+                          <span className="flex items-center justify-end gap-1">
+                            Impressions
+                            {jobTitlesSortBy === 'impressions' && (
+                              <span>{jobTitlesSortDir === 'desc' ? '↓' : '↑'}</span>
+                            )}
+                          </span>
+                        </th>
+                        <th 
+                          className="text-right py-3 px-4 font-medium text-gray-600 cursor-pointer hover:text-gray-900"
+                          onClick={() => handleJobTitlesSort('clicks')}
+                        >
+                          <span className="flex items-center justify-end gap-1">
+                            Clicks
+                            {jobTitlesSortBy === 'clicks' && (
+                              <span>{jobTitlesSortDir === 'desc' ? '↓' : '↑'}</span>
+                            )}
+                          </span>
+                        </th>
+                        <th 
+                          className="text-right py-3 px-4 font-medium text-gray-600 cursor-pointer hover:text-gray-900"
+                          onClick={() => handleJobTitlesSort('ctr')}
+                        >
+                          <span className="flex items-center justify-end gap-1">
+                            CTR
+                            {jobTitlesSortBy === 'ctr' && (
+                              <span>{jobTitlesSortDir === 'desc' ? '↓' : '↑'}</span>
+                            )}
+                          </span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {jobTitlesData.jobTitles.map((item, idx) => (
+                        <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="py-3 px-4">
+                            <div className="font-medium text-gray-900">{item.jobTitle}</div>
+                          </td>
+                          <td className="py-3 px-4 text-right text-gray-700">
+                            {item.impressions.toLocaleString()}
+                          </td>
+                          <td className="py-3 px-4 text-right text-gray-700">
+                            {item.clicks.toLocaleString()}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <span className={`font-medium ${
+                              item.ctr >= 0.5 ? 'text-green-600' : 
+                              item.ctr >= 0.3 ? 'text-amber-600' : 'text-gray-600'
+                            }`}>
+                              {item.ctr.toFixed(2)}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {jobTitlesData.totalCount > 25 && (
+                  <div className="mt-4 flex items-center justify-between">
+                    <div className="text-sm text-gray-500">
+                      Showing {((jobTitlesPage - 1) * 25) + 1} - {Math.min(jobTitlesPage * 25, jobTitlesData.totalCount)} of {jobTitlesData.totalCount} job titles
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setJobTitlesPage(prev => Math.max(1, prev - 1))}
+                        disabled={jobTitlesPage === 1}
+                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                      >
+                        Previous
+                      </button>
+                      <span className="text-sm text-gray-600">
+                        Page {jobTitlesPage} of {Math.ceil(jobTitlesData.totalCount / 25)}
+                      </span>
+                      <button
+                        onClick={() => setJobTitlesPage(prev => prev + 1)}
+                        disabled={jobTitlesPage >= Math.ceil(jobTitlesData.totalCount / 25)}
+                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -208,6 +208,23 @@ export async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_analytics_hourly_account_date ON analytics_campaign_hourly(account_id, metric_date DESC, metric_hour);
       CREATE INDEX IF NOT EXISTS idx_analytics_hourly_campaign ON analytics_campaign_hourly(campaign_id, metric_date DESC, metric_hour);
 
+      -- Job title analytics for drilldown view (aggregated impressions/clicks per job title)
+      CREATE TABLE IF NOT EXISTS analytics_job_titles (
+        id SERIAL PRIMARY KEY,
+        account_id VARCHAR(50) NOT NULL,
+        job_title_urn VARCHAR(255) NOT NULL,
+        job_title_name VARCHAR(500),
+        impressions BIGINT DEFAULT 0,
+        clicks BIGINT DEFAULT 0,
+        ctr DECIMAL(8,4),
+        sync_date DATE NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(account_id, job_title_urn, sync_date)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_analytics_job_titles_account ON analytics_job_titles(account_id, sync_date DESC);
+      CREATE INDEX IF NOT EXISTS idx_analytics_job_titles_impressions ON analytics_job_titles(account_id, impressions DESC);
+
       -- Ideate Canvas tables
       CREATE TABLE IF NOT EXISTS ideate_canvases (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1316,6 +1333,147 @@ export async function getCanvasWithOwnership(canvasId: string, userId: string): 
     [canvasId, userId]
   );
   return result.rows[0] || null;
+}
+
+// Save job title analytics (one row per job title per sync date)
+export async function saveJobTitleAnalytics(
+  accountId: string,
+  jobTitles: Array<{
+    jobTitleUrn: string;
+    jobTitleName: string;
+    impressions: number;
+    clicks: number;
+  }>
+) {
+  const accId = String(accountId);
+  const syncDate = new Date().toISOString().split('T')[0];
+  
+  for (const jt of jobTitles) {
+    const ctr = jt.impressions > 0 ? (jt.clicks / jt.impressions) * 100 : 0;
+    
+    await pool.query(
+      `INSERT INTO analytics_job_titles 
+       (account_id, job_title_urn, job_title_name, impressions, clicks, ctr, sync_date)
+       VALUES ($1::text, $2::text, $3::text, $4::bigint, $5::bigint, $6::numeric, $7::date)
+       ON CONFLICT (account_id, job_title_urn, sync_date) DO UPDATE SET
+         job_title_name = EXCLUDED.job_title_name,
+         impressions = EXCLUDED.impressions,
+         clicks = EXCLUDED.clicks,
+         ctr = EXCLUDED.ctr`,
+      [
+        accId,
+        jt.jobTitleUrn,
+        jt.jobTitleName || 'Unknown Title',
+        jt.impressions || 0,
+        jt.clicks || 0,
+        ctr,
+        syncDate
+      ]
+    );
+  }
+}
+
+// Get job title analytics with pagination
+export async function getJobTitleAnalytics(
+  accountId: string,
+  options: {
+    page?: number;
+    pageSize?: number;
+    sortBy?: 'impressions' | 'clicks' | 'ctr' | 'job_title_name';
+    sortDir?: 'asc' | 'desc';
+  } = {}
+): Promise<{
+  data: Array<{
+    jobTitleUrn: string;
+    jobTitleName: string;
+    impressions: number;
+    clicks: number;
+    ctr: number;
+    syncDate: string;
+  }>;
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+}> {
+  const accId = String(accountId);
+  const page = options.page || 1;
+  const pageSize = options.pageSize || 25;
+  const sortBy = options.sortBy || 'impressions';
+  const sortDir = options.sortDir || 'desc';
+  const offset = (page - 1) * pageSize;
+  
+  // Get latest sync date
+  const latestDateResult = await pool.query(
+    `SELECT MAX(sync_date) as latest_date FROM analytics_job_titles WHERE account_id = $1`,
+    [accId]
+  );
+  const latestDate = latestDateResult.rows[0]?.latest_date;
+  
+  if (!latestDate) {
+    return {
+      data: [],
+      total: 0,
+      page,
+      pageSize,
+      totalPages: 0,
+      hasPrevious: false,
+      hasNext: false
+    };
+  }
+  
+  // Get total count
+  const countResult = await pool.query(
+    `SELECT COUNT(*) as count FROM analytics_job_titles WHERE account_id = $1 AND sync_date = $2`,
+    [accId, latestDate]
+  );
+  const total = parseInt(countResult.rows[0]?.count || '0');
+  
+  // Validate sort column
+  const validSortColumns = ['impressions', 'clicks', 'ctr', 'job_title_name'];
+  const safeSortBy = validSortColumns.includes(sortBy) ? sortBy : 'impressions';
+  const safeSortDir = sortDir === 'asc' ? 'ASC' : 'DESC';
+  
+  // Get paginated data
+  const dataResult = await pool.query(
+    `SELECT job_title_urn, job_title_name, impressions, clicks, ctr, sync_date
+     FROM analytics_job_titles 
+     WHERE account_id = $1 AND sync_date = $2
+     ORDER BY ${safeSortBy} ${safeSortDir}
+     LIMIT $3 OFFSET $4`,
+    [accId, latestDate, pageSize, offset]
+  );
+  
+  const totalPages = Math.ceil(total / pageSize);
+  
+  return {
+    data: dataResult.rows.map(row => ({
+      jobTitleUrn: row.job_title_urn,
+      jobTitleName: row.job_title_name,
+      impressions: parseInt(row.impressions) || 0,
+      clicks: parseInt(row.clicks) || 0,
+      ctr: parseFloat(row.ctr) || 0,
+      syncDate: row.sync_date
+    })),
+    total,
+    page,
+    pageSize,
+    totalPages,
+    hasPrevious: page > 1,
+    hasNext: page < totalPages
+  };
+}
+
+// Check if job title data exists for account
+export async function hasJobTitleData(accountId: string): Promise<boolean> {
+  const accId = String(accountId);
+  const result = await pool.query(
+    `SELECT EXISTS(SELECT 1 FROM analytics_job_titles WHERE account_id = $1) as exists`,
+    [accId]
+  );
+  return result.rows[0]?.exists || false;
 }
 
 export default pool;
