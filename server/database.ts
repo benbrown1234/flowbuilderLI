@@ -181,6 +181,14 @@ export async function initDatabase() {
       ALTER TABLE analytics_creative_daily ADD COLUMN IF NOT EXISTS scoring_metadata JSONB DEFAULT '{}';
 
       CREATE INDEX IF NOT EXISTS idx_audit_accounts_account ON audit_accounts(account_id);
+      
+      -- Add separate sync tracking columns for each drilldown data type
+      ALTER TABLE audit_accounts ADD COLUMN IF NOT EXISTS hourly_sync_at TIMESTAMP;
+      ALTER TABLE audit_accounts ADD COLUMN IF NOT EXISTS hourly_sync_status VARCHAR(20) DEFAULT 'pending';
+      ALTER TABLE audit_accounts ADD COLUMN IF NOT EXISTS job_titles_sync_at TIMESTAMP;
+      ALTER TABLE audit_accounts ADD COLUMN IF NOT EXISTS job_titles_sync_status VARCHAR(20) DEFAULT 'pending';
+      ALTER TABLE audit_accounts ADD COLUMN IF NOT EXISTS companies_sync_at TIMESTAMP;
+      ALTER TABLE audit_accounts ADD COLUMN IF NOT EXISTS companies_sync_status VARCHAR(20) DEFAULT 'pending';
       CREATE INDEX IF NOT EXISTS idx_analytics_campaign_daily_account_date ON analytics_campaign_daily(account_id, metric_date DESC);
       CREATE INDEX IF NOT EXISTS idx_analytics_creative_daily_account_date ON analytics_creative_daily(account_id, metric_date DESC);
       CREATE INDEX IF NOT EXISTS idx_analytics_campaign_daily_campaign ON analytics_campaign_daily(campaign_id, metric_date DESC);
@@ -719,6 +727,38 @@ export async function getOptedInAccounts() {
     'SELECT * FROM audit_accounts WHERE auto_sync_enabled = TRUE ORDER BY opted_in_at'
   );
   return result.rows;
+}
+
+export async function updateDrilldownSyncStatus(
+  accountId: string,
+  dataType: 'hourly' | 'job_titles' | 'companies',
+  status: 'pending' | 'syncing' | 'completed' | 'error',
+  error?: string
+) {
+  const columnPrefix = dataType === 'hourly' ? 'hourly' : 
+                       dataType === 'job_titles' ? 'job_titles' : 'companies';
+  
+  const result = await pool.query(
+    `UPDATE audit_accounts 
+     SET ${columnPrefix}_sync_status = $1::text,
+         ${columnPrefix}_sync_at = CASE WHEN $1::text = 'completed' THEN NOW() ELSE ${columnPrefix}_sync_at END
+     WHERE account_id = $2::text
+     RETURNING *`,
+    [String(status), String(accountId)]
+  );
+  return result.rows[0] || null;
+}
+
+export async function getDrilldownSyncStatus(accountId: string) {
+  const result = await pool.query(
+    `SELECT account_id, 
+            hourly_sync_at, hourly_sync_status,
+            job_titles_sync_at, job_titles_sync_status,
+            companies_sync_at, companies_sync_status
+     FROM audit_accounts WHERE account_id = $1`,
+    [String(accountId)]
+  );
+  return result.rows[0] || null;
 }
 
 export async function getStuckSyncs() {
