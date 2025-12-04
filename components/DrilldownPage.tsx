@@ -1,11 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronLeft, Filter, Clock, TrendingDown, AlertTriangle, Calendar, RefreshCw, BarChart3, Loader2, Play, ClipboardCheck, Users, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
+type DrilldownView = 'hourly' | 'job-titles';
+
 interface DrilldownPageProps {
   accountId: string;
   accountName: string;
   onBack: () => void;
   onNavigateToAudit?: () => void;
+  subView?: DrilldownView;
+  onSubViewChange?: (view: DrilldownView) => void;
 }
 
 interface AuditAccountStatus {
@@ -81,7 +85,6 @@ interface JobTitlesResponse {
   hasNext: boolean;
 }
 
-type DrilldownView = 'hourly' | 'job-titles';
 type SortField = 'impressions' | 'clicks' | 'ctr' | 'job_title_name';
 type SortDir = 'asc' | 'desc';
 
@@ -95,8 +98,9 @@ const METRICS = [
   { key: 'conversions', label: 'Conversions', format: (v: number) => v.toLocaleString() },
 ];
 
-export default function DrilldownPage({ accountId, accountName, onBack, onNavigateToAudit }: DrilldownPageProps) {
-  const [selectedView, setSelectedView] = useState<DrilldownView>('hourly');
+export default function DrilldownPage({ accountId, accountName, onBack, onNavigateToAudit, subView = 'hourly', onSubViewChange }: DrilldownPageProps) {
+  const selectedView = subView;
+  const setSelectedView = onSubViewChange || (() => {});
   const [selectedMetric, setSelectedMetric] = useState('impressions');
   const [selectedCampaign, setSelectedCampaign] = useState<string | undefined>(undefined);
   const [campaigns, setCampaigns] = useState<CampaignWithData[]>([]);
@@ -355,24 +359,13 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
             <p className="text-gray-500">{accountName}</p>
           </div>
           
-          <div className="flex items-center gap-3">
-            <select
-              value={selectedView}
-              onChange={(e) => setSelectedView(e.target.value as DrilldownView)}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-            >
-              <option value="hourly">Hourly</option>
-              <option value="job-titles">Job Titles</option>
-            </select>
-            
-            <button
-              onClick={() => selectedView === 'hourly' ? fetchData() : fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Refresh
-            </button>
-          </div>
+          <button
+            onClick={() => selectedView === 'hourly' ? fetchData() : fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </button>
         </div>
 
         {selectedView === 'hourly' && (

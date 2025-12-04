@@ -12,7 +12,7 @@ import DrilldownPage from './components/DrilldownPage';
 import { IdeateCanvas } from './components/IdeateCanvas';
 import LandingPage from './components/LandingPage';
 import ErrorBoundary from './components/ErrorBoundary';
-import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, ClipboardCheck, Lightbulb, Eye, BarChart3 } from 'lucide-react';
+import { Linkedin, Network, ListTree, ChevronDown, RefreshCw, LogIn, LogOut, ClipboardCheck, Lightbulb, Eye, BarChart3, Clock, Users } from 'lucide-react';
 
 // Audit summary type for Structure view
 interface AuditSummary {
@@ -37,6 +37,9 @@ const App: React.FC = () => {
   const [importedCanvasId, setImportedCanvasId] = useState<string | null>(null);
   const [visualizeDropdownOpen, setVisualizeDropdownOpen] = useState(false);
   const visualizeDropdownRef = useRef<HTMLDivElement>(null);
+  const [drilldownDropdownOpen, setDrilldownDropdownOpen] = useState(false);
+  const drilldownDropdownRef = useRef<HTMLDivElement>(null);
+  const [drilldownSubView, setDrilldownSubView] = useState<'hourly' | 'job-titles'>('hourly');
   const [auditSummary, setAuditSummary] = useState<AuditSummary | null>(null);
   const [showAuditView, setShowAuditView] = useState<boolean>(true); // Default to audit view when available
 
@@ -44,6 +47,9 @@ const App: React.FC = () => {
     const handleClickOutside = (event: MouseEvent) => {
       if (visualizeDropdownRef.current && !visualizeDropdownRef.current.contains(event.target as Node)) {
         setVisualizeDropdownOpen(false);
+      }
+      if (drilldownDropdownRef.current && !drilldownDropdownRef.current.contains(event.target as Node)) {
+        setDrilldownDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -482,13 +488,42 @@ const App: React.FC = () => {
                   <ClipboardCheck size={16} />
                   Audit
                 </button>
-                <button 
-                  onClick={() => setViewMode('DRILLDOWN')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'DRILLDOWN' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  <BarChart3 size={16} />
-                  Drilldown
-                </button>
+                {/* Drilldown Dropdown */}
+                <div className="relative" ref={drilldownDropdownRef}>
+                  <button 
+                    onClick={() => setDrilldownDropdownOpen(!drilldownDropdownOpen)}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                      viewMode === 'DRILLDOWN' 
+                        ? 'bg-white shadow-sm text-gray-900' 
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <BarChart3 size={16} />
+                    {viewMode === 'DRILLDOWN' 
+                      ? (drilldownSubView === 'hourly' ? 'Hourly' : 'Job Titles') 
+                      : 'Drilldown'}
+                    <ChevronDown size={14} className={`transition-transform ${drilldownDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  
+                  {drilldownDropdownOpen && (
+                    <div className="absolute top-full left-0 mt-1 bg-white rounded-lg shadow-lg border border-gray-200 py-1 min-w-[140px] z-50">
+                      <button 
+                        onClick={() => { setViewMode('DRILLDOWN'); setDrilldownSubView('hourly'); setDrilldownDropdownOpen(false); }}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50 ${viewMode === 'DRILLDOWN' && drilldownSubView === 'hourly' ? 'text-blue-600 bg-blue-50' : 'text-gray-700'}`}
+                      >
+                        <Clock size={16} />
+                        Hourly
+                      </button>
+                      <button 
+                        onClick={() => { setViewMode('DRILLDOWN'); setDrilldownSubView('job-titles'); setDrilldownDropdownOpen(false); }}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50 ${viewMode === 'DRILLDOWN' && drilldownSubView === 'job-titles' ? 'text-blue-600 bg-blue-50' : 'text-gray-700'}`}
+                      >
+                        <Users size={16} />
+                        Job Titles
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <button 
                   onClick={() => setViewMode('IDEATE')}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'IDEATE' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
@@ -549,6 +584,8 @@ const App: React.FC = () => {
               accountName={accounts.find(a => a.id === selectedAccountId)?.name || `Account ${selectedAccountId}`}
               onBack={() => setViewMode('AUDIT')}
               onNavigateToAudit={() => setViewMode('AUDIT')}
+              subView={drilldownSubView}
+              onSubViewChange={setDrilldownSubView}
             />
           ) : viewMode === 'AUDIT' ? (
             <AuditPage 
