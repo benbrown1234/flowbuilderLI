@@ -286,6 +286,7 @@ interface Session {
   userId: string | null;
   userName: string | null;
   csrfToken: string | null;
+  authorizedAccounts: string[];
 }
 
 const generateCsrfToken = (): string => {
@@ -336,7 +337,8 @@ const getSession = async (sessionId: string): Promise<Session> => {
       state: dbSession.state,
       userId: dbSession.user_id,
       userName: dbSession.user_name,
-      csrfToken: dbSession.csrf_token || null
+      csrfToken: dbSession.csrf_token || null,
+      authorizedAccounts: dbSession.authorized_accounts || []
     };
     sessionCache.set(sessionId, session);
     return session;
@@ -344,7 +346,7 @@ const getSession = async (sessionId: string): Promise<Session> => {
   
   // Create new session with CSRF token
   const csrfToken = generateCsrfToken();
-  const newSession: Session = { accessToken: null, expiresAt: null, state: null, userId: null, userName: null, csrfToken };
+  const newSession: Session = { accessToken: null, expiresAt: null, state: null, userId: null, userName: null, csrfToken, authorizedAccounts: [] };
   sessionCache.set(sessionId, newSession);
   await createDbSession(sessionId, csrfToken);
   return newSession;
@@ -352,7 +354,7 @@ const getSession = async (sessionId: string): Promise<Session> => {
 
 const updateSession = async (sessionId: string, updates: Partial<Session>): Promise<void> => {
   // Update cache
-  const current = sessionCache.get(sessionId) || { accessToken: null, expiresAt: null, state: null, userId: null, userName: null, csrfToken: null };
+  const current = sessionCache.get(sessionId) || { accessToken: null, expiresAt: null, state: null, userId: null, userName: null, csrfToken: null, authorizedAccounts: [] };
   const updated = { ...current, ...updates };
   sessionCache.set(sessionId, updated);
   
@@ -362,7 +364,8 @@ const updateSession = async (sessionId: string, updates: Partial<Session>): Prom
     expires_at: updated.expiresAt ? new Date(updated.expiresAt) : null,
     state: updated.state,
     user_id: updated.userId,
-    user_name: updated.userName
+    user_name: updated.userName,
+    authorized_accounts: updated.authorizedAccounts
   });
 };
 
@@ -552,9 +555,28 @@ app.get('/api/auth/callback', async (req, res) => {
       }
     );
     
+    const accessToken = tokenResponse.data.access_token;
+    const expiresAt = Date.now() + (tokenResponse.data.expires_in * 1000);
+    
+    // Fetch authorized ad accounts after successful login
+    let authorizedAccounts: string[] = [];
+    try {
+      const accountsResponse = await linkedinApiRequestWithToken(accessToken, '/adAccounts', { q: 'search' });
+      if (accountsResponse.elements && Array.isArray(accountsResponse.elements)) {
+        authorizedAccounts = accountsResponse.elements.map((acc: any) => {
+          const id = acc.id?.toString() || '';
+          return id.includes(':') ? id.split(':').pop() || id : id;
+        });
+        logger.info({ accountCount: authorizedAccounts.length }, 'Fetched authorized accounts on login');
+      }
+    } catch (accountErr: any) {
+      logger.warn({ error: accountErr.message }, 'Failed to fetch authorized accounts - will allow access check on each request');
+    }
+    
     await updateSession(sessionId, {
-      accessToken: tokenResponse.data.access_token,
-      expiresAt: Date.now() + (tokenResponse.data.expires_in * 1000)
+      accessToken,
+      expiresAt,
+      authorizedAccounts
     });
     
     res.send(sendAuthResultHtml(true));
@@ -712,6 +734,49 @@ const requireAuth = async (req: express.Request, res: express.Response, next: ex
   next();
 };
 
+// Middleware to verify user has access to the specified LinkedIn ad account
+const requireAccountAccess = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { accountId } = req.params;
+  const session = (req as any).session as Session;
+  
+  if (!accountId) {
+    return res.status(400).json({ error: 'Account ID required' });
+  }
+  
+  // If we have cached authorized accounts, check against them
+  if (session.authorizedAccounts && session.authorizedAccounts.length > 0) {
+    if (!session.authorizedAccounts.includes(accountId)) {
+      logger.warn({ accountId, sessionId: ((req as any).sessionId as string).substring(0, 8) }, 'Account access denied');
+      return res.status(403).json({ error: 'You do not have access to this account' });
+    }
+    return next();
+  }
+  
+  // If no cached accounts (e.g., older session), fetch and update them
+  try {
+    const accountsResponse = await linkedinApiRequest((req as any).sessionId, '/adAccounts', { q: 'search' });
+    if (accountsResponse.elements && Array.isArray(accountsResponse.elements)) {
+      const authorizedAccounts = accountsResponse.elements.map((acc: any) => {
+        const id = acc.id?.toString() || '';
+        return id.includes(':') ? id.split(':').pop() || id : id;
+      });
+      
+      // Update session cache
+      await updateSession((req as any).sessionId, { authorizedAccounts });
+      session.authorizedAccounts = authorizedAccounts;
+      
+      if (!authorizedAccounts.includes(accountId)) {
+        logger.warn({ accountId, sessionId: ((req as any).sessionId as string).substring(0, 8) }, 'Account access denied after refresh');
+        return res.status(403).json({ error: 'You do not have access to this account' });
+      }
+    }
+    next();
+  } catch (err: any) {
+    logger.error({ error: err.message }, 'Failed to verify account access');
+    return res.status(500).json({ error: 'Failed to verify account access' });
+  }
+};
+
 app.get('/api/linkedin/accounts', requireAuth, async (req, res) => {
   try {
     const data = await linkedinApiRequest((req as any).sessionId, '/adAccounts', {
@@ -727,7 +792,7 @@ app.get('/api/linkedin/accounts', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/linkedin/account/:accountId/campaigns', requireAuth, async (req, res) => {
+app.get('/api/linkedin/account/:accountId/campaigns', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const { accountId } = req.params;
     const data = await linkedinApiRequest((req as any).sessionId, `/adAccounts/${accountId}/adCampaigns`, {
@@ -742,7 +807,7 @@ app.get('/api/linkedin/account/:accountId/campaigns', requireAuth, async (req, r
   }
 });
 
-app.get('/api/linkedin/account/:accountId/groups', requireAuth, async (req, res) => {
+app.get('/api/linkedin/account/:accountId/groups', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const { accountId } = req.params;
     const data = await linkedinApiRequest((req as any).sessionId, `/adAccounts/${accountId}/adCampaignGroups`, {
@@ -757,7 +822,7 @@ app.get('/api/linkedin/account/:accountId/groups', requireAuth, async (req, res)
   }
 });
 
-app.get('/api/linkedin/account/:accountId/creatives', requireAuth, async (req, res) => {
+app.get('/api/linkedin/account/:accountId/creatives', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const { accountId } = req.params;
     const data = await linkedinApiRequest((req as any).sessionId, `/adAccounts/${accountId}/creatives`, {
@@ -772,7 +837,7 @@ app.get('/api/linkedin/account/:accountId/creatives', requireAuth, async (req, r
   }
 });
 
-app.get('/api/linkedin/account/:accountId/segments', requireAuth, async (req, res) => {
+app.get('/api/linkedin/account/:accountId/segments', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const { accountId } = req.params;
     const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
@@ -791,7 +856,7 @@ app.get('/api/linkedin/account/:accountId/segments', requireAuth, async (req, re
   }
 });
 
-app.get('/api/linkedin/account/:accountId/engagement-rules', requireAuth, async (req, res) => {
+app.get('/api/linkedin/account/:accountId/engagement-rules', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const { accountId } = req.params;
     const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
@@ -811,7 +876,7 @@ app.get('/api/linkedin/account/:accountId/engagement-rules', requireAuth, async 
   }
 });
 
-app.get('/api/linkedin/account/:accountId/analytics', requireAuth, async (req, res) => {
+app.get('/api/linkedin/account/:accountId/analytics', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const { accountId } = req.params;
     const { comparisonMode } = req.query;
@@ -995,7 +1060,7 @@ app.get('/api/linkedin/account/:accountId/analytics', requireAuth, async (req, r
   }
 });
 
-app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, async (req, res) => {
+app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const { accountId } = req.params;
     const sessionId = (req as any).sessionId;
@@ -1484,7 +1549,7 @@ app.post('/api/linkedin/resolve-targeting', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/linkedin/account/:accountId/ad-preview/:creativeId', requireAuth, async (req, res) => {
+app.get('/api/linkedin/account/:accountId/ad-preview/:creativeId', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const sessionId = (req as any).sessionId;
     const { accountId, creativeId } = req.params;
@@ -1509,7 +1574,7 @@ app.get('/api/linkedin/account/:accountId/ad-preview/:creativeId', requireAuth, 
 });
 
 // Ad Budget Pricing endpoint - fetches bid limits and suggested bids
-app.get('/api/linkedin/account/:accountId/campaign/:campaignId/budget-pricing', requireAuth, async (req, res) => {
+app.get('/api/linkedin/account/:accountId/campaign/:campaignId/budget-pricing', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const sessionId = (req as any).sessionId;
     const { accountId, campaignId } = req.params;
@@ -1607,7 +1672,7 @@ app.get('/api/linkedin/account/:accountId/campaign/:campaignId/budget-pricing', 
   }
 });
 
-app.get('/api/linkedin/account/:accountId/creative/:creativeId', requireAuth, async (req, res) => {
+app.get('/api/linkedin/account/:accountId/creative/:creativeId', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const sessionId = (req as any).sessionId;
     const { accountId, creativeId } = req.params;
@@ -1906,7 +1971,7 @@ Guidelines:
   }
 });
 
-app.get('/api/linkedin/audit/status/:accountId', requireAuth, async (req, res) => {
+app.get('/api/linkedin/audit/status/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const { accountId } = req.params;
     const snapshot = await getSnapshot(accountId);
@@ -1927,7 +1992,7 @@ app.get('/api/linkedin/audit/status/:accountId', requireAuth, async (req, res) =
   }
 });
 
-app.post('/api/linkedin/audit/run/:accountId', requireAuth, async (req, res) => {
+app.post('/api/linkedin/audit/run/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   const sessionId = (req as any).sessionId;
   const { accountId } = req.params;
   const { accountName } = req.body;
@@ -2089,7 +2154,7 @@ app.post('/api/linkedin/audit/run/:accountId', requireAuth, async (req, res) => 
   }
 });
 
-app.get('/api/linkedin/audit/results/:accountId', requireAuth, async (req, res) => {
+app.get('/api/linkedin/audit/results/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const { accountId } = req.params;
     const auditData = await getAuditData(accountId);
@@ -2115,7 +2180,7 @@ app.get('/api/linkedin/audit/results/:accountId', requireAuth, async (req, res) 
   }
 });
 
-app.delete('/api/linkedin/audit/:accountId', requireAuth, async (req, res) => {
+app.delete('/api/linkedin/audit/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const { accountId } = req.params;
     await deleteAuditData(accountId);
@@ -2129,7 +2194,7 @@ app.delete('/api/linkedin/audit/:accountId', requireAuth, async (req, res) => {
 // ========== NEW AUDIT SYNC ENDPOINTS ==========
 
 // Check if account is opted into audit
-app.get('/api/audit/account/:accountId', requireAuth, async (req, res) => {
+app.get('/api/audit/account/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const { accountId } = req.params;
     const auditAccount = await getAuditAccount(accountId);
@@ -3154,7 +3219,7 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
 }
 
 // Start audit (opt-in and sync)
-app.post('/api/audit/start/:accountId', requireAuth, async (req, res) => {
+app.post('/api/audit/start/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   const { accountId } = req.params;
   const { accountName } = req.body;
   
@@ -3195,7 +3260,7 @@ app.post('/api/audit/start/:accountId', requireAuth, async (req, res) => {
 });
 
 // Refresh/resync audit data
-app.post('/api/audit/refresh/:accountId', requireAuth, async (req, res) => {
+app.post('/api/audit/refresh/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   const { accountId } = req.params;
   
   // Capture access token BEFORE sending response
@@ -3238,7 +3303,7 @@ app.post('/api/audit/refresh/:accountId', requireAuth, async (req, res) => {
 });
 
 // Get stored audit analytics data
-app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
+app.get('/api/audit/data/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   // Helper to extract numeric ID from URN
   const extractId = (urn: any): string => {
     if (urn === null || urn === undefined) return '';
@@ -4383,7 +4448,7 @@ app.get('/api/audit/data/:accountId', requireAuth, async (req, res) => {
 });
 
 // Remove account from audit
-app.delete('/api/audit/account/:accountId', requireAuth, async (req, res) => {
+app.delete('/api/audit/account/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const { accountId } = req.params;
     await removeAuditAccount(accountId);
@@ -4395,7 +4460,7 @@ app.delete('/api/audit/account/:accountId', requireAuth, async (req, res) => {
 });
 
 // Lightweight audit summary for Structure view - returns scoring status without heavy processing
-app.get('/api/audit/structure-summary/:accountId', requireAuth, async (req, res) => {
+app.get('/api/audit/structure-summary/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   try {
     const { accountId } = req.params;
     
@@ -4491,7 +4556,7 @@ app.get('/api/audit/structure-summary/:accountId', requireAuth, async (req, res)
 });
 
 // Get hourly heatmap data for drilldown
-app.get('/api/audit/drilldown/heatmap/:accountId', requireAuth, async (req, res) => {
+app.get('/api/audit/drilldown/heatmap/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   const { accountId } = req.params;
   const { campaignId, metric = 'impressions' } = req.query;
   
@@ -4509,7 +4574,7 @@ app.get('/api/audit/drilldown/heatmap/:accountId', requireAuth, async (req, res)
 });
 
 // Get delivery cutoff analysis by day
-app.get('/api/audit/drilldown/cutoffs/:accountId', requireAuth, async (req, res) => {
+app.get('/api/audit/drilldown/cutoffs/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   const { accountId } = req.params;
   const { campaignId } = req.query;
   
@@ -4523,7 +4588,7 @@ app.get('/api/audit/drilldown/cutoffs/:accountId', requireAuth, async (req, res)
 });
 
 // Get list of campaigns with hourly data available
-app.get('/api/audit/drilldown/campaigns/:accountId', requireAuth, async (req, res) => {
+app.get('/api/audit/drilldown/campaigns/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   const { accountId } = req.params;
   
   try {

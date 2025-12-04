@@ -260,6 +260,7 @@ export async function initDatabase() {
         user_id VARCHAR(100),
         user_name VARCHAR(255),
         csrf_token VARCHAR(64),
+        authorized_accounts TEXT[] DEFAULT '{}',
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
@@ -269,6 +270,9 @@ export async function initDatabase() {
       BEGIN 
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'user_sessions' AND column_name = 'csrf_token') THEN
           ALTER TABLE user_sessions ADD COLUMN csrf_token VARCHAR(64);
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'user_sessions' AND column_name = 'authorized_accounts') THEN
+          ALTER TABLE user_sessions ADD COLUMN authorized_accounts TEXT[] DEFAULT '{}';
         END IF;
       END $$;
 
@@ -1223,6 +1227,7 @@ export interface DbSession {
   user_id: string | null;
   user_name: string | null;
   csrf_token: string | null;
+  authorized_accounts: string[];
   created_at: Date;
   updated_at: Date;
 }
@@ -1253,6 +1258,7 @@ export async function updateDbSession(
     state?: string | null;
     user_id?: string | null;
     user_name?: string | null;
+    authorized_accounts?: string[];
   }
 ): Promise<DbSession | null> {
   const setClauses: string[] = ['updated_at = NOW()'];
@@ -1277,6 +1283,10 @@ export async function updateDbSession(
   if (updates.user_name !== undefined) {
     params.push(updates.user_name);
     setClauses.push(`user_name = $${params.length}`);
+  }
+  if (updates.authorized_accounts !== undefined) {
+    params.push(updates.authorized_accounts);
+    setClauses.push(`authorized_accounts = $${params.length}`);
   }
   
   params.push(sessionId);

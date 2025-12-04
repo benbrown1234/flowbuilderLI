@@ -536,6 +536,7 @@ const App: React.FC = () => {
         )}
 
         <div className="flex-1 min-h-0 relative">
+          <ErrorBoundary>
           {viewMode === 'IDEATE' ? (
             <IdeateCanvas 
               shareToken={sharedCanvasToken || undefined} 
@@ -597,6 +598,7 @@ const App: React.FC = () => {
               )}
             </>
           )}
+          </ErrorBoundary>
         </div>
 
       </main>
