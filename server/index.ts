@@ -173,6 +173,94 @@ const getFallbackName = (urn: string): string | null => {
   
   return null;
 };
+
+// Shared helper function for processing job title data with proper fallbacks
+interface JobTitleEntry {
+  campaignId: string;
+  titleUrn: string;
+  impressions: number;
+  clicks: number;
+}
+
+interface ProcessedJobTitle {
+  jobTitleUrn: string;
+  jobTitleName: string;
+  impressions: number;
+  clicks: number;
+}
+
+interface JobTitleProcessingResult {
+  byCampaign: Record<string, ProcessedJobTitle[]>;
+  stats: {
+    resolvedFromApi: number;
+    resolvedFromCache: number;
+    resolvedFromFallback: number;
+    unresolvedCount: number;
+  };
+  fallbacksAddedToCache: boolean;
+}
+
+function processJobTitleDataWithFallbacks(
+  allJobTitleData: JobTitleEntry[],
+  resolvedTitles: Record<string, string>
+): JobTitleProcessingResult {
+  const byCampaign: Record<string, ProcessedJobTitle[]> = {};
+  let resolvedFromApi = 0;
+  let resolvedFromCache = 0;
+  let resolvedFromFallback = 0;
+  let unresolvedCount = 0;
+  let fallbacksAddedToCache = false;
+
+  for (const item of allJobTitleData) {
+    if (!byCampaign[item.campaignId]) {
+      byCampaign[item.campaignId] = [];
+    }
+    
+    // Get resolved name with fallback priority: API > cache > COMMON_TITLES > ID
+    let titleName: string;
+    if (resolvedTitles[item.titleUrn]) {
+      titleName = resolvedTitles[item.titleUrn];
+      resolvedFromApi++;
+    } else if (urnCache[item.titleUrn]) {
+      titleName = urnCache[item.titleUrn];
+      resolvedFromCache++;
+    } else {
+      // Try COMMON_TITLES fallback
+      const fallback = getFallbackName(item.titleUrn);
+      if (fallback) {
+        titleName = fallback;
+        resolvedFromFallback++;
+        // Save fallback to cache for future use
+        urnCache[item.titleUrn] = fallback;
+        fallbacksAddedToCache = true;
+      } else {
+        // Last resort: extract ID as name
+        const titleId = item.titleUrn.split(':').pop() || 'Unknown';
+        titleName = `Title ID: ${titleId}`;
+        unresolvedCount++;
+      }
+    }
+    
+    byCampaign[item.campaignId].push({
+      jobTitleUrn: item.titleUrn,
+      jobTitleName: titleName,
+      impressions: item.impressions,
+      clicks: item.clicks
+    });
+  }
+
+  return {
+    byCampaign,
+    stats: {
+      resolvedFromApi,
+      resolvedFromCache,
+      resolvedFromFallback,
+      unresolvedCount
+    },
+    fallbacksAddedToCache
+  };
+}
+
 const isProduction = process.env.NODE_ENV === 'production';
 const PORT = Number(process.env.PORT) || (isProduction ? 5000 : 3001);
 
@@ -2955,7 +3043,9 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     
     console.log(`[JobTitles] Will fetch job titles for ${activeCampaignIds.length} active campaigns`);
     
-    let totalJobTitlesSaved = 0;
+    // Collect all job title data across campaigns first
+    const allJobTitleData: Array<{ campaignId: string; titleUrn: string; impressions: number; clicks: number }> = [];
+    const allTitleUrns = new Set<string>();
     
     for (const campaignId of activeCampaignIds) {
       await delay(500); // Slightly longer delay between campaigns to be safe with rate limits
@@ -2966,36 +3056,105 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
       let jobTitleAnalytics: any = { elements: [] };
       try {
         jobTitleAnalytics = await linkedinApiRequest(sessionId, `/adAnalytics`, {}, jobTitleAnalyticsQuery);
+        console.log(`[JobTitles] Campaign ${campaignId}: fetched ${jobTitleAnalytics.elements?.length || 0} job title entries`);
       } catch (err: any) {
         console.warn(`[JobTitles] Fetch error for campaign ${campaignId}:`, err.message);
         continue;
       }
       
-      // Process and save job title analytics for this campaign
-      const jobTitleMetrics: Array<{ jobTitleUrn: string; jobTitleName: string; impressions: number; clicks: number; }> = [];
+      // Collect job title data and URNs
       for (const elem of (jobTitleAnalytics.elements || [])) {
         const titleUrn = elem.pivotValues?.[0];
         if (!titleUrn || !titleUrn.includes('title:')) continue;
         
-        // Get title name from URN cache or use a placeholder
-        const titleName = urnCache[titleUrn] || titleUrn.split(':').pop() || 'Unknown Title';
-        
-        jobTitleMetrics.push({
-          jobTitleUrn: titleUrn,
-          jobTitleName: titleName,
+        allTitleUrns.add(titleUrn);
+        allJobTitleData.push({
+          campaignId,
+          titleUrn,
           impressions: elem.impressions || 0,
           clicks: elem.clicks || 0
         });
       }
+    }
+    
+    console.log(`[JobTitles] Collected ${allJobTitleData.length} total entries with ${allTitleUrns.size} unique job titles`);
+    
+    // Resolve all job title URNs to their actual names
+    const resolvedTitles: Record<string, string> = {};
+    const urnsToResolve = Array.from(allTitleUrns).filter(urn => !urnCache[urn]);
+    
+    console.log(`[JobTitles] Need to resolve ${urnsToResolve.length} new job title URNs (${allTitleUrns.size - urnsToResolve.length} already cached)`);
+    
+    if (urnsToResolve.length > 0) {
+      // Use titles facet lookup for batch resolution
+      const batchSize = 50;
+      for (let i = 0; i < urnsToResolve.length; i += batchSize) {
+        const batch = urnsToResolve.slice(i, i + batchSize);
+        const urnList = batch.map(u => encodeURIComponent(u)).join(',');
+        
+        await delay(300);
+        
+        try {
+          const response = await linkedinApiRequest(
+            sessionId, 
+            '/adTargetingEntities',
+            {},
+            `q=urns&queryVersion=QUERY_USES_URNS&urns=List(${urnList})&locale=(language:en,country:US)`
+          );
+          
+          // Handle different response formats
+          if (response.results) {
+            Object.entries(response.results).forEach(([urn, entity]: [string, any]) => {
+              if (entity && entity.name) {
+                resolvedTitles[urn] = entity.name;
+                urnCache[urn] = entity.name;
+              } else if (entity && entity.value) {
+                resolvedTitles[urn] = entity.value;
+                urnCache[urn] = entity.value;
+              }
+            });
+          }
+          if (response.elements && Array.isArray(response.elements)) {
+            response.elements.forEach((entity: any) => {
+              if (entity.urn && entity.name) {
+                resolvedTitles[entity.urn] = entity.name;
+                urnCache[entity.urn] = entity.name;
+              }
+            });
+          }
+          
+          console.log(`[JobTitles] Resolved batch ${Math.floor(i / batchSize) + 1}: ${Object.keys(resolvedTitles).length} titles so far`);
+        } catch (batchErr: any) {
+          console.warn(`[JobTitles] URN batch resolution failed: ${batchErr.message}`);
+        }
+      }
       
-      if (jobTitleMetrics.length > 0) {
-        await saveJobTitleAnalytics(accountId, campaignId, jobTitleMetrics);
-        totalJobTitlesSaved += jobTitleMetrics.length;
-        console.log(`[JobTitles] Campaign ${campaignId}: saved ${jobTitleMetrics.length} job titles`);
+      // Save newly resolved URNs to cache
+      if (Object.keys(resolvedTitles).length > 0) {
+        saveUrnCache();
+        console.log(`[JobTitles] Saved ${Object.keys(resolvedTitles).length} new job title names to cache`);
       }
     }
     
-    console.log(`[JobTitles] Completed: saved ${totalJobTitlesSaved} total job title entries across ${activeCampaignIds.length} campaigns`);
+    // Use shared helper function to process job title data with proper fallbacks
+    const { byCampaign, stats, fallbacksAddedToCache } = processJobTitleDataWithFallbacks(allJobTitleData, resolvedTitles);
+    
+    // Save fallbacks to cache if any were added
+    if (fallbacksAddedToCache) {
+      saveUrnCache();
+    }
+    
+    console.log(`[JobTitles] Resolution stats: ${stats.resolvedFromApi} from API, ${stats.resolvedFromCache} from cache, ${stats.resolvedFromFallback} from fallback, ${stats.unresolvedCount} unresolved`);
+    
+    // Save each campaign's data
+    let totalJobTitlesSaved = 0;
+    for (const [campaignId, metrics] of Object.entries(byCampaign)) {
+      await saveJobTitleAnalytics(accountId, campaignId, metrics);
+      totalJobTitlesSaved += metrics.length;
+      console.log(`[JobTitles] Campaign ${campaignId}: saved ${metrics.length} job titles`);
+    }
+    
+    console.log(`[JobTitles] Completed: saved ${totalJobTitlesSaved} total job title entries across ${Object.keys(byCampaign).length} campaigns`);
     
     // Compute and save scoring status for Structure view caching
     console.log('Computing and saving scoring status...');
@@ -3313,7 +3472,9 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     
     console.log(`[JobTitles] Will fetch job titles for ${activeCampaignIds.length} active campaigns`);
     
-    let totalJobTitlesSaved = 0;
+    // Collect all job title data across campaigns first
+    const allJobTitleData: Array<{ campaignId: string; titleUrn: string; impressions: number; clicks: number }> = [];
+    const allTitleUrns = new Set<string>();
     
     for (const campaignId of activeCampaignIds) {
       await delay(500); // Slightly longer delay between campaigns to be safe with rate limits
@@ -3324,36 +3485,105 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
       let jobTitleAnalytics: any = { elements: [] };
       try {
         jobTitleAnalytics = await linkedinApiRequestWithToken(accessToken, `/adAnalytics`, {}, jobTitleAnalyticsQuery);
+        console.log(`[JobTitles] Campaign ${campaignId}: fetched ${jobTitleAnalytics.elements?.length || 0} job title entries`);
       } catch (err: any) {
         console.warn(`[JobTitles] Fetch error for campaign ${campaignId}:`, err.message);
         continue;
       }
       
-      // Process and save job title analytics for this campaign
-      const jobTitleMetrics: Array<{ jobTitleUrn: string; jobTitleName: string; impressions: number; clicks: number; }> = [];
+      // Collect job title data and URNs
       for (const elem of (jobTitleAnalytics.elements || [])) {
         const titleUrn = elem.pivotValues?.[0];
         if (!titleUrn || !titleUrn.includes('title:')) continue;
         
-        // Get title name from URN cache or use a placeholder
-        const titleName = urnCache[titleUrn] || titleUrn.split(':').pop() || 'Unknown Title';
-        
-        jobTitleMetrics.push({
-          jobTitleUrn: titleUrn,
-          jobTitleName: titleName,
+        allTitleUrns.add(titleUrn);
+        allJobTitleData.push({
+          campaignId,
+          titleUrn,
           impressions: elem.impressions || 0,
           clicks: elem.clicks || 0
         });
       }
+    }
+    
+    console.log(`[JobTitles] Collected ${allJobTitleData.length} total entries with ${allTitleUrns.size} unique job titles`);
+    
+    // Resolve all job title URNs to their actual names
+    const resolvedTitles: Record<string, string> = {};
+    const urnsToResolve = Array.from(allTitleUrns).filter(urn => !urnCache[urn]);
+    
+    console.log(`[JobTitles] Need to resolve ${urnsToResolve.length} new job title URNs (${allTitleUrns.size - urnsToResolve.length} already cached)`);
+    
+    if (urnsToResolve.length > 0) {
+      // Use titles facet lookup for batch resolution
+      const batchSize = 50;
+      for (let i = 0; i < urnsToResolve.length; i += batchSize) {
+        const batch = urnsToResolve.slice(i, i + batchSize);
+        const urnList = batch.map(u => encodeURIComponent(u)).join(',');
+        
+        await delay(300);
+        
+        try {
+          const response = await linkedinApiRequestWithToken(
+            accessToken, 
+            '/adTargetingEntities',
+            {},
+            `q=urns&queryVersion=QUERY_USES_URNS&urns=List(${urnList})&locale=(language:en,country:US)`
+          );
+          
+          // Handle different response formats
+          if (response.results) {
+            Object.entries(response.results).forEach(([urn, entity]: [string, any]) => {
+              if (entity && entity.name) {
+                resolvedTitles[urn] = entity.name;
+                urnCache[urn] = entity.name;
+              } else if (entity && entity.value) {
+                resolvedTitles[urn] = entity.value;
+                urnCache[urn] = entity.value;
+              }
+            });
+          }
+          if (response.elements && Array.isArray(response.elements)) {
+            response.elements.forEach((entity: any) => {
+              if (entity.urn && entity.name) {
+                resolvedTitles[entity.urn] = entity.name;
+                urnCache[entity.urn] = entity.name;
+              }
+            });
+          }
+          
+          console.log(`[JobTitles] Resolved batch ${Math.floor(i / batchSize) + 1}: ${Object.keys(resolvedTitles).length} titles so far`);
+        } catch (batchErr: any) {
+          console.warn(`[JobTitles] URN batch resolution failed: ${batchErr.message}`);
+        }
+      }
       
-      if (jobTitleMetrics.length > 0) {
-        await saveJobTitleAnalytics(accountId, campaignId, jobTitleMetrics);
-        totalJobTitlesSaved += jobTitleMetrics.length;
-        console.log(`[JobTitles] Campaign ${campaignId}: saved ${jobTitleMetrics.length} job titles`);
+      // Save newly resolved URNs to cache
+      if (Object.keys(resolvedTitles).length > 0) {
+        saveUrnCache();
+        console.log(`[JobTitles] Saved ${Object.keys(resolvedTitles).length} new job title names to cache`);
       }
     }
     
-    console.log(`[JobTitles] Completed: saved ${totalJobTitlesSaved} total job title entries across ${activeCampaignIds.length} campaigns`);
+    // Use shared helper function to process job title data with proper fallbacks
+    const { byCampaign, stats, fallbacksAddedToCache } = processJobTitleDataWithFallbacks(allJobTitleData, resolvedTitles);
+    
+    // Save fallbacks to cache if any were added
+    if (fallbacksAddedToCache) {
+      saveUrnCache();
+    }
+    
+    console.log(`[JobTitles] Resolution stats: ${stats.resolvedFromApi} from API, ${stats.resolvedFromCache} from cache, ${stats.resolvedFromFallback} from fallback, ${stats.unresolvedCount} unresolved`);
+    
+    // Save each campaign's data
+    let totalJobTitlesSaved = 0;
+    for (const [campaignId, metrics] of Object.entries(byCampaign)) {
+      await saveJobTitleAnalytics(accountId, campaignId, metrics);
+      totalJobTitlesSaved += metrics.length;
+      console.log(`[JobTitles] Campaign ${campaignId}: saved ${metrics.length} job titles`);
+    }
+    
+    console.log(`[JobTitles] Completed: saved ${totalJobTitlesSaved} total job title entries across ${Object.keys(byCampaign).length} campaigns`);
     
     // Compute and save scoring status for Structure view caching
     console.log('Computing and saving scoring status...');
