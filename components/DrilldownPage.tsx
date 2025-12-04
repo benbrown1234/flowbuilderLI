@@ -114,6 +114,8 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
   const [jobTitlesPage, setJobTitlesPage] = useState(1);
   const [jobTitlesSortBy, setJobTitlesSortBy] = useState<SortField>('impressions');
   const [jobTitlesSortDir, setJobTitlesSortDir] = useState<SortDir>('desc');
+  const [jobTitlesCampaigns, setJobTitlesCampaigns] = useState<Array<{ campaignId: string; campaignName: string }>>([]);
+  const [selectedJobTitlesCampaign, setSelectedJobTitlesCampaign] = useState<string | undefined>(undefined);
 
   const checkAuditStatus = useCallback(async () => {
     try {
@@ -168,6 +170,20 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
     }
   }, [selectedCampaign, selectedMetric]);
 
+  const fetchJobTitlesCampaigns = async () => {
+    try {
+      const response = await fetch(`/api/audit/drilldown/job-title-campaigns/${accountId}`, {
+        credentials: 'include'
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setJobTitlesCampaigns(data);
+      }
+    } catch (error) {
+      console.error('Error fetching job titles campaigns:', error);
+    }
+  };
+
   const fetchCampaigns = async () => {
     try {
       const response = await fetch(`/api/audit/drilldown/campaigns/${accountId}`, {
@@ -211,11 +227,12 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
     setLoading(false);
   };
 
-  const fetchJobTitles = async (page: number = 1, sortBy: SortField = 'impressions', sortDir: SortDir = 'desc') => {
+  const fetchJobTitles = async (page: number = 1, sortBy: SortField = 'impressions', sortDir: SortDir = 'desc', campaignId?: string) => {
     setJobTitlesLoading(true);
     try {
+      const campaignParam = campaignId ? `&campaignId=${campaignId}` : '';
       const response = await fetch(
-        `/api/audit/drilldown/job-titles/${accountId}?page=${page}&pageSize=25&sortBy=${sortBy}&sortDir=${sortDir}`,
+        `/api/audit/drilldown/job-titles/${accountId}?page=${page}&pageSize=25&sortBy=${sortBy}&sortDir=${sortDir}${campaignParam}`,
         { credentials: 'include' }
       );
       if (response.ok) {
@@ -230,9 +247,10 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
 
   useEffect(() => {
     if (auditStatus?.optedIn && auditStatus?.syncStatus === 'completed' && selectedView === 'job-titles') {
-      fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir);
+      fetchJobTitlesCampaigns();
+      fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir, selectedJobTitlesCampaign);
     }
-  }, [selectedView, jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir, auditStatus]);
+  }, [selectedView, jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir, selectedJobTitlesCampaign, auditStatus]);
 
   const handleJobTitlesSort = (field: SortField) => {
     if (field === jobTitlesSortBy) {
@@ -358,7 +376,7 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
           </div>
           
           <button
-            onClick={() => selectedView === 'hourly' ? fetchData() : fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir)}
+            onClick={() => selectedView === 'hourly' ? fetchData() : fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir, selectedJobTitlesCampaign)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
@@ -690,13 +708,38 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
         {selectedView === 'job-titles' && (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200">
             <div className="p-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <Users className="w-5 h-5 text-purple-600" />
-                Job Titles Breakdown
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Account-wide performance metrics by job title from the last 90 days
-              </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <Users className="w-5 h-5 text-purple-600" />
+                    Job Titles Breakdown
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {selectedJobTitlesCampaign ? 'Campaign-level' : 'Account-wide'} performance metrics by job title from the last 90 days
+                  </p>
+                </div>
+                
+                {jobTitlesCampaigns.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Filter className="w-4 h-4 text-gray-500" />
+                    <select
+                      value={selectedJobTitlesCampaign || ''}
+                      onChange={(e) => {
+                        setSelectedJobTitlesCampaign(e.target.value || undefined);
+                        setJobTitlesPage(1);
+                      }}
+                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                    >
+                      <option value="">All Campaigns</option>
+                      {jobTitlesCampaigns.map(campaign => (
+                        <option key={campaign.campaignId} value={campaign.campaignId}>
+                          {campaign.campaignName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
             </div>
 
             {jobTitlesLoading ? (

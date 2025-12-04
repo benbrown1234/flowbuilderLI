@@ -212,6 +212,7 @@ export async function initDatabase() {
       CREATE TABLE IF NOT EXISTS analytics_job_titles (
         id SERIAL PRIMARY KEY,
         account_id VARCHAR(50) NOT NULL,
+        campaign_id VARCHAR(50),
         job_title_urn VARCHAR(255) NOT NULL,
         job_title_name VARCHAR(500),
         impressions BIGINT DEFAULT 0,
@@ -219,11 +220,31 @@ export async function initDatabase() {
         ctr DECIMAL(8,4),
         sync_date DATE NOT NULL,
         created_at TIMESTAMP DEFAULT NOW(),
-        UNIQUE(account_id, job_title_urn, sync_date)
+        UNIQUE(account_id, campaign_id, job_title_urn, sync_date)
       );
+
+      -- Migration: add campaign_id column if it doesn't exist
+      ALTER TABLE analytics_job_titles ADD COLUMN IF NOT EXISTS campaign_id VARCHAR(50);
+
+      -- Drop old unique constraint and create new one with campaign_id
+      -- First, drop the old constraint if it exists (PostgreSQL syntax)
+      DO $$ 
+      BEGIN
+        IF EXISTS (
+          SELECT 1 FROM pg_constraint 
+          WHERE conname = 'analytics_job_titles_account_id_job_title_urn_sync_date_key'
+        ) THEN
+          ALTER TABLE analytics_job_titles DROP CONSTRAINT analytics_job_titles_account_id_job_title_urn_sync_date_key;
+        END IF;
+      END $$;
+
+      -- Create the new unique constraint with campaign_id (handles NULL campaign_id correctly)
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_analytics_job_titles_unique 
+        ON analytics_job_titles(account_id, COALESCE(campaign_id, ''), job_title_urn, sync_date);
 
       CREATE INDEX IF NOT EXISTS idx_analytics_job_titles_account ON analytics_job_titles(account_id, sync_date DESC);
       CREATE INDEX IF NOT EXISTS idx_analytics_job_titles_impressions ON analytics_job_titles(account_id, impressions DESC);
+      CREATE INDEX IF NOT EXISTS idx_analytics_job_titles_campaign ON analytics_job_titles(campaign_id, sync_date DESC);
 
       -- Ideate Canvas tables
       CREATE TABLE IF NOT EXISTS ideate_canvases (
@@ -1335,9 +1356,10 @@ export async function getCanvasWithOwnership(canvasId: string, userId: string): 
   return result.rows[0] || null;
 }
 
-// Save job title analytics (one row per job title per sync date)
+// Save job title analytics (one row per job title per campaign per sync date)
 export async function saveJobTitleAnalytics(
   accountId: string,
+  campaignId: string | null,
   jobTitles: Array<{
     jobTitleUrn: string;
     jobTitleName: string;
@@ -1346,6 +1368,7 @@ export async function saveJobTitleAnalytics(
   }>
 ) {
   const accId = String(accountId);
+  const campId = campaignId ? String(campaignId) : '';
   const syncDate = new Date().toISOString().split('T')[0];
   
   for (const jt of jobTitles) {
@@ -1353,15 +1376,16 @@ export async function saveJobTitleAnalytics(
     
     await pool.query(
       `INSERT INTO analytics_job_titles 
-       (account_id, job_title_urn, job_title_name, impressions, clicks, ctr, sync_date)
-       VALUES ($1::text, $2::text, $3::text, $4::bigint, $5::bigint, $6::numeric, $7::date)
-       ON CONFLICT (account_id, job_title_urn, sync_date) DO UPDATE SET
+       (account_id, campaign_id, job_title_urn, job_title_name, impressions, clicks, ctr, sync_date)
+       VALUES ($1::text, NULLIF($2::text, ''), $3::text, $4::text, $5::bigint, $6::bigint, $7::numeric, $8::date)
+       ON CONFLICT (account_id, COALESCE(campaign_id, ''), job_title_urn, sync_date) DO UPDATE SET
          job_title_name = EXCLUDED.job_title_name,
          impressions = EXCLUDED.impressions,
          clicks = EXCLUDED.clicks,
          ctr = EXCLUDED.ctr`,
       [
         accId,
+        campId,
         jt.jobTitleUrn,
         jt.jobTitleName || 'Unknown Title',
         jt.impressions || 0,
@@ -1405,11 +1429,21 @@ export async function getJobTitleAnalytics(
   const sortBy = options.sortBy || 'impressions';
   const sortDir = options.sortDir || 'desc';
   const offset = (page - 1) * pageSize;
+  const campaignId = options.campaignId ? String(options.campaignId) : null;
   
-  // Get latest sync date
+  // Build WHERE clause based on whether we're filtering by campaign
+  let whereClause = 'account_id = $1';
+  let params: any[] = [accId];
+  
+  if (campaignId) {
+    whereClause += ' AND campaign_id = $2';
+    params.push(campaignId);
+  }
+  
+  // Get latest sync date for the filtered data
   const latestDateResult = await pool.query(
-    `SELECT MAX(sync_date) as latest_date FROM analytics_job_titles WHERE account_id = $1`,
-    [accId]
+    `SELECT MAX(sync_date) as latest_date FROM analytics_job_titles WHERE ${whereClause}`,
+    params
   );
   const latestDate = latestDateResult.rows[0]?.latest_date;
   
@@ -1425,10 +1459,14 @@ export async function getJobTitleAnalytics(
     };
   }
   
+  // Add sync_date to where clause and params
+  const fullWhereClause = whereClause + ` AND sync_date = $${params.length + 1}`;
+  const fullParams = [...params, latestDate];
+  
   // Get total count
   const countResult = await pool.query(
-    `SELECT COUNT(*) as count FROM analytics_job_titles WHERE account_id = $1 AND sync_date = $2`,
-    [accId, latestDate]
+    `SELECT COUNT(*) as count FROM analytics_job_titles WHERE ${fullWhereClause}`,
+    fullParams
   );
   const total = parseInt(countResult.rows[0]?.count || '0');
   
@@ -1441,10 +1479,10 @@ export async function getJobTitleAnalytics(
   const dataResult = await pool.query(
     `SELECT job_title_urn, job_title_name, impressions, clicks, ctr, sync_date
      FROM analytics_job_titles 
-     WHERE account_id = $1 AND sync_date = $2
+     WHERE ${fullWhereClause}
      ORDER BY ${safeSortBy} ${safeSortDir}
-     LIMIT $3 OFFSET $4`,
-    [accId, latestDate, pageSize, offset]
+     LIMIT $${fullParams.length + 1} OFFSET $${fullParams.length + 2}`,
+    [...fullParams, pageSize, offset]
   );
   
   const totalPages = Math.ceil(total / pageSize);
@@ -1465,6 +1503,26 @@ export async function getJobTitleAnalytics(
     hasPrevious: page > 1,
     hasNext: page < totalPages
   };
+}
+
+// Get campaigns that have job title data
+export async function getCampaignsWithJobTitleData(accountId: string): Promise<Array<{ campaignId: string; campaignName: string }>> {
+  const accId = String(accountId);
+  
+  // Get distinct campaigns from job title data, joined with daily analytics for names
+  const result = await pool.query(
+    `SELECT DISTINCT jt.campaign_id, 
+       COALESCE((SELECT campaign_name FROM analytics_campaign_daily WHERE campaign_id = jt.campaign_id LIMIT 1), 'Campaign ' || jt.campaign_id) as campaign_name
+     FROM analytics_job_titles jt
+     WHERE jt.account_id = $1 AND jt.campaign_id IS NOT NULL
+     ORDER BY campaign_name`,
+    [accId]
+  );
+  
+  return result.rows.map(row => ({
+    campaignId: row.campaign_id,
+    campaignName: row.campaign_name
+  }));
 }
 
 // Check if job title data exists for account

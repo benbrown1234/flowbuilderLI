@@ -66,7 +66,8 @@ import {
   getCanvasWithOwnership,
   saveJobTitleAnalytics,
   getJobTitleAnalytics,
-  hasJobTitleData
+  hasJobTitleData,
+  getCampaignsWithJobTitleData
 } from './database.js';
 import { runAuditRules, calculateAccountScore } from './auditRules.js';
 
@@ -2943,50 +2944,58 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
       console.log('[Hourly] No hourly metrics to save');
     }
     
-    // Fetch Job Title analytics (pivot by MEMBER_JOB_TITLE)
-    console.log('[JobTitles] Fetching job title analytics...');
-    await delay(300);
+    // Fetch Job Title analytics per campaign (pivot by MEMBER_JOB_TITLE)
+    console.log('[JobTitles] Fetching job title analytics per campaign...');
     
-    const jobTitleAnalyticsQuery = `q=analytics&pivot=MEMBER_JOB_TITLE&dateRange=(start:(year:${ninetyDaysAgo.getFullYear()},month:${ninetyDaysAgo.getMonth() + 1},day:${ninetyDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,pivotValues`;
-    console.log(`[JobTitles] Query: ${jobTitleAnalyticsQuery}`);
+    // Get list of active campaigns to fetch job titles for
+    const activeCampaignIds = campaigns
+      .filter((c: any) => c.status === 'ACTIVE')
+      .map((c: any) => extractId(c.id || c.campaignUrn || ''))
+      .filter((id: string) => id);
     
-    let jobTitleAnalytics: any = { elements: [] };
-    try {
-      jobTitleAnalytics = await linkedinApiRequest(sessionId, `/adAnalytics`, {}, jobTitleAnalyticsQuery);
-      console.log(`[JobTitles] Got ${jobTitleAnalytics.elements?.length || 0} job title rows`);
-      if (jobTitleAnalytics.elements?.length > 0) {
-        console.log(`[JobTitles] Sample element:`, JSON.stringify(jobTitleAnalytics.elements[0], null, 2).substring(0, 300));
+    console.log(`[JobTitles] Will fetch job titles for ${activeCampaignIds.length} active campaigns`);
+    
+    let totalJobTitlesSaved = 0;
+    
+    for (const campaignId of activeCampaignIds) {
+      await delay(500); // Slightly longer delay between campaigns to be safe with rate limits
+      
+      const encodedCampaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`);
+      const jobTitleAnalyticsQuery = `q=analytics&pivot=MEMBER_JOB_TITLE&dateRange=(start:(year:${ninetyDaysAgo.getFullYear()},month:${ninetyDaysAgo.getMonth() + 1},day:${ninetyDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&campaigns=List(${encodedCampaignUrn})&fields=impressions,clicks,pivotValues`;
+      
+      let jobTitleAnalytics: any = { elements: [] };
+      try {
+        jobTitleAnalytics = await linkedinApiRequest(sessionId, `/adAnalytics`, {}, jobTitleAnalyticsQuery);
+      } catch (err: any) {
+        console.warn(`[JobTitles] Fetch error for campaign ${campaignId}:`, err.message);
+        continue;
       }
-    } catch (err: any) {
-      console.warn('[JobTitles] Fetch error:', err.message);
-    }
-    
-    // Process and save job title analytics
-    const jobTitleMetrics: Array<{ jobTitleUrn: string; jobTitleName: string; impressions: number; clicks: number; }> = [];
-    for (const elem of (jobTitleAnalytics.elements || [])) {
-      const titleUrn = elem.pivotValues?.[0];
-      if (!titleUrn || !titleUrn.includes('title:')) continue;
       
-      // Get title name from URN cache or use a placeholder
-      const titleName = urnCache[titleUrn] || titleUrn.split(':').pop() || 'Unknown Title';
+      // Process and save job title analytics for this campaign
+      const jobTitleMetrics: Array<{ jobTitleUrn: string; jobTitleName: string; impressions: number; clicks: number; }> = [];
+      for (const elem of (jobTitleAnalytics.elements || [])) {
+        const titleUrn = elem.pivotValues?.[0];
+        if (!titleUrn || !titleUrn.includes('title:')) continue;
+        
+        // Get title name from URN cache or use a placeholder
+        const titleName = urnCache[titleUrn] || titleUrn.split(':').pop() || 'Unknown Title';
+        
+        jobTitleMetrics.push({
+          jobTitleUrn: titleUrn,
+          jobTitleName: titleName,
+          impressions: elem.impressions || 0,
+          clicks: elem.clicks || 0
+        });
+      }
       
-      jobTitleMetrics.push({
-        jobTitleUrn: titleUrn,
-        jobTitleName: titleName,
-        impressions: elem.impressions || 0,
-        clicks: elem.clicks || 0
-      });
+      if (jobTitleMetrics.length > 0) {
+        await saveJobTitleAnalytics(accountId, campaignId, jobTitleMetrics);
+        totalJobTitlesSaved += jobTitleMetrics.length;
+        console.log(`[JobTitles] Campaign ${campaignId}: saved ${jobTitleMetrics.length} job titles`);
+      }
     }
     
-    console.log(`[JobTitles] Processed ${jobTitleMetrics.length} job titles`);
-    
-    if (jobTitleMetrics.length > 0) {
-      console.log(`[JobTitles] Saving ${jobTitleMetrics.length} job title metrics...`);
-      await saveJobTitleAnalytics(accountId, jobTitleMetrics);
-      console.log('[JobTitles] Save completed');
-    } else {
-      console.log('[JobTitles] No job title metrics to save');
-    }
+    console.log(`[JobTitles] Completed: saved ${totalJobTitlesSaved} total job title entries across ${activeCampaignIds.length} campaigns`);
     
     // Compute and save scoring status for Structure view caching
     console.log('Computing and saving scoring status...');
@@ -2995,7 +3004,7 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     await updateAuditAccountSyncStatus(accountId, 'completed');
     console.log(`=== Audit sync completed for account ${accountId} ===\n`);
     
-    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length, hourlyMetrics: hourlyMetrics.length, jobTitleMetrics: jobTitleMetrics.length };
+    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length, hourlyMetrics: hourlyMetrics.length, jobTitleMetrics: totalJobTitlesSaved };
     
   } catch (err: any) {
     console.error(`Audit sync error for account ${accountId}:`, err.message);
@@ -3293,66 +3302,58 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
       console.log('[Hourly] No hourly metrics to save');
     }
     
-    // Fetch Job Title analytics (pivot by MEMBER_JOB_TITLE)
-    console.log('[JobTitles] Fetching job title analytics...');
-    await delay(300);
+    // Fetch Job Title analytics per campaign (pivot by MEMBER_JOB_TITLE)
+    console.log('[JobTitles] Fetching job title analytics per campaign...');
     
-    const jobTitleAnalyticsQuery = `q=analytics&pivot=MEMBER_JOB_TITLE&dateRange=(start:(year:${ninetyDaysAgo.getFullYear()},month:${ninetyDaysAgo.getMonth() + 1},day:${ninetyDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&accounts=List(${encodedAccountUrn})&fields=impressions,clicks,pivotValues`;
-    console.log(`[JobTitles] Query: ${jobTitleAnalyticsQuery}`);
+    // Get list of active campaigns to fetch job titles for
+    const activeCampaignIds = campaigns
+      .filter((c: any) => c.status === 'ACTIVE')
+      .map((c: any) => extractId(c.id || c.campaignUrn || ''))
+      .filter((id: string) => id);
     
-    let jobTitleAnalytics: any = { elements: [] };
-    try {
-      jobTitleAnalytics = await linkedinApiRequestWithToken(accessToken, `/adAnalytics`, {}, jobTitleAnalyticsQuery);
-      console.log(`[JobTitles] Got ${jobTitleAnalytics.elements?.length || 0} job title rows`);
-      if (jobTitleAnalytics.elements?.length > 0) {
-        console.log(`[JobTitles] Sample element:`, JSON.stringify(jobTitleAnalytics.elements[0], null, 2).substring(0, 500));
-      } else {
-        console.log('[JobTitles] Response structure:', JSON.stringify(jobTitleAnalytics, null, 2).substring(0, 500));
-      }
-    } catch (err: any) {
-      console.warn('[JobTitles] Fetch error:', err.message);
-      if (err.response?.data) {
-        console.warn('[JobTitles] Error response:', JSON.stringify(err.response.data, null, 2));
-      }
-    }
+    console.log(`[JobTitles] Will fetch job titles for ${activeCampaignIds.length} active campaigns`);
     
-    // Process and save job title analytics
-    const jobTitleMetrics: Array<{ jobTitleUrn: string; jobTitleName: string; impressions: number; clicks: number; }> = [];
-    let skippedNoUrn = 0;
-    let skippedNoTitle = 0;
+    let totalJobTitlesSaved = 0;
     
-    for (const elem of (jobTitleAnalytics.elements || [])) {
-      const titleUrn = elem.pivotValues?.[0];
-      if (!titleUrn) {
-        skippedNoUrn++;
-        continue;
-      }
-      if (!titleUrn.includes('title:')) {
-        skippedNoTitle++;
-        console.log('[JobTitles] Skipping non-title URN:', titleUrn);
+    for (const campaignId of activeCampaignIds) {
+      await delay(500); // Slightly longer delay between campaigns to be safe with rate limits
+      
+      const encodedCampaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`);
+      const jobTitleAnalyticsQuery = `q=analytics&pivot=MEMBER_JOB_TITLE&dateRange=(start:(year:${ninetyDaysAgo.getFullYear()},month:${ninetyDaysAgo.getMonth() + 1},day:${ninetyDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&campaigns=List(${encodedCampaignUrn})&fields=impressions,clicks,pivotValues`;
+      
+      let jobTitleAnalytics: any = { elements: [] };
+      try {
+        jobTitleAnalytics = await linkedinApiRequestWithToken(accessToken, `/adAnalytics`, {}, jobTitleAnalyticsQuery);
+      } catch (err: any) {
+        console.warn(`[JobTitles] Fetch error for campaign ${campaignId}:`, err.message);
         continue;
       }
       
-      // Get title name from URN cache or use a placeholder
-      const titleName = urnCache[titleUrn] || titleUrn.split(':').pop() || 'Unknown Title';
+      // Process and save job title analytics for this campaign
+      const jobTitleMetrics: Array<{ jobTitleUrn: string; jobTitleName: string; impressions: number; clicks: number; }> = [];
+      for (const elem of (jobTitleAnalytics.elements || [])) {
+        const titleUrn = elem.pivotValues?.[0];
+        if (!titleUrn || !titleUrn.includes('title:')) continue;
+        
+        // Get title name from URN cache or use a placeholder
+        const titleName = urnCache[titleUrn] || titleUrn.split(':').pop() || 'Unknown Title';
+        
+        jobTitleMetrics.push({
+          jobTitleUrn: titleUrn,
+          jobTitleName: titleName,
+          impressions: elem.impressions || 0,
+          clicks: elem.clicks || 0
+        });
+      }
       
-      jobTitleMetrics.push({
-        jobTitleUrn: titleUrn,
-        jobTitleName: titleName,
-        impressions: elem.impressions || 0,
-        clicks: elem.clicks || 0
-      });
+      if (jobTitleMetrics.length > 0) {
+        await saveJobTitleAnalytics(accountId, campaignId, jobTitleMetrics);
+        totalJobTitlesSaved += jobTitleMetrics.length;
+        console.log(`[JobTitles] Campaign ${campaignId}: saved ${jobTitleMetrics.length} job titles`);
+      }
     }
     
-    console.log(`[JobTitles] Processed ${jobTitleMetrics.length} job titles (skipped: ${skippedNoUrn} no URN, ${skippedNoTitle} non-title)`);
-    
-    if (jobTitleMetrics.length > 0) {
-      console.log(`[JobTitles] Saving ${jobTitleMetrics.length} job title metrics...`);
-      await saveJobTitleAnalytics(accountId, jobTitleMetrics);
-      console.log('[JobTitles] Save completed');
-    } else {
-      console.log('[JobTitles] No job title metrics to save');
-    }
+    console.log(`[JobTitles] Completed: saved ${totalJobTitlesSaved} total job title entries across ${activeCampaignIds.length} campaigns`);
     
     // Compute and save scoring status for Structure view caching
     console.log('Computing and saving scoring status...');
@@ -3361,7 +3362,7 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     await updateAuditAccountSyncStatus(accountId, 'completed');
     console.log(`=== Audit sync completed for account ${accountId} ===\n`);
     
-    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length, hourlyMetrics: hourlyMetrics.length, jobTitleMetrics: jobTitleMetrics.length };
+    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length, hourlyMetrics: hourlyMetrics.length, jobTitleMetrics: totalJobTitlesSaved };
     
   } catch (err: any) {
     console.error(`Audit sync error for account ${accountId}:`, err.message);
@@ -4792,6 +4793,19 @@ app.get('/api/audit/drilldown/job-titles-status/:accountId', requireAuth, requir
   } catch (err: any) {
     console.error('Job titles status error:', err.message);
     res.status(500).json({ error: 'Failed to check job title data' });
+  }
+});
+
+// Get list of campaigns with job title data available
+app.get('/api/audit/drilldown/job-title-campaigns/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
+  const { accountId } = req.params;
+  
+  try {
+    const campaigns = await getCampaignsWithJobTitleData(accountId);
+    res.json(campaigns);
+  } catch (err: any) {
+    console.error('Job title campaigns error:', err.message);
+    res.status(500).json({ error: 'Failed to get campaigns with job title data' });
   }
 });
 
