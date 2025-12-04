@@ -3618,53 +3618,59 @@ async function syncCompaniesData(
   
   console.log(`[Companies] Need to resolve ${companyUrnsToResolve.length} new company URNs (${allCompanyUrns.size - companyUrnsToResolve.length} already cached)`);
   
-  let skipOrgApiLookups = false;
-  
   if (companyUrnsToResolve.length > 0) {
-    for (const companyUrn of companyUrnsToResolve) {
-      const orgIdMatch = companyUrn.match(/:(\d+)$/);
-      if (!orgIdMatch) continue;
-      
-      const orgId = orgIdMatch[1];
-      
-      if (skipOrgApiLookups) {
-        resolvedCompanies[companyUrn] = { 
-          name: `Company ${orgId}`,
-          url: `https://www.linkedin.com/company/${orgId}`
-        };
-        continue;
-      }
+    // Use batch URN resolution via /adTargetingEntities (same approach as job titles)
+    const batchSize = 50;
+    let resolvedCount = 0;
+    
+    for (let i = 0; i < companyUrnsToResolve.length; i += batchSize) {
+      const batch = companyUrnsToResolve.slice(i, i + batchSize);
       
       try {
-        await delay(100);
-        const orgResponse = await linkedinApiRequestWithToken(accessToken, `/organizations/${orgId}`);
+        await delay(200);
         
-        const name = orgResponse.localizedName || orgResponse.name || `Company ${orgId}`;
-        const vanityName = orgResponse.vanityName;
-        const url = vanityName ? `https://www.linkedin.com/company/${vanityName}` : `https://www.linkedin.com/company/${orgId}`;
+        // Try batch URN lookup via adTargetingEntities
+        const encodedUrns = batch.map(urn => encodeURIComponent(urn)).join(',');
+        const response = await linkedinApiRequestWithToken(
+          accessToken, 
+          `/adTargetingEntities`,
+          {},
+          `q=urns&urns=List(${encodedUrns})`
+        );
         
-        resolvedCompanies[companyUrn] = { name, url };
-        urnCache[companyUrn] = name;
-      } catch (err: any) {
-        const status = err.response?.status;
-        
-        if (status === 403) {
-          console.log(`[Companies] Organization API access denied (403) - using Company IDs with direct URLs for all companies`);
-          skipOrgApiLookups = true;
-        } else if (status === 429) {
-          console.warn('[Companies] Rate limited on org lookup, using fallback');
+        if (response.elements) {
+          for (const entity of response.elements) {
+            const urn = entity.urn;
+            const name = entity.name || entity.displayName || entity.localizedName;
+            if (urn && name) {
+              const orgId = urn.match(/:(\d+)$/)?.[1];
+              resolvedCompanies[urn] = {
+                name,
+                url: orgId ? `https://www.linkedin.com/company/${orgId}` : undefined
+              };
+              urnCache[urn] = name;
+              resolvedCount++;
+            }
+          }
         }
-        
-        resolvedCompanies[companyUrn] = { 
-          name: `Company ${orgId}`,
-          url: `https://www.linkedin.com/company/${orgId}`
-        };
+      } catch (err: any) {
+        console.warn(`[Companies] Batch URN resolution failed for batch ${Math.floor(i/batchSize) + 1}:`, err.message);
+      }
+      
+      // For any URNs not resolved by API, use fallback
+      for (const companyUrn of batch) {
+        if (!resolvedCompanies[companyUrn]) {
+          const orgId = companyUrn.match(/:(\d+)$/)?.[1] || 'Unknown';
+          resolvedCompanies[companyUrn] = {
+            name: `Company ${orgId}`,
+            url: `https://www.linkedin.com/company/${orgId}`
+          };
+        }
       }
     }
     
-    if (skipOrgApiLookups) {
-      console.log(`[Companies] Skipped API lookups - using ${companyUrnsToResolve.length} Company IDs with LinkedIn URLs`);
-    }
+    console.log(`[Companies] Resolved ${resolvedCount} company names via API, ${companyUrnsToResolve.length - resolvedCount} using fallback IDs`);
+    saveUrnCache();
   }
   
   // Add cached companies with URLs
