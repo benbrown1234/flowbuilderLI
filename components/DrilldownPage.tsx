@@ -86,6 +86,7 @@ interface JobTitlesResponse {
 
 type SortField = 'impressions' | 'clicks' | 'ctr' | 'job_title_name';
 type SortDir = 'asc' | 'desc';
+type DateRange = '7' | '30' | '90';
 
 const METRICS = [
   { key: 'impressions', label: 'Impressions', format: (v: number) => v.toLocaleString() },
@@ -116,6 +117,7 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
   const [jobTitlesSortDir, setJobTitlesSortDir] = useState<SortDir>('desc');
   const [jobTitlesCampaigns, setJobTitlesCampaigns] = useState<Array<{ campaignId: string; campaignName: string }>>([]);
   const [selectedJobTitlesCampaign, setSelectedJobTitlesCampaign] = useState<string | undefined>(undefined);
+  const [jobTitlesDateRange, setJobTitlesDateRange] = useState<DateRange>('90');
 
   const checkAuditStatus = useCallback(async () => {
     try {
@@ -227,12 +229,12 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
     setLoading(false);
   };
 
-  const fetchJobTitles = async (page: number = 1, sortBy: SortField = 'impressions', sortDir: SortDir = 'desc', campaignId?: string) => {
+  const fetchJobTitles = async (page: number = 1, sortBy: SortField = 'impressions', sortDir: SortDir = 'desc', campaignId?: string, dateRange: DateRange = '90') => {
     setJobTitlesLoading(true);
     try {
       const campaignParam = campaignId ? `&campaignId=${campaignId}` : '';
       const response = await fetch(
-        `/api/audit/drilldown/job-titles/${accountId}?page=${page}&pageSize=25&sortBy=${sortBy}&sortDir=${sortDir}${campaignParam}`,
+        `/api/audit/drilldown/job-titles/${accountId}?page=${page}&pageSize=25&sortBy=${sortBy}&sortDir=${sortDir}&dateRange=${dateRange}${campaignParam}`,
         { credentials: 'include' }
       );
       if (response.ok) {
@@ -248,9 +250,9 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
   useEffect(() => {
     if (auditStatus?.optedIn && auditStatus?.syncStatus === 'completed' && selectedView === 'job-titles') {
       fetchJobTitlesCampaigns();
-      fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir, selectedJobTitlesCampaign);
+      fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir, selectedJobTitlesCampaign, jobTitlesDateRange);
     }
-  }, [selectedView, jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir, selectedJobTitlesCampaign, auditStatus]);
+  }, [selectedView, jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir, selectedJobTitlesCampaign, jobTitlesDateRange, auditStatus]);
 
   const handleJobTitlesSort = (field: SortField) => {
     if (field === jobTitlesSortBy) {
@@ -376,7 +378,7 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
           </div>
           
           <button
-            onClick={() => selectedView === 'hourly' ? fetchData() : fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir, selectedJobTitlesCampaign)}
+            onClick={() => selectedView === 'hourly' ? fetchData() : fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir, selectedJobTitlesCampaign, jobTitlesDateRange)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
@@ -715,30 +717,67 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
                     Job Titles Breakdown
                   </h2>
                   <p className="text-sm text-gray-500 mt-1">
-                    {selectedJobTitlesCampaign ? 'Campaign-level' : 'Account-wide'} performance metrics by job title from the last 90 days
+                    {selectedJobTitlesCampaign ? 'Campaign-level' : 'Account-wide'} performance metrics by job title from the last {jobTitlesDateRange} days
                   </p>
                 </div>
                 
-                {jobTitlesCampaigns.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <Filter className="w-4 h-4 text-gray-500" />
-                    <select
-                      value={selectedJobTitlesCampaign || ''}
-                      onChange={(e) => {
-                        setSelectedJobTitlesCampaign(e.target.value || undefined);
-                        setJobTitlesPage(1);
-                      }}
-                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                <div className="flex items-center gap-4">
+                  {/* Date Range Filter */}
+                  <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                    <button
+                      onClick={() => { setJobTitlesDateRange('7'); setJobTitlesPage(1); }}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        jobTitlesDateRange === '7' 
+                          ? 'bg-white text-purple-700 shadow-sm' 
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
                     >
-                      <option value="">All Campaigns</option>
-                      {jobTitlesCampaigns.map(campaign => (
-                        <option key={campaign.campaignId} value={campaign.campaignId}>
-                          {campaign.campaignName}
-                        </option>
-                      ))}
-                    </select>
+                      7 Days
+                    </button>
+                    <button
+                      onClick={() => { setJobTitlesDateRange('30'); setJobTitlesPage(1); }}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        jobTitlesDateRange === '30' 
+                          ? 'bg-white text-purple-700 shadow-sm' 
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      30 Days
+                    </button>
+                    <button
+                      onClick={() => { setJobTitlesDateRange('90'); setJobTitlesPage(1); }}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        jobTitlesDateRange === '90' 
+                          ? 'bg-white text-purple-700 shadow-sm' 
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      90 Days
+                    </button>
                   </div>
-                )}
+                  
+                  {/* Campaign Filter */}
+                  {jobTitlesCampaigns.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <Filter className="w-4 h-4 text-gray-500" />
+                      <select
+                        value={selectedJobTitlesCampaign || ''}
+                        onChange={(e) => {
+                          setSelectedJobTitlesCampaign(e.target.value || undefined);
+                          setJobTitlesPage(1);
+                        }}
+                        className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                      >
+                        <option value="">All Campaigns</option>
+                        {jobTitlesCampaigns.map(campaign => (
+                          <option key={campaign.campaignId} value={campaign.campaignId}>
+                            {campaign.campaignName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

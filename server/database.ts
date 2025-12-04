@@ -1406,6 +1406,7 @@ export async function getJobTitleAnalytics(
     sortBy?: 'impressions' | 'clicks' | 'ctr' | 'job_title_name';
     sortDir?: 'asc' | 'desc';
     campaignId?: string;
+    dateRange?: '7' | '30' | '90';
   } = {}
 ): Promise<{
   data: Array<{
@@ -1430,24 +1431,30 @@ export async function getJobTitleAnalytics(
   const sortDir = options.sortDir || 'desc';
   const offset = (page - 1) * pageSize;
   const campaignId = options.campaignId ? String(options.campaignId) : null;
+  const dateRange = options.dateRange || '90';
+  
+  // Calculate date cutoff based on dateRange
+  const daysAgo = parseInt(dateRange);
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysAgo);
+  const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
   
   // Build WHERE clause based on whether we're filtering by campaign
-  let whereClause = 'account_id = $1';
-  let params: any[] = [accId];
+  let whereClause = 'account_id = $1 AND sync_date >= $2';
+  let params: any[] = [accId, cutoffDateStr];
   
   if (campaignId) {
-    whereClause += ' AND campaign_id = $2';
+    whereClause += ' AND campaign_id = $3';
     params.push(campaignId);
   }
   
-  // Get latest sync date for the filtered data
-  const latestDateResult = await pool.query(
-    `SELECT MAX(sync_date) as latest_date FROM analytics_job_titles WHERE ${whereClause}`,
+  // Check if we have any data in the date range
+  const dataCheckResult = await pool.query(
+    `SELECT EXISTS(SELECT 1 FROM analytics_job_titles WHERE ${whereClause}) as has_data`,
     params
   );
-  const latestDate = latestDateResult.rows[0]?.latest_date;
   
-  if (!latestDate) {
+  if (!dataCheckResult.rows[0]?.has_data) {
     return {
       data: [],
       total: 0,
@@ -1459,9 +1466,9 @@ export async function getJobTitleAnalytics(
     };
   }
   
-  // Add sync_date to where clause and params
-  const fullWhereClause = whereClause + ` AND sync_date = $${params.length + 1}`;
-  const fullParams = [...params, latestDate];
+  // Use whereClause directly (date range filter is already included)
+  const fullWhereClause = whereClause;
+  const fullParams = params;
   
   // Validate sort column
   const validSortColumns = ['impressions', 'clicks', 'ctr', 'job_title_name'];

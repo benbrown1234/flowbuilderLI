@@ -4996,7 +4996,7 @@ app.get('/api/audit/drilldown/campaigns/:accountId', requireAuth, requireAccount
 // Get job title analytics with pagination
 app.get('/api/audit/drilldown/job-titles/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
   const { accountId } = req.params;
-  const { page, pageSize, sortBy, sortDir, campaignId } = req.query;
+  const { page, pageSize, sortBy, sortDir, campaignId, dateRange } = req.query;
   
   try {
     const data = await getJobTitleAnalytics(accountId, {
@@ -5004,7 +5004,8 @@ app.get('/api/audit/drilldown/job-titles/:accountId', requireAuth, requireAccoun
       pageSize: pageSize ? parseInt(pageSize as string) : 25,
       sortBy: (sortBy as 'impressions' | 'clicks' | 'ctr' | 'job_title_name') || 'impressions',
       sortDir: (sortDir as 'asc' | 'desc') || 'desc',
-      campaignId: campaignId as string | undefined
+      campaignId: campaignId as string | undefined,
+      dateRange: (dateRange as '7' | '30' | '90') || '90'
     });
     res.json(data);
   } catch (err: any) {
