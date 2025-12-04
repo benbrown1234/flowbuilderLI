@@ -3618,51 +3618,63 @@ async function syncCompaniesData(
   
   console.log(`[Companies] Need to resolve ${companyUrnsToResolve.length} new company URNs (${allCompanyUrns.size - companyUrnsToResolve.length} already cached)`);
   
+  let skipOrgApiLookups = false;
+  
   if (companyUrnsToResolve.length > 0) {
-    const batchSize = 50;
-    for (let i = 0; i < companyUrnsToResolve.length; i += batchSize) {
-      const batch = companyUrnsToResolve.slice(i, i + batchSize);
+    for (const companyUrn of companyUrnsToResolve) {
+      const orgIdMatch = companyUrn.match(/:(\d+)$/);
+      if (!orgIdMatch) continue;
       
-      await delay(500);
+      const orgId = orgIdMatch[1];
       
-      for (const companyUrn of batch) {
-        try {
-          // Extract organization ID from URN
-          const orgIdMatch = companyUrn.match(/:(\d+)$/);
-          if (!orgIdMatch) continue;
-          
-          const orgId = orgIdMatch[1];
-          
-          // Try to fetch organization details from LinkedIn API
-          await delay(100);
-          try {
-            const orgResponse = await linkedinApiRequestWithToken(accessToken, `/organizations/${orgId}`);
-            
-            const name = orgResponse.localizedName || orgResponse.name || `Company ${orgId}`;
-            const vanityName = orgResponse.vanityName;
-            const url = vanityName ? `https://www.linkedin.com/company/${vanityName}` : undefined;
-            
-            resolvedCompanies[companyUrn] = { name, url };
-            urnCache[companyUrn] = name;
-          } catch (err: any) {
-            if (err.response?.status === 429) {
-              console.warn('[Companies] Rate limited on org lookup, using fallback');
-              resolvedCompanies[companyUrn] = { name: `Company ${orgId}` };
-            } else {
-              resolvedCompanies[companyUrn] = { name: `Company ${orgId}` };
-            }
-          }
-        } catch (err: any) {
-          // Silently continue on individual lookup failures
-        }
+      if (skipOrgApiLookups) {
+        resolvedCompanies[companyUrn] = { 
+          name: `Company ${orgId}`,
+          url: `https://www.linkedin.com/company/${orgId}`
+        };
+        continue;
       }
+      
+      try {
+        await delay(100);
+        const orgResponse = await linkedinApiRequestWithToken(accessToken, `/organizations/${orgId}`);
+        
+        const name = orgResponse.localizedName || orgResponse.name || `Company ${orgId}`;
+        const vanityName = orgResponse.vanityName;
+        const url = vanityName ? `https://www.linkedin.com/company/${vanityName}` : `https://www.linkedin.com/company/${orgId}`;
+        
+        resolvedCompanies[companyUrn] = { name, url };
+        urnCache[companyUrn] = name;
+      } catch (err: any) {
+        const status = err.response?.status;
+        
+        if (status === 403) {
+          console.log(`[Companies] Organization API access denied (403) - using Company IDs with direct URLs for all companies`);
+          skipOrgApiLookups = true;
+        } else if (status === 429) {
+          console.warn('[Companies] Rate limited on org lookup, using fallback');
+        }
+        
+        resolvedCompanies[companyUrn] = { 
+          name: `Company ${orgId}`,
+          url: `https://www.linkedin.com/company/${orgId}`
+        };
+      }
+    }
+    
+    if (skipOrgApiLookups) {
+      console.log(`[Companies] Skipped API lookups - using ${companyUrnsToResolve.length} Company IDs with LinkedIn URLs`);
     }
   }
   
-  // Add cached companies
+  // Add cached companies with URLs
   for (const urn of allCompanyUrns) {
     if (urnCache[urn] && !resolvedCompanies[urn]) {
-      resolvedCompanies[urn] = { name: urnCache[urn] };
+      const orgId = urn.match(/:(\d+)$/)?.[1];
+      resolvedCompanies[urn] = { 
+        name: urnCache[urn],
+        url: orgId ? `https://www.linkedin.com/company/${orgId}` : undefined
+      };
     }
   }
   
@@ -3674,17 +3686,15 @@ async function syncCompaniesData(
     for (const item of periodData) {
       if (!companiesByCampaign[item.campaignId]) companiesByCampaign[item.campaignId] = [];
       
-      let companyName = 'Unknown Company';
-      let companyUrl: string | undefined;
+      const orgId = item.companyUrn.match(/:(\d+)$/)?.[1] || 'Unknown';
+      let companyName = `Company ${orgId}`;
+      let companyUrl: string | undefined = `https://www.linkedin.com/company/${orgId}`;
       
       if (resolvedCompanies[item.companyUrn]) {
         companyName = resolvedCompanies[item.companyUrn].name;
-        companyUrl = resolvedCompanies[item.companyUrn].url;
+        companyUrl = resolvedCompanies[item.companyUrn].url || companyUrl;
       } else if (urnCache[item.companyUrn]) {
         companyName = urnCache[item.companyUrn];
-      } else {
-        const orgId = item.companyUrn.match(/:(\d+)$/)?.[1] || 'Unknown';
-        companyName = `Company ${orgId}`;
       }
       
       companiesByCampaign[item.campaignId].push({
