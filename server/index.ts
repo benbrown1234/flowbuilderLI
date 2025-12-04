@@ -3969,6 +3969,10 @@ app.get('/api/audit/drilldown-status/:accountId', requireAuth, requireAccountAcc
       companies: {
         lastSyncAt: status.companies_sync_at,
         status: status.companies_sync_status || 'pending'
+      },
+      seniorities: {
+        lastSyncAt: status.seniorities_sync_at,
+        status: status.seniorities_sync_status || 'pending'
       }
     });
   } catch (err: any) {
@@ -3983,9 +3987,9 @@ app.post('/api/audit/drilldown/sync/:accountId/:dataType', requireAuth, requireA
   
   console.log(`[Drilldown] POST /api/audit/drilldown/sync/${accountId}/${dataType} - Request received`);
   
-  if (!['hourly', 'job_titles', 'companies'].includes(dataType)) {
+  if (!['hourly', 'job_titles', 'companies', 'seniorities'].includes(dataType)) {
     console.log(`[Drilldown] Invalid dataType: ${dataType}`);
-    return res.status(400).json({ error: 'Invalid data type. Must be hourly, job_titles, or companies' });
+    return res.status(400).json({ error: 'Invalid data type. Must be hourly, job_titles, companies, or seniorities' });
   }
   
   const session = (req as any).session as Session;
@@ -4007,7 +4011,7 @@ app.post('/api/audit/drilldown/sync/:accountId/:dataType', requireAuth, requireA
     
     // Update status to syncing
     console.log(`[Drilldown] Updating status to syncing for ${dataType}...`);
-    await updateDrilldownSyncStatus(accountId, dataType as 'hourly' | 'job_titles' | 'companies', 'syncing');
+    await updateDrilldownSyncStatus(accountId, dataType as 'hourly' | 'job_titles' | 'companies' | 'seniorities', 'syncing');
     
     // Queue sync BEFORE sending response
     syncQueued = true;
@@ -4018,12 +4022,12 @@ app.post('/api/audit/drilldown/sync/:accountId/:dataType', requireAuth, requireA
       console.log(`[Drilldown] setImmediate callback fired for ${dataType} sync`);
       try {
         console.log(`[Drilldown] ${dataType} sync starting for ${accountId}...`);
-        await runDrilldownSync(accessToken, accountId, dataType as 'hourly' | 'job_titles' | 'companies');
+        await runDrilldownSync(accessToken, accountId, dataType as 'hourly' | 'job_titles' | 'companies' | 'seniorities');
         console.log(`[Drilldown] ${dataType} sync completed for ${accountId}`);
       } catch (err: any) {
         console.error(`[Drilldown] ${dataType} sync error for ${accountId}:`, err.message, err.stack);
         try {
-          await updateDrilldownSyncStatus(accountId, dataType as 'hourly' | 'job_titles' | 'companies', 'error');
+          await updateDrilldownSyncStatus(accountId, dataType as 'hourly' | 'job_titles' | 'companies' | 'seniorities', 'error');
         } catch (statusErr: any) {
           console.error(`[Drilldown] Failed to update error status:`, statusErr.message);
         }

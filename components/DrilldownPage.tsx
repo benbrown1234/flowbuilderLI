@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, Filter, Clock, TrendingDown, AlertTriangle, Calendar, RefreshCw, BarChart3, Loader2, Play, ClipboardCheck, Users, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, Building2, ExternalLink } from 'lucide-react';
+import { ChevronLeft, Filter, Clock, TrendingDown, AlertTriangle, Calendar, RefreshCw, BarChart3, Loader2, Play, ClipboardCheck, Users, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, Building2, ExternalLink, Briefcase } from 'lucide-react';
 
-type DrilldownView = 'hourly' | 'job-titles' | 'companies';
+type DrilldownView = 'hourly' | 'job-titles' | 'companies' | 'seniorities';
 
 interface DrilldownPageProps {
   accountId: string;
@@ -104,8 +104,28 @@ interface CompaniesResponse {
   hasNext: boolean;
 }
 
+interface SeniorityData {
+  seniorityUrn: string;
+  seniorityName: string;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+  syncDate: string;
+}
+
+interface SenioritiesResponse {
+  data: SeniorityData[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+}
+
 type SortField = 'impressions' | 'clicks' | 'ctr' | 'job_title_name';
 type CompanySortField = 'impressions' | 'clicks' | 'engagement_rate' | 'company_name';
+type SenioritySortField = 'impressions' | 'clicks' | 'ctr' | 'seniority_name';
 type SortDir = 'asc' | 'desc';
 type DateRange = '7' | '30' | '90';
 
@@ -113,6 +133,7 @@ interface DrilldownSyncStatus {
   hourly: { lastSyncAt: string | null; status: 'pending' | 'syncing' | 'completed' | 'error' };
   jobTitles: { lastSyncAt: string | null; status: 'pending' | 'syncing' | 'completed' | 'error' };
   companies: { lastSyncAt: string | null; status: 'pending' | 'syncing' | 'completed' | 'error' };
+  seniorities: { lastSyncAt: string | null; status: 'pending' | 'syncing' | 'completed' | 'error' };
 }
 
 const METRICS = [
@@ -155,8 +176,17 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
   const [selectedCompaniesCampaign, setSelectedCompaniesCampaign] = useState<string | undefined>(undefined);
   const [companiesDateRange, setCompaniesDateRange] = useState<DateRange>('90');
   
+  const [senioritiesData, setSenioritiesData] = useState<SenioritiesResponse | null>(null);
+  const [senioritiesLoading, setSenioritiesLoading] = useState(false);
+  const [senioritiesPage, setSenioritiesPage] = useState(1);
+  const [senioritiesSortBy, setSenioritiesSortBy] = useState<SenioritySortField>('impressions');
+  const [senioritiesSortDir, setSenioritiesSortDir] = useState<SortDir>('desc');
+  const [senioritiesCampaigns, setSenioritiesCampaigns] = useState<Array<{ campaignId: string; campaignName: string }>>([]);
+  const [selectedSenioritiesCampaign, setSelectedSenioritiesCampaign] = useState<string | undefined>(undefined);
+  const [senioritiesDateRange, setSenioritiesDateRange] = useState<DateRange>('90');
+  
   const [drilldownSyncStatus, setDrilldownSyncStatus] = useState<DrilldownSyncStatus | null>(null);
-  const [syncingType, setSyncingType] = useState<'hourly' | 'job_titles' | 'companies' | null>(null);
+  const [syncingType, setSyncingType] = useState<'hourly' | 'job_titles' | 'companies' | 'seniorities' | null>(null);
 
   const fetchDrilldownSyncStatus = useCallback(async () => {
     try {
@@ -174,7 +204,7 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
     return null;
   }, [accountId]);
 
-  const triggerDrilldownSync = async (dataType: 'hourly' | 'job_titles' | 'companies') => {
+  const triggerDrilldownSync = async (dataType: 'hourly' | 'job_titles' | 'companies' | 'seniorities') => {
     setSyncingType(dataType);
     try {
       const response = await fetch(`/api/audit/drilldown/sync/${accountId}/${dataType}`, {
@@ -191,12 +221,13 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
     }
   };
 
-  const startPollingSync = (dataType: 'hourly' | 'job_titles' | 'companies') => {
+  const startPollingSync = (dataType: 'hourly' | 'job_titles' | 'companies' | 'seniorities') => {
     const pollInterval = setInterval(async () => {
       const status = await fetchDrilldownSyncStatus();
       const syncStatus = dataType === 'hourly' ? status?.hourly?.status :
                          dataType === 'job_titles' ? status?.jobTitles?.status :
-                         status?.companies?.status;
+                         dataType === 'companies' ? status?.companies?.status :
+                         status?.seniorities?.status;
       
       if (syncStatus === 'completed' || syncStatus === 'error') {
         clearInterval(pollInterval);
@@ -212,6 +243,9 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
           } else if (dataType === 'companies') {
             fetchCompaniesCampaigns();
             fetchCompanies(1, companiesSortBy, companiesSortDir, selectedCompaniesCampaign, companiesDateRange);
+          } else if (dataType === 'seniorities') {
+            fetchSenioritiesCampaigns();
+            fetchSeniorities(1, senioritiesSortBy, senioritiesSortDir, selectedSenioritiesCampaign, senioritiesDateRange);
           }
         }
       }
@@ -435,6 +469,55 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
     setCompaniesPage(1);
   };
 
+  const fetchSenioritiesCampaigns = async () => {
+    try {
+      const response = await fetch(`/api/audit/drilldown/seniority-campaigns/${accountId}`, {
+        credentials: 'include'
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setSenioritiesCampaigns(data);
+      }
+    } catch (error) {
+      console.error('Error fetching seniorities campaigns:', error);
+    }
+  };
+
+  const fetchSeniorities = async (page: number = 1, sortBy: SenioritySortField = 'impressions', sortDir: SortDir = 'desc', campaignId?: string, dateRange: DateRange = '90') => {
+    setSenioritiesLoading(true);
+    try {
+      const campaignParam = campaignId ? `&campaignId=${campaignId}` : '';
+      const response = await fetch(
+        `/api/audit/drilldown/seniorities/${accountId}?page=${page}&pageSize=25&sortBy=${sortBy}&sortDir=${sortDir}&dateRange=${dateRange}${campaignParam}`,
+        { credentials: 'include' }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setSenioritiesData(data);
+      }
+    } catch (error) {
+      console.error('Error fetching seniorities:', error);
+    }
+    setSenioritiesLoading(false);
+  };
+
+  useEffect(() => {
+    if (auditStatus?.optedIn && auditStatus?.syncStatus === 'completed' && selectedView === 'seniorities') {
+      fetchSenioritiesCampaigns();
+      fetchSeniorities(senioritiesPage, senioritiesSortBy, senioritiesSortDir, selectedSenioritiesCampaign, senioritiesDateRange);
+    }
+  }, [selectedView, senioritiesPage, senioritiesSortBy, senioritiesSortDir, selectedSenioritiesCampaign, senioritiesDateRange, auditStatus]);
+
+  const handleSenioritiesSort = (field: SenioritySortField) => {
+    if (field === senioritiesSortBy) {
+      setSenioritiesSortDir(prev => prev === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSenioritiesSortBy(field);
+      setSenioritiesSortDir('desc');
+    }
+    setSenioritiesPage(1);
+  };
+
   const getColorForValue = (value: number, maxValue: number, metric: string) => {
     if (value === 0 || !maxValue) return 'bg-gray-100';
     const intensity = Math.min(value / maxValue, 1);
@@ -556,6 +639,8 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
                 fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir, selectedJobTitlesCampaign, jobTitlesDateRange);
               } else if (selectedView === 'companies') {
                 fetchCompanies(companiesPage, companiesSortBy, companiesSortDir, selectedCompaniesCampaign, companiesDateRange);
+              } else if (selectedView === 'seniorities') {
+                fetchSeniorities(senioritiesPage, senioritiesSortBy, senioritiesSortDir, selectedSenioritiesCampaign, senioritiesDateRange);
               }
             }}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -1343,6 +1428,227 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
                       <button
                         onClick={() => setCompaniesPage(prev => prev + 1)}
                         disabled={companiesPage >= Math.ceil(companiesData.total / 25)}
+                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {selectedView === 'seniorities' && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+            <div className="p-4 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <Briefcase className="w-5 h-5 text-indigo-600" />
+                    Seniority Breakdown
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {selectedSenioritiesCampaign ? 'Campaign-level' : 'Account-wide'} performance metrics by seniority from the last {senioritiesDateRange} days
+                  </p>
+                </div>
+                
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                    <button
+                      onClick={() => { setSenioritiesDateRange('7'); setSenioritiesPage(1); }}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        senioritiesDateRange === '7' 
+                          ? 'bg-white text-indigo-700 shadow-sm' 
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      7 Days
+                    </button>
+                    <button
+                      onClick={() => { setSenioritiesDateRange('30'); setSenioritiesPage(1); }}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        senioritiesDateRange === '30' 
+                          ? 'bg-white text-indigo-700 shadow-sm' 
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      30 Days
+                    </button>
+                    <button
+                      onClick={() => { setSenioritiesDateRange('90'); setSenioritiesPage(1); }}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        senioritiesDateRange === '90' 
+                          ? 'bg-white text-indigo-700 shadow-sm' 
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      90 Days
+                    </button>
+                  </div>
+                  
+                  {senioritiesCampaigns.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <Filter className="w-4 h-4 text-gray-500" />
+                      <select
+                        value={selectedSenioritiesCampaign || ''}
+                        onChange={(e) => {
+                          setSelectedSenioritiesCampaign(e.target.value || undefined);
+                          setSenioritiesPage(1);
+                        }}
+                        className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      >
+                        <option value="">All Campaigns</option>
+                        {senioritiesCampaigns.map(campaign => (
+                          <option key={campaign.campaignId} value={campaign.campaignId}>
+                            {campaign.campaignName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  
+                  <div className="flex items-center gap-2 text-sm border-l border-gray-200 pl-4">
+                    <span className="text-gray-400">
+                      {formatSyncTime(drilldownSyncStatus?.seniorities?.lastSyncAt || null)}
+                    </span>
+                    <button
+                      onClick={() => triggerDrilldownSync('seniorities')}
+                      disabled={syncingType === 'seniorities'}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        syncingType === 'seniorities'
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'
+                      }`}
+                    >
+                      {syncingType === 'seniorities' ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Syncing...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          Sync Seniorities
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {senioritiesLoading ? (
+              <div className="p-12 text-center">
+                <div className="animate-spin w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full mx-auto mb-4" />
+                <p className="text-gray-500">Loading seniority data...</p>
+              </div>
+            ) : !senioritiesData || senioritiesData.data.length === 0 ? (
+              <div className="p-12 text-center">
+                <Briefcase className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-500 text-lg font-medium">No seniority data available</p>
+                <p className="text-gray-400 text-sm mt-2 max-w-md mx-auto">
+                  Seniority data is collected during the audit sync. Run an audit refresh to collect this data.
+                </p>
+              </div>
+            ) : (
+              <div className="p-6">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th 
+                          className="text-left py-3 px-4 font-medium text-gray-600 cursor-pointer hover:text-gray-900"
+                          onClick={() => handleSenioritiesSort('seniority_name')}
+                        >
+                          <span className="flex items-center gap-1">
+                            Seniority Level
+                            {senioritiesSortBy === 'seniority_name' && (
+                              <span>{senioritiesSortDir === 'desc' ? '↓' : '↑'}</span>
+                            )}
+                          </span>
+                        </th>
+                        <th 
+                          className="text-right py-3 px-4 font-medium text-gray-600 cursor-pointer hover:text-gray-900"
+                          onClick={() => handleSenioritiesSort('impressions')}
+                        >
+                          <span className="flex items-center justify-end gap-1">
+                            Impressions
+                            {senioritiesSortBy === 'impressions' && (
+                              <span>{senioritiesSortDir === 'desc' ? '↓' : '↑'}</span>
+                            )}
+                          </span>
+                        </th>
+                        <th 
+                          className="text-right py-3 px-4 font-medium text-gray-600 cursor-pointer hover:text-gray-900"
+                          onClick={() => handleSenioritiesSort('clicks')}
+                        >
+                          <span className="flex items-center justify-end gap-1">
+                            Clicks
+                            {senioritiesSortBy === 'clicks' && (
+                              <span>{senioritiesSortDir === 'desc' ? '↓' : '↑'}</span>
+                            )}
+                          </span>
+                        </th>
+                        <th 
+                          className="text-right py-3 px-4 font-medium text-gray-600 cursor-pointer hover:text-gray-900"
+                          onClick={() => handleSenioritiesSort('ctr')}
+                        >
+                          <span className="flex items-center justify-end gap-1">
+                            CTR
+                            {senioritiesSortBy === 'ctr' && (
+                              <span>{senioritiesSortDir === 'desc' ? '↓' : '↑'}</span>
+                            )}
+                          </span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {senioritiesData.data.map((item, idx) => (
+                        <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="py-3 px-4">
+                            <span className="font-medium text-gray-900">{item.seniorityName}</span>
+                          </td>
+                          <td className="py-3 px-4 text-right text-gray-700">
+                            {item.impressions.toLocaleString()}
+                          </td>
+                          <td className="py-3 px-4 text-right text-gray-700">
+                            {item.clicks.toLocaleString()}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <span className={`font-medium ${
+                              item.ctr >= 0.5 ? 'text-green-600' : 
+                              item.ctr >= 0.3 ? 'text-amber-600' : 'text-gray-600'
+                            }`}>
+                              {item.ctr.toFixed(2)}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {senioritiesData.total > 25 && (
+                  <div className="mt-4 flex items-center justify-between">
+                    <div className="text-sm text-gray-500">
+                      Showing {((senioritiesPage - 1) * 25) + 1} - {Math.min(senioritiesPage * 25, senioritiesData.total)} of {senioritiesData.total} seniorities
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setSenioritiesPage(prev => Math.max(1, prev - 1))}
+                        disabled={senioritiesPage === 1}
+                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                      >
+                        Previous
+                      </button>
+                      <span className="text-sm text-gray-600">
+                        Page {senioritiesPage} of {Math.ceil(senioritiesData.total / 25)}
+                      </span>
+                      <button
+                        onClick={() => setSenioritiesPage(prev => prev + 1)}
+                        disabled={senioritiesPage >= Math.ceil(senioritiesData.total / 25)}
                         className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
                       >
                         Next
