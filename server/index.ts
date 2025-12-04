@@ -3824,7 +3824,10 @@ app.get('/api/audit/drilldown-status/:accountId', requireAuth, requireAccountAcc
 app.post('/api/audit/drilldown/sync/:accountId/:dataType', requireAuth, requireAccountAccess, async (req, res) => {
   const { accountId, dataType } = req.params;
   
+  console.log(`[Drilldown] POST /api/audit/drilldown/sync/${accountId}/${dataType} - Request received`);
+  
   if (!['hourly', 'job_titles', 'companies'].includes(dataType)) {
+    console.log(`[Drilldown] Invalid dataType: ${dataType}`);
     return res.status(400).json({ error: 'Invalid data type. Must be hourly, job_titles, or companies' });
   }
   
@@ -3832,37 +3835,51 @@ app.post('/api/audit/drilldown/sync/:accountId/:dataType', requireAuth, requireA
   const accessToken = session.accessToken;
   
   if (!accessToken) {
+    console.log(`[Drilldown] No access token for ${dataType} sync`);
     return res.status(401).json({ error: 'Not authenticated' });
   }
+  
+  let syncQueued = false;
   
   try {
     const auditAccount = await getAuditAccount(accountId);
     if (!auditAccount) {
+      console.log(`[Drilldown] Account ${accountId} not opted into audit`);
       return res.status(400).json({ error: 'Account not opted into audit' });
     }
     
     // Update status to syncing
+    console.log(`[Drilldown] Updating status to syncing for ${dataType}...`);
     await updateDrilldownSyncStatus(accountId, dataType as 'hourly' | 'job_titles' | 'companies', 'syncing');
     
-    res.json({ status: 'started', message: `${dataType} sync started` });
+    // Queue sync BEFORE sending response
+    syncQueued = true;
+    console.log(`[Drilldown] Queueing ${dataType} sync for account ${accountId} (before response)...`);
+    
+    // Use setImmediate for better async handling
+    setImmediate(async () => {
+      console.log(`[Drilldown] setImmediate callback fired for ${dataType} sync`);
+      try {
+        console.log(`[Drilldown] ${dataType} sync starting for ${accountId}...`);
+        await runDrilldownSync(accessToken, accountId, dataType as 'hourly' | 'job_titles' | 'companies');
+        console.log(`[Drilldown] ${dataType} sync completed for ${accountId}`);
+      } catch (err: any) {
+        console.error(`[Drilldown] ${dataType} sync error for ${accountId}:`, err.message, err.stack);
+        try {
+          await updateDrilldownSyncStatus(accountId, dataType as 'hourly' | 'job_titles' | 'companies', 'error');
+        } catch (statusErr: any) {
+          console.error(`[Drilldown] Failed to update error status:`, statusErr.message);
+        }
+      }
+    });
+    
+    console.log(`[Drilldown] Sending response for ${dataType} sync...`);
+    return res.json({ status: 'started', message: `${dataType} sync started` });
     
   } catch (err: any) {
-    console.error(`[Drilldown] ${dataType} sync error:`, err.message);
+    console.error(`[Drilldown] ${dataType} sync setup error:`, err.message, err.stack);
     return res.status(500).json({ error: `Failed to start ${dataType} sync` });
   }
-  
-  // Run sync after response
-  console.log(`[Drilldown] Queuing ${dataType} sync for account ${accountId}...`);
-  process.nextTick(async () => {
-    try {
-      console.log(`[Drilldown] ${dataType} sync starting for ${accountId}...`);
-      await runDrilldownSync(accessToken, accountId, dataType as 'hourly' | 'job_titles' | 'companies');
-      console.log(`[Drilldown] ${dataType} sync completed for ${accountId}`);
-    } catch (err: any) {
-      console.error(`[Drilldown] ${dataType} sync error for ${accountId}:`, err.message);
-      await updateDrilldownSyncStatus(accountId, dataType as 'hourly' | 'job_titles' | 'companies', 'error');
-    }
-  });
 });
 
 // Get stored audit analytics data
