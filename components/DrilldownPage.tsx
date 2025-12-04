@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, Filter, Clock, TrendingDown, AlertTriangle, Calendar, RefreshCw, BarChart3, Loader2, Play, ClipboardCheck, Users, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { ChevronLeft, Filter, Clock, TrendingDown, AlertTriangle, Calendar, RefreshCw, BarChart3, Loader2, Play, ClipboardCheck, Users, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, Building2, ExternalLink } from 'lucide-react';
 
-type DrilldownView = 'hourly' | 'job-titles';
+type DrilldownView = 'hourly' | 'job-titles' | 'companies';
 
 interface DrilldownPageProps {
   accountId: string;
@@ -84,7 +84,28 @@ interface JobTitlesResponse {
   hasNext: boolean;
 }
 
+interface CompanyData {
+  companyUrn: string;
+  companyName: string;
+  companyUrl: string | null;
+  impressions: number;
+  clicks: number;
+  engagementRate: number;
+  syncDate: string;
+}
+
+interface CompaniesResponse {
+  data: CompanyData[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+}
+
 type SortField = 'impressions' | 'clicks' | 'ctr' | 'job_title_name';
+type CompanySortField = 'impressions' | 'clicks' | 'engagement_rate' | 'company_name';
 type SortDir = 'asc' | 'desc';
 type DateRange = '7' | '30' | '90';
 
@@ -118,6 +139,15 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
   const [jobTitlesCampaigns, setJobTitlesCampaigns] = useState<Array<{ campaignId: string; campaignName: string }>>([]);
   const [selectedJobTitlesCampaign, setSelectedJobTitlesCampaign] = useState<string | undefined>(undefined);
   const [jobTitlesDateRange, setJobTitlesDateRange] = useState<DateRange>('90');
+  
+  const [companiesData, setCompaniesData] = useState<CompaniesResponse | null>(null);
+  const [companiesLoading, setCompaniesLoading] = useState(false);
+  const [companiesPage, setCompaniesPage] = useState(1);
+  const [companiesSortBy, setCompaniesSortBy] = useState<CompanySortField>('impressions');
+  const [companiesSortDir, setCompaniesSortDir] = useState<SortDir>('desc');
+  const [companiesCampaigns, setCompaniesCampaigns] = useState<Array<{ campaignId: string; campaignName: string }>>([]);
+  const [selectedCompaniesCampaign, setSelectedCompaniesCampaign] = useState<string | undefined>(undefined);
+  const [companiesDateRange, setCompaniesDateRange] = useState<DateRange>('90');
 
   const checkAuditStatus = useCallback(async () => {
     try {
@@ -264,6 +294,55 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
     setJobTitlesPage(1);
   };
 
+  const fetchCompaniesCampaigns = async () => {
+    try {
+      const response = await fetch(`/api/audit/drilldown/company-campaigns/${accountId}`, {
+        credentials: 'include'
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setCompaniesCampaigns(data);
+      }
+    } catch (error) {
+      console.error('Error fetching companies campaigns:', error);
+    }
+  };
+
+  const fetchCompanies = async (page: number = 1, sortBy: CompanySortField = 'impressions', sortDir: SortDir = 'desc', campaignId?: string, dateRange: DateRange = '90') => {
+    setCompaniesLoading(true);
+    try {
+      const campaignParam = campaignId ? `&campaignId=${campaignId}` : '';
+      const response = await fetch(
+        `/api/audit/drilldown/companies/${accountId}?page=${page}&pageSize=25&sortBy=${sortBy}&sortDir=${sortDir}&dateRange=${dateRange}${campaignParam}`,
+        { credentials: 'include' }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setCompaniesData(data);
+      }
+    } catch (error) {
+      console.error('Error fetching companies:', error);
+    }
+    setCompaniesLoading(false);
+  };
+
+  useEffect(() => {
+    if (auditStatus?.optedIn && auditStatus?.syncStatus === 'completed' && selectedView === 'companies') {
+      fetchCompaniesCampaigns();
+      fetchCompanies(companiesPage, companiesSortBy, companiesSortDir, selectedCompaniesCampaign, companiesDateRange);
+    }
+  }, [selectedView, companiesPage, companiesSortBy, companiesSortDir, selectedCompaniesCampaign, companiesDateRange, auditStatus]);
+
+  const handleCompaniesSort = (field: CompanySortField) => {
+    if (field === companiesSortBy) {
+      setCompaniesSortDir(prev => prev === 'desc' ? 'asc' : 'desc');
+    } else {
+      setCompaniesSortBy(field);
+      setCompaniesSortDir('desc');
+    }
+    setCompaniesPage(1);
+  };
+
   const getColorForValue = (value: number, maxValue: number, metric: string) => {
     if (value === 0 || !maxValue) return 'bg-gray-100';
     const intensity = Math.min(value / maxValue, 1);
@@ -378,7 +457,15 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
           </div>
           
           <button
-            onClick={() => selectedView === 'hourly' ? fetchData() : fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir, selectedJobTitlesCampaign, jobTitlesDateRange)}
+            onClick={() => {
+              if (selectedView === 'hourly') {
+                fetchData();
+              } else if (selectedView === 'job-titles') {
+                fetchJobTitles(jobTitlesPage, jobTitlesSortBy, jobTitlesSortDir, selectedJobTitlesCampaign, jobTitlesDateRange);
+              } else if (selectedView === 'companies') {
+                fetchCompanies(companiesPage, companiesSortBy, companiesSortDir, selectedCompaniesCampaign, companiesDateRange);
+              }
+            }}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
@@ -881,6 +968,205 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
                       <button
                         onClick={() => setJobTitlesPage(prev => prev + 1)}
                         disabled={jobTitlesPage >= Math.ceil(jobTitlesData.total / 25)}
+                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {selectedView === 'companies' && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200">
+            <div className="p-4 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <Building2 className="w-5 h-5 text-orange-600" />
+                    Companies Breakdown
+                  </h2>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {selectedCompaniesCampaign ? 'Campaign-level' : 'Account-wide'} performance metrics by company from the last {companiesDateRange} days
+                  </p>
+                </div>
+                
+                <div className="flex items-center gap-4">
+                  {/* Date Range Filter */}
+                  <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+                    <button
+                      onClick={() => { setCompaniesDateRange('7'); setCompaniesPage(1); }}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        companiesDateRange === '7' 
+                          ? 'bg-white text-orange-700 shadow-sm' 
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      7 Days
+                    </button>
+                    <button
+                      onClick={() => { setCompaniesDateRange('30'); setCompaniesPage(1); }}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        companiesDateRange === '30' 
+                          ? 'bg-white text-orange-700 shadow-sm' 
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      30 Days
+                    </button>
+                    <button
+                      onClick={() => { setCompaniesDateRange('90'); setCompaniesPage(1); }}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                        companiesDateRange === '90' 
+                          ? 'bg-white text-orange-700 shadow-sm' 
+                          : 'text-gray-600 hover:text-gray-900'
+                      }`}
+                    >
+                      90 Days
+                    </button>
+                  </div>
+                  
+                  {/* Campaign Filter */}
+                  {companiesCampaigns.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <Filter className="w-4 h-4 text-gray-500" />
+                      <select
+                        value={selectedCompaniesCampaign || ''}
+                        onChange={(e) => {
+                          setSelectedCompaniesCampaign(e.target.value || undefined);
+                          setCompaniesPage(1);
+                        }}
+                        className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                      >
+                        <option value="">All Campaigns</option>
+                        {companiesCampaigns.map(campaign => (
+                          <option key={campaign.campaignId} value={campaign.campaignId}>
+                            {campaign.campaignName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {companiesLoading ? (
+              <div className="p-12 text-center">
+                <div className="animate-spin w-8 h-8 border-4 border-orange-600 border-t-transparent rounded-full mx-auto mb-4" />
+                <p className="text-gray-500">Loading companies data...</p>
+              </div>
+            ) : !companiesData || companiesData.data.length === 0 ? (
+              <div className="p-12 text-center">
+                <Building2 className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-500 text-lg font-medium">No companies data available</p>
+                <p className="text-gray-400 text-sm mt-2 max-w-md mx-auto">
+                  Companies data is collected during the audit sync. Run an audit refresh to collect this data.
+                </p>
+              </div>
+            ) : (
+              <div className="p-6">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className="text-left py-3 px-4 font-medium text-gray-600">Company</th>
+                        <th 
+                          className="text-right py-3 px-4 font-medium text-gray-600 cursor-pointer hover:text-gray-900"
+                          onClick={() => handleCompaniesSort('impressions')}
+                        >
+                          <span className="flex items-center justify-end gap-1">
+                            Impressions
+                            {companiesSortBy === 'impressions' && (
+                              <span>{companiesSortDir === 'desc' ? '↓' : '↑'}</span>
+                            )}
+                          </span>
+                        </th>
+                        <th 
+                          className="text-right py-3 px-4 font-medium text-gray-600 cursor-pointer hover:text-gray-900"
+                          onClick={() => handleCompaniesSort('clicks')}
+                        >
+                          <span className="flex items-center justify-end gap-1">
+                            Clicks
+                            {companiesSortBy === 'clicks' && (
+                              <span>{companiesSortDir === 'desc' ? '↓' : '↑'}</span>
+                            )}
+                          </span>
+                        </th>
+                        <th 
+                          className="text-right py-3 px-4 font-medium text-gray-600 cursor-pointer hover:text-gray-900"
+                          onClick={() => handleCompaniesSort('engagement_rate')}
+                        >
+                          <span className="flex items-center justify-end gap-1">
+                            Eng. Rate
+                            {companiesSortBy === 'engagement_rate' && (
+                              <span>{companiesSortDir === 'desc' ? '↓' : '↑'}</span>
+                            )}
+                          </span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {companiesData.data.map((item, idx) => (
+                        <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-gray-900">{item.companyName}</span>
+                              {item.companyUrl && (
+                                <a 
+                                  href={item.companyUrl} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="text-orange-600 hover:text-orange-700"
+                                  title="View on LinkedIn"
+                                >
+                                  <ExternalLink className="w-4 h-4" />
+                                </a>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 text-right text-gray-700">
+                            {item.impressions.toLocaleString()}
+                          </td>
+                          <td className="py-3 px-4 text-right text-gray-700">
+                            {item.clicks.toLocaleString()}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <span className={`font-medium ${
+                              item.engagementRate >= 0.5 ? 'text-green-600' : 
+                              item.engagementRate >= 0.3 ? 'text-amber-600' : 'text-gray-600'
+                            }`}>
+                              {item.engagementRate.toFixed(2)}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {companiesData.total > 25 && (
+                  <div className="mt-4 flex items-center justify-between">
+                    <div className="text-sm text-gray-500">
+                      Showing {((companiesPage - 1) * 25) + 1} - {Math.min(companiesPage * 25, companiesData.total)} of {companiesData.total} companies
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setCompaniesPage(prev => Math.max(1, prev - 1))}
+                        disabled={companiesPage === 1}
+                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                      >
+                        Previous
+                      </button>
+                      <span className="text-sm text-gray-600">
+                        Page {companiesPage} of {Math.ceil(companiesData.total / 25)}
+                      </span>
+                      <button
+                        onClick={() => setCompaniesPage(prev => prev + 1)}
+                        disabled={companiesPage >= Math.ceil(companiesData.total / 25)}
                         className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
                       >
                         Next
