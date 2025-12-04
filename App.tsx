@@ -585,7 +585,6 @@ const App: React.FC = () => {
               onBack={() => setViewMode('AUDIT')}
               onNavigateToAudit={() => setViewMode('AUDIT')}
               subView={drilldownSubView}
-              onSubViewChange={setDrilldownSubView}
             />
           ) : viewMode === 'AUDIT' ? (
             <AuditPage 

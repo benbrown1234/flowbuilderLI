@@ -9,7 +9,6 @@ interface DrilldownPageProps {
   onBack: () => void;
   onNavigateToAudit?: () => void;
   subView?: DrilldownView;
-  onSubViewChange?: (view: DrilldownView) => void;
 }
 
 interface AuditAccountStatus {
@@ -98,9 +97,8 @@ const METRICS = [
   { key: 'conversions', label: 'Conversions', format: (v: number) => v.toLocaleString() },
 ];
 
-export default function DrilldownPage({ accountId, accountName, onBack, onNavigateToAudit, subView = 'hourly', onSubViewChange }: DrilldownPageProps) {
+export default function DrilldownPage({ accountId, accountName, onBack, onNavigateToAudit, subView = 'hourly' }: DrilldownPageProps) {
   const selectedView = subView;
-  const setSelectedView = onSubViewChange || (() => {});
   const [selectedMetric, setSelectedMetric] = useState('impressions');
   const [selectedCampaign, setSelectedCampaign] = useState<string | undefined>(undefined);
   const [campaigns, setCampaigns] = useState<CampaignWithData[]>([]);
