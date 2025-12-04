@@ -189,6 +189,8 @@ export async function initDatabase() {
       ALTER TABLE audit_accounts ADD COLUMN IF NOT EXISTS job_titles_sync_status VARCHAR(20) DEFAULT 'pending';
       ALTER TABLE audit_accounts ADD COLUMN IF NOT EXISTS companies_sync_at TIMESTAMP;
       ALTER TABLE audit_accounts ADD COLUMN IF NOT EXISTS companies_sync_status VARCHAR(20) DEFAULT 'pending';
+      ALTER TABLE audit_accounts ADD COLUMN IF NOT EXISTS seniorities_sync_at TIMESTAMP;
+      ALTER TABLE audit_accounts ADD COLUMN IF NOT EXISTS seniorities_sync_status VARCHAR(20) DEFAULT 'pending';
       CREATE INDEX IF NOT EXISTS idx_analytics_campaign_daily_account_date ON analytics_campaign_daily(account_id, metric_date DESC);
       CREATE INDEX IF NOT EXISTS idx_analytics_creative_daily_account_date ON analytics_creative_daily(account_id, metric_date DESC);
       CREATE INDEX IF NOT EXISTS idx_analytics_campaign_daily_campaign ON analytics_campaign_daily(campaign_id, metric_date DESC);
@@ -752,12 +754,13 @@ export async function getOptedInAccounts() {
 
 export async function updateDrilldownSyncStatus(
   accountId: string,
-  dataType: 'hourly' | 'job_titles' | 'companies',
+  dataType: 'hourly' | 'job_titles' | 'companies' | 'seniorities',
   status: 'pending' | 'syncing' | 'completed' | 'error',
   error?: string
 ) {
   const columnPrefix = dataType === 'hourly' ? 'hourly' : 
-                       dataType === 'job_titles' ? 'job_titles' : 'companies';
+                       dataType === 'job_titles' ? 'job_titles' : 
+                       dataType === 'seniorities' ? 'seniorities' : 'companies';
   
   const result = await pool.query(
     `UPDATE audit_accounts 
@@ -775,7 +778,8 @@ export async function getDrilldownSyncStatus(accountId: string) {
     `SELECT account_id, 
             hourly_sync_at, hourly_sync_status,
             job_titles_sync_at, job_titles_sync_status,
-            companies_sync_at, companies_sync_status
+            companies_sync_at, companies_sync_status,
+            seniorities_sync_at, seniorities_sync_status
      FROM audit_accounts WHERE account_id = $1`,
     [String(accountId)]
   );

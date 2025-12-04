@@ -72,6 +72,10 @@ import {
   getCompanyAnalytics,
   hasCompanyData,
   getCampaignsWithCompanyData,
+  saveSeniorityAnalytics,
+  getSeniorityAnalytics,
+  hasSeniorityData,
+  getCampaignsWithSeniorityData,
   updateDrilldownSyncStatus,
   getDrilldownSyncStatus
 } from './database.js';
@@ -160,6 +164,19 @@ const COMMON_FUNCTIONS: Record<string, string> = {
   '24': 'Research', '25': 'Sales', '26': 'Support',
 };
 
+const COMMON_SENIORITIES: Record<string, string> = {
+  '1': 'Unpaid',
+  '2': 'Training',
+  '3': 'Entry',
+  '4': 'Senior',
+  '5': 'Manager',
+  '6': 'Director',
+  '7': 'VP',
+  '8': 'CXO',
+  '9': 'Partner',
+  '10': 'Owner',
+};
+
 const getFallbackName = (urn: string): string | null => {
   const parts = urn.split(':');
   if (parts.length < 4) return null;
@@ -175,6 +192,9 @@ const getFallbackName = (urn: string): string | null => {
   }
   if (entityType === 'function' && COMMON_FUNCTIONS[entityId]) {
     return COMMON_FUNCTIONS[entityId];
+  }
+  if (entityType === 'seniority' && COMMON_SENIORITIES[entityId]) {
+    return COMMON_SENIORITIES[entityId];
   }
   
   return null;
@@ -3282,7 +3302,7 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
 async function runDrilldownSync(
   accessToken: string, 
   accountId: string, 
-  dataType: 'hourly' | 'job_titles' | 'companies'
+  dataType: 'hourly' | 'job_titles' | 'companies' | 'seniorities'
 ) {
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
   const extractId = (urn: any): string => {
@@ -3331,6 +3351,8 @@ async function runDrilldownSync(
       await syncJobTitlesData(accessToken, accountId, activeCampaignIds, now);
     } else if (dataType === 'companies') {
       await syncCompaniesData(accessToken, accountId, activeCampaignIds, now);
+    } else if (dataType === 'seniorities') {
+      await syncSenioritiesData(accessToken, accountId, activeCampaignIds, now);
     }
     
     // Update sync status to completed
@@ -3720,6 +3742,125 @@ async function syncCompaniesData(
   
   saveUrnCache();
   console.log(`[Companies] Completed: saved ${totalCompaniesSaved} total company entries`);
+}
+
+// Sync seniorities data only
+async function syncSenioritiesData(
+  accessToken: string, 
+  accountId: string, 
+  activeCampaignIds: string[],
+  now: Date
+) {
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  
+  console.log('[Seniorities] Fetching seniority analytics per campaign for 7, 30, and 90 day periods...');
+  
+  const periods: Array<{ days: number; period: '7' | '30' | '90' }> = [
+    { days: 7, period: '7' },
+    { days: 30, period: '30' },
+    { days: 90, period: '90' }
+  ];
+  
+  let totalSenioritiesSaved = 0;
+  const allSeniorityUrns = new Set<string>();
+  const allSeniorityDataByPeriod: Record<string, Array<{ campaignId: string; seniorityUrn: string; impressions: number; clicks: number }>> = {
+    '7': [], '30': [], '90': []
+  };
+  
+  // Fetch seniorities for each period
+  for (const { days, period } of periods) {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    
+    console.log(`[Seniorities] Fetching ${period}-day data...`);
+    
+    for (const campaignId of activeCampaignIds) {
+      await delay(500);
+      
+      const encodedCampaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`);
+      const seniorityAnalyticsQuery = `q=analytics&pivot=MEMBER_SENIORITY&dateRange=(start:(year:${startDate.getFullYear()},month:${startDate.getMonth() + 1},day:${startDate.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&campaigns=List(${encodedCampaignUrn})&fields=impressions,clicks,pivotValues`;
+      
+      let seniorityAnalytics: any = { elements: [] };
+      try {
+        seniorityAnalytics = await linkedinApiRequestWithToken(accessToken, `/adAnalytics`, {}, seniorityAnalyticsQuery);
+      } catch (err: any) {
+        if (err.response?.status === 429) {
+          console.warn(`[Seniorities] Rate limited, waiting 30s before retry...`);
+          await delay(30000);
+          try {
+            seniorityAnalytics = await linkedinApiRequestWithToken(accessToken, `/adAnalytics`, {}, seniorityAnalyticsQuery);
+          } catch (retryErr: any) {
+            console.error(`[Seniorities] Retry failed for campaign ${campaignId}`);
+            continue;
+          }
+        } else {
+          continue;
+        }
+      }
+      
+      // Collect seniority data and URNs
+      for (const elem of (seniorityAnalytics.elements || [])) {
+        const seniorityUrn = elem.pivotValues?.[0];
+        if (!seniorityUrn || !seniorityUrn.includes('seniority:')) continue;
+        
+        allSeniorityUrns.add(seniorityUrn);
+        allSeniorityDataByPeriod[period].push({
+          campaignId,
+          seniorityUrn,
+          impressions: elem.impressions || 0,
+          clicks: elem.clicks || 0
+        });
+      }
+    }
+    
+    console.log(`[Seniorities] ${period}-day: collected ${allSeniorityDataByPeriod[period].length} entries`);
+  }
+  
+  console.log(`[Seniorities] Total unique seniorities: ${allSeniorityUrns.size}`);
+  
+  // Resolve all seniority URNs using cache or common seniorities
+  const resolvedSeniorities: Record<string, string> = {};
+  for (const seniorityUrn of allSeniorityUrns) {
+    if (urnCache[seniorityUrn]) {
+      resolvedSeniorities[seniorityUrn] = urnCache[seniorityUrn];
+    } else {
+      // Extract ID and use common seniorities if available
+      const seniorityIdMatch = seniorityUrn.match(/seniority:(\d+)/);
+      if (seniorityIdMatch) {
+        const seniorityId = seniorityIdMatch[1];
+        if (COMMON_SENIORITIES[seniorityId]) {
+          resolvedSeniorities[seniorityUrn] = COMMON_SENIORITIES[seniorityId];
+          urnCache[seniorityUrn] = COMMON_SENIORITIES[seniorityId];
+        } else {
+          resolvedSeniorities[seniorityUrn] = `Seniority ${seniorityId}`;
+        }
+      }
+    }
+  }
+  
+  // Save seniorities with resolved names
+  for (const { period } of periods) {
+    const periodData = allSeniorityDataByPeriod[period];
+    const byCampaign: Record<string, Array<{ seniorityUrn: string; seniorityName: string; impressions: number; clicks: number }>> = {};
+    
+    for (const item of periodData) {
+      if (!byCampaign[item.campaignId]) byCampaign[item.campaignId] = [];
+      byCampaign[item.campaignId].push({
+        seniorityUrn: item.seniorityUrn,
+        seniorityName: resolvedSeniorities[item.seniorityUrn] || 'Unknown Seniority',
+        impressions: item.impressions,
+        clicks: item.clicks
+      });
+    }
+    
+    for (const [campaignId, seniorities] of Object.entries(byCampaign)) {
+      await saveSeniorityAnalytics(accountId, campaignId, seniorities, period);
+      totalSenioritiesSaved += seniorities.length;
+    }
+  }
+  
+  saveUrnCache();
+  console.log(`[Seniorities] Completed: saved ${totalSenioritiesSaved} total seniority entries`);
 }
 
 // Start audit (opt-in and sync)
@@ -5287,6 +5428,53 @@ app.get('/api/audit/drilldown/company-campaigns/:accountId', requireAuth, requir
   } catch (err: any) {
     console.error('Company campaigns error:', err.message);
     res.status(500).json({ error: 'Failed to get campaigns with company data' });
+  }
+});
+
+// Get seniority analytics with pagination
+app.get('/api/audit/drilldown/seniorities/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
+  const { accountId } = req.params;
+  const { page, pageSize, sortBy, sortDir, campaignId, dateRange } = req.query;
+  
+  try {
+    const data = await getSeniorityAnalytics(accountId, {
+      page: page ? parseInt(page as string) : 1,
+      pageSize: pageSize ? parseInt(pageSize as string) : 25,
+      sortBy: (sortBy as 'impressions' | 'clicks' | 'ctr' | 'seniority_name') || 'impressions',
+      sortDir: (sortDir as 'asc' | 'desc') || 'desc',
+      campaignId: campaignId as string | undefined,
+      dateRange: (dateRange as '7' | '30' | '90') || '90'
+    });
+    res.json(data);
+  } catch (err: any) {
+    console.error('Seniorities drilldown error:', err.message);
+    res.status(500).json({ error: 'Failed to get seniority data' });
+  }
+});
+
+// Check if seniority data exists for account
+app.get('/api/audit/drilldown/seniorities-status/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
+  const { accountId } = req.params;
+  
+  try {
+    const hasData = await hasSeniorityData(accountId);
+    res.json({ hasData });
+  } catch (err: any) {
+    console.error('Seniorities status error:', err.message);
+    res.status(500).json({ error: 'Failed to check seniority data' });
+  }
+});
+
+// Get list of campaigns with seniority data available
+app.get('/api/audit/drilldown/seniority-campaigns/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
+  const { accountId } = req.params;
+  
+  try {
+    const campaigns = await getCampaignsWithSeniorityData(accountId);
+    res.json(campaigns);
+  } catch (err: any) {
+    console.error('Seniority campaigns error:', err.message);
+    res.status(500).json({ error: 'Failed to get campaigns with seniority data' });
   }
 });
 
