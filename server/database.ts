@@ -1604,4 +1604,253 @@ export async function hasJobTitleData(accountId: string): Promise<boolean> {
   return result.rows[0]?.exists || false;
 }
 
+// Save company analytics (one row per company per campaign per period)
+export async function saveCompanyAnalytics(
+  accountId: string,
+  campaignId: string | null,
+  companies: Array<{
+    companyUrn: string;
+    companyName: string;
+    companyUrl?: string;
+    impressions: number;
+    clicks: number;
+  }>,
+  period: '7' | '30' | '90' = '90'
+) {
+  const accId = String(accountId);
+  const campId = campaignId ? String(campaignId) : '';
+  const syncDate = new Date().toISOString().split('T')[0];
+  
+  for (const company of companies) {
+    const engagementRate = company.impressions > 0 ? (company.clicks / company.impressions) * 100 : 0;
+    
+    await pool.query(
+      `INSERT INTO analytics_companies 
+       (account_id, campaign_id, company_urn, company_name, company_url, impressions, clicks, engagement_rate, sync_date, period)
+       VALUES ($1::text, NULLIF($2::text, ''), $3::text, $4::text, $5::text, $6::bigint, $7::bigint, $8::numeric, $9::date, $10::text)
+       ON CONFLICT (account_id, COALESCE(campaign_id, ''), company_urn, period) DO UPDATE SET
+         company_name = EXCLUDED.company_name,
+         company_url = EXCLUDED.company_url,
+         impressions = EXCLUDED.impressions,
+         clicks = EXCLUDED.clicks,
+         engagement_rate = EXCLUDED.engagement_rate,
+         sync_date = EXCLUDED.sync_date`,
+      [
+        accId,
+        campId,
+        company.companyUrn,
+        company.companyName || 'Unknown Company',
+        company.companyUrl || null,
+        company.impressions || 0,
+        company.clicks || 0,
+        engagementRate,
+        syncDate,
+        period
+      ]
+    );
+  }
+}
+
+// Get company analytics with pagination
+export async function getCompanyAnalytics(
+  accountId: string,
+  options: {
+    page?: number;
+    pageSize?: number;
+    sortBy?: 'impressions' | 'clicks' | 'engagement_rate' | 'company_name';
+    sortDir?: 'asc' | 'desc';
+    campaignId?: string;
+    dateRange?: '7' | '30' | '90';
+  } = {}
+): Promise<{
+  data: Array<{
+    companyUrn: string;
+    companyName: string;
+    companyUrl: string | null;
+    impressions: number;
+    clicks: number;
+    engagementRate: number;
+    syncDate: string;
+  }>;
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasPrevious: boolean;
+  hasNext: boolean;
+}> {
+  const accId = String(accountId);
+  const page = options.page || 1;
+  const pageSize = options.pageSize || 25;
+  const sortBy = options.sortBy || 'impressions';
+  const sortDir = options.sortDir || 'desc';
+  const offset = (page - 1) * pageSize;
+  const campaignId = options.campaignId ? String(options.campaignId) : null;
+  const period = options.dateRange || '90';
+  
+  // Build WHERE clause filtering by period
+  let whereClause = 'account_id = $1 AND period = $2';
+  let params: any[] = [accId, period];
+  
+  if (campaignId) {
+    whereClause += ' AND campaign_id = $3';
+    params.push(campaignId);
+  }
+  
+  // Check if we have any data for this period
+  const dataCheckResult = await pool.query(
+    `SELECT EXISTS(SELECT 1 FROM analytics_companies WHERE ${whereClause}) as has_data`,
+    params
+  );
+  
+  if (!dataCheckResult.rows[0]?.has_data) {
+    return {
+      data: [],
+      total: 0,
+      page,
+      pageSize,
+      totalPages: 0,
+      hasPrevious: false,
+      hasNext: false
+    };
+  }
+  
+  const fullWhereClause = whereClause;
+  const fullParams = params;
+  
+  // Validate sort column
+  const validSortColumns = ['impressions', 'clicks', 'engagement_rate', 'company_name'];
+  const safeSortBy = validSortColumns.includes(sortBy) ? sortBy : 'impressions';
+  const safeSortDir = sortDir === 'asc' ? 'ASC' : 'DESC';
+  
+  // When no campaign filter, aggregate companies across all campaigns
+  if (!campaignId) {
+    const countResult = await pool.query(
+      `SELECT COUNT(DISTINCT company_urn) as count FROM analytics_companies WHERE ${fullWhereClause}`,
+      fullParams
+    );
+    const total = parseInt(countResult.rows[0]?.count || '0');
+    
+    // Map sort column to aggregated expression
+    let aggregatedOrderBy: string;
+    switch (safeSortBy) {
+      case 'impressions':
+        aggregatedOrderBy = 'SUM(impressions)';
+        break;
+      case 'clicks':
+        aggregatedOrderBy = 'SUM(clicks)';
+        break;
+      case 'engagement_rate':
+        aggregatedOrderBy = 'CASE WHEN SUM(impressions) > 0 THEN (SUM(clicks)::float / SUM(impressions) * 100) ELSE 0 END';
+        break;
+      case 'company_name':
+        aggregatedOrderBy = 'MAX(company_name)';
+        break;
+      default:
+        aggregatedOrderBy = 'SUM(impressions)';
+    }
+    
+    const dataResult = await pool.query(
+      `SELECT company_urn, 
+              MAX(company_name) as company_name,
+              MAX(company_url) as company_url,
+              SUM(impressions) as impressions, 
+              SUM(clicks) as clicks,
+              CASE WHEN SUM(impressions) > 0 THEN (SUM(clicks)::float / SUM(impressions) * 100) ELSE 0 END as engagement_rate,
+              MAX(sync_date) as sync_date
+       FROM analytics_companies 
+       WHERE ${fullWhereClause}
+       GROUP BY company_urn
+       ORDER BY ${aggregatedOrderBy} ${safeSortDir}
+       LIMIT $${fullParams.length + 1} OFFSET $${fullParams.length + 2}`,
+      [...fullParams, pageSize, offset]
+    );
+    
+    const totalPages = Math.ceil(total / pageSize);
+    
+    return {
+      data: dataResult.rows.map(row => ({
+        companyUrn: row.company_urn,
+        companyName: row.company_name,
+        companyUrl: row.company_url,
+        impressions: parseInt(row.impressions) || 0,
+        clicks: parseInt(row.clicks) || 0,
+        engagementRate: parseFloat(row.engagement_rate) || 0,
+        syncDate: row.sync_date
+      })),
+      total,
+      page,
+      pageSize,
+      totalPages,
+      hasPrevious: page > 1,
+      hasNext: page < totalPages
+    };
+  }
+  
+  // Per-campaign mode
+  const countResult = await pool.query(
+    `SELECT COUNT(*) as count FROM analytics_companies WHERE ${fullWhereClause}`,
+    fullParams
+  );
+  const total = parseInt(countResult.rows[0]?.count || '0');
+  
+  const dataResult = await pool.query(
+    `SELECT company_urn, company_name, company_url, impressions, clicks, engagement_rate, sync_date
+     FROM analytics_companies 
+     WHERE ${fullWhereClause}
+     ORDER BY ${safeSortBy} ${safeSortDir}
+     LIMIT $${fullParams.length + 1} OFFSET $${fullParams.length + 2}`,
+    [...fullParams, pageSize, offset]
+  );
+  
+  const totalPages = Math.ceil(total / pageSize);
+  
+  return {
+    data: dataResult.rows.map(row => ({
+      companyUrn: row.company_urn,
+      companyName: row.company_name,
+      companyUrl: row.company_url,
+      impressions: parseInt(row.impressions) || 0,
+      clicks: parseInt(row.clicks) || 0,
+      engagementRate: parseFloat(row.engagement_rate) || 0,
+      syncDate: row.sync_date
+    })),
+    total,
+    page,
+    pageSize,
+    totalPages,
+    hasPrevious: page > 1,
+    hasNext: page < totalPages
+  };
+}
+
+// Get campaigns that have company data
+export async function getCampaignsWithCompanyData(accountId: string): Promise<Array<{ campaignId: string; campaignName: string }>> {
+  const accId = String(accountId);
+  
+  const result = await pool.query(
+    `SELECT DISTINCT c.campaign_id, 
+       COALESCE((SELECT campaign_name FROM analytics_campaign_daily WHERE campaign_id = c.campaign_id LIMIT 1), 'Campaign ' || c.campaign_id) as campaign_name
+     FROM analytics_companies c
+     WHERE c.account_id = $1 AND c.campaign_id IS NOT NULL
+     ORDER BY campaign_name`,
+    [accId]
+  );
+  
+  return result.rows.map(row => ({
+    campaignId: row.campaign_id,
+    campaignName: row.campaign_name
+  }));
+}
+
+// Check if company data exists for account
+export async function hasCompanyData(accountId: string): Promise<boolean> {
+  const accId = String(accountId);
+  const result = await pool.query(
+    `SELECT EXISTS(SELECT 1 FROM analytics_companies WHERE account_id = $1) as exists`,
+    [accId]
+  );
+  return result.rows[0]?.exists || false;
+}
+
 export default pool;
