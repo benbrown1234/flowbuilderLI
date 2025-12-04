@@ -47,8 +47,9 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   **LAN/Expansion Monitoring**: Campaigns with LinkedIn Audience Network or Audience Expansion enabled get daily syncs instead of weekly.
     *   **Weekly Sync**: Default sync frequency is weekly; campaigns with LAN/Expansion get daily syncs.
     *   **Manual Refresh**: "Refresh" button to pull latest data on-demand.
-*   **Drilldown (Hourly Performance Analysis)**:
-    *   **Audit Prerequisite**: Drilldown requires audit to be enabled first. Hourly data collection begins when audit is activated.
+*   **Drilldown (Performance Analysis)**:
+    *   **Audit Prerequisite**: Drilldown requires audit to be enabled first. Data collection begins when audit is activated.
+    *   **Navigation Dropdown**: Switch between Hourly and Job Titles views using the dropdown in the main menu.
     *   **Hourly Heatmap**: Visual 7x24 grid showing performance by day of week and hour of day (last 14 days).
     *   **Selectable Metrics**: Toggle between Impressions, Clicks, Spend, CTR, CPC, CPM, and Conversions.
     *   **Color-Coded Intensity**: Darker cells indicate higher activity/performance.
@@ -59,6 +60,12 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   **Daily Delivery Window Visualization**: Bar chart showing first and last delivery hours per day.
     *   **Data Collection**: Hourly data fetched during audit sync (last 14 days via LinkedIn Analytics API with HOURLY granularity).
     *   **Database Storage**: `analytics_campaign_hourly` table stores hourly metrics per campaign per day.
+    *   **Job Titles Analysis**:
+        - Shows targeted job titles with impressions, clicks, and CTR data (last 90 days).
+        - Per-campaign filtering: Campaign dropdown to view job titles for specific campaigns.
+        - Sorted by impressions descending to show highest-volume job titles first.
+        - Data fetched per-campaign during audit sync with 500ms delays for rate limiting.
+        - Database storage: `analytics_job_titles` table with campaign_id for per-campaign data.
 *   **Ideate Canvas**:
     *   A visual planning tool for campaigns, featuring a drag-and-drop interface.
     *   **Import from Structure**: One-click import of live LinkedIn campaign data into Ideate canvas. Transforms campaign groups, campaigns, and ads into editable nodes with full targeting data preserved. Auto-generates TOF audience nodes from targeting criteria (industries, company sizes, seniorities).
