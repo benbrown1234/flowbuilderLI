@@ -1909,6 +1909,57 @@ export async function hasSeniorityData(accountId: string): Promise<boolean> {
   return result.rows[0]?.exists || false;
 }
 
+// Get seniority data for tier distribution comparison (for audit scoring)
+// Returns raw seniority data grouped by campaign for the specified date range
+export async function getSeniorityDataForScoring(
+  accountId: string,
+  campaignIds: string[],
+  currentStartDate: Date,
+  currentEndDate: Date,
+  previousStartDate: Date,
+  previousEndDate: Date
+): Promise<{
+  currentPeriod: Map<string, Array<{ seniorityUrn: string; seniorityName: string; impressions: number; clicks: number }>>;
+  previousPeriod: Map<string, Array<{ seniorityUrn: string; seniorityName: string; impressions: number; clicks: number }>>;
+}> {
+  const accId = String(accountId);
+  
+  // Get all seniority data within the date ranges
+  const result = await pool.query(
+    `SELECT campaign_id, seniority_urn, seniority_name, impressions, clicks, sync_date
+     FROM analytics_seniorities
+     WHERE account_id = $1 
+       AND campaign_id = ANY($2::text[])
+       AND sync_date >= $3::date AND sync_date <= $4::date
+     ORDER BY campaign_id, sync_date DESC`,
+    [accId, campaignIds, previousStartDate.toISOString().split('T')[0], currentEndDate.toISOString().split('T')[0]]
+  );
+  
+  const currentPeriod = new Map<string, Array<{ seniorityUrn: string; seniorityName: string; impressions: number; clicks: number }>>();
+  const previousPeriod = new Map<string, Array<{ seniorityUrn: string; seniorityName: string; impressions: number; clicks: number }>>();
+  
+  for (const row of result.rows) {
+    const syncDate = new Date(row.sync_date);
+    const campaignId = row.campaign_id;
+    const entry = {
+      seniorityUrn: row.seniority_urn,
+      seniorityName: row.seniority_name,
+      impressions: parseInt(row.impressions) || 0,
+      clicks: parseInt(row.clicks) || 0
+    };
+    
+    if (syncDate >= currentStartDate && syncDate <= currentEndDate) {
+      if (!currentPeriod.has(campaignId)) currentPeriod.set(campaignId, []);
+      currentPeriod.get(campaignId)!.push(entry);
+    } else if (syncDate >= previousStartDate && syncDate <= previousEndDate) {
+      if (!previousPeriod.has(campaignId)) previousPeriod.set(campaignId, []);
+      previousPeriod.get(campaignId)!.push(entry);
+    }
+  }
+  
+  return { currentPeriod, previousPeriod };
+}
+
 // Save company analytics (one row per company per campaign per period)
 export async function saveCompanyAnalytics(
   accountId: string,

@@ -177,6 +177,42 @@ const COMMON_SENIORITIES: Record<string, string> = {
   '10': 'Owner',
 };
 
+type SeniorityTier = 'senior' | 'mid' | 'entry';
+
+const SENIORITY_TIER_MAP: Record<string, SeniorityTier> = {
+  '1': 'entry',    // Unpaid
+  '2': 'entry',    // Training (intern-like)
+  '3': 'entry',    // Entry
+  '4': 'mid',      // Senior (individual contributor)
+  '5': 'mid',      // Manager
+  '6': 'senior',   // Director
+  '7': 'senior',   // VP
+  '8': 'senior',   // CXO
+  '9': 'senior',   // Partner
+  '10': 'senior',  // Owner
+};
+
+const getSeniorityTierFromUrn = (seniorityUrn: string): SeniorityTier | null => {
+  const parts = seniorityUrn.split(':');
+  if (parts.length < 4) return null;
+  const seniorityId = parts[3];
+  return SENIORITY_TIER_MAP[seniorityId] || null;
+};
+
+const getSeniorityTierFromName = (seniorityName: string): SeniorityTier | null => {
+  const name = seniorityName.toLowerCase();
+  if (['vp', 'vice president', 'director', 'cxo', 'ceo', 'cfo', 'cto', 'coo', 'partner', 'owner', 'president', 'executive'].some(t => name.includes(t))) {
+    return 'senior';
+  }
+  if (['manager', 'senior', 'lead', 'supervisor'].some(t => name.includes(t))) {
+    return 'mid';
+  }
+  if (['entry', 'intern', 'unpaid', 'training', 'junior', 'associate', 'assistant'].some(t => name.includes(t))) {
+    return 'entry';
+  }
+  return null;
+};
+
 const getFallbackName = (urn: string): string | null => {
   const parts = urn.split(':');
   if (parts.length < 4) return null;
