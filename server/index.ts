@@ -76,6 +76,7 @@ import {
   getSeniorityAnalytics,
   hasSeniorityData,
   getCampaignsWithSeniorityData,
+  getSeniorityDataForScoring,
   updateDrilldownSyncStatus,
   getDrilldownSyncStatus
 } from './database.js';
@@ -211,6 +212,163 @@ const getSeniorityTierFromName = (seniorityName: string): SeniorityTier | null =
     return 'entry';
   }
   return null;
+};
+
+interface TierDistribution {
+  senior: number;  // percentage 0-100
+  mid: number;
+  entry: number;
+  totalImpressions: number;
+  tiersReported: number;
+}
+
+interface SeniorityTierShiftResult {
+  hasData: boolean;
+  currentDistribution: TierDistribution | null;
+  previousDistribution: TierDistribution | null;
+  seniorShift: number;   // percentage point change (positive = more senior)
+  midShift: number;
+  entryShift: number;
+  scoreContribution: number;  // -1, 0, or +1
+  issueMessage: string | null;
+  positiveMessage: string | null;
+  flagged: boolean;  // true if shift > 50%
+}
+
+const computeTierDistribution = (
+  data: Array<{ seniorityUrn: string; seniorityName: string; impressions: number; clicks: number }>
+): TierDistribution | null => {
+  if (!data || data.length === 0) return null;
+  
+  let seniorImpressions = 0;
+  let midImpressions = 0;
+  let entryImpressions = 0;
+  let totalImpressions = 0;
+  const tiersFound = new Set<SeniorityTier>();
+  
+  for (const item of data) {
+    // Try to get tier from URN first, then from name
+    let tier = getSeniorityTierFromUrn(item.seniorityUrn);
+    if (!tier) {
+      tier = getSeniorityTierFromName(item.seniorityName);
+    }
+    
+    if (tier) {
+      tiersFound.add(tier);
+      totalImpressions += item.impressions;
+      if (tier === 'senior') seniorImpressions += item.impressions;
+      else if (tier === 'mid') midImpressions += item.impressions;
+      else if (tier === 'entry') entryImpressions += item.impressions;
+    }
+  }
+  
+  if (totalImpressions === 0) return null;
+  
+  return {
+    senior: (seniorImpressions / totalImpressions) * 100,
+    mid: (midImpressions / totalImpressions) * 100,
+    entry: (entryImpressions / totalImpressions) * 100,
+    totalImpressions,
+    tiersReported: tiersFound.size
+  };
+};
+
+const computeSeniorityTierShift = (
+  currentData: Array<{ seniorityUrn: string; seniorityName: string; impressions: number; clicks: number }> | undefined,
+  previousData: Array<{ seniorityUrn: string; seniorityName: string; impressions: number; clicks: number }> | undefined,
+  minImpressions: number = 500,
+  minTiers: number = 2
+): SeniorityTierShiftResult => {
+  const noDataResult: SeniorityTierShiftResult = {
+    hasData: false,
+    currentDistribution: null,
+    previousDistribution: null,
+    seniorShift: 0,
+    midShift: 0,
+    entryShift: 0,
+    scoreContribution: 0,
+    issueMessage: null,
+    positiveMessage: null,
+    flagged: false
+  };
+  
+  if (!currentData || !previousData) return noDataResult;
+  
+  const current = computeTierDistribution(currentData);
+  const previous = computeTierDistribution(previousData);
+  
+  // Guardrails: need minimum data in both periods
+  if (!current || !previous) return noDataResult;
+  if (current.totalImpressions < minImpressions || previous.totalImpressions < minImpressions) return noDataResult;
+  if (current.tiersReported < minTiers || previous.tiersReported < minTiers) return noDataResult;
+  
+  // Compute shifts (positive = more of that tier)
+  const seniorShift = current.senior - previous.senior;
+  const midShift = current.mid - previous.mid;
+  const entryShift = current.entry - previous.entry;
+  
+  // Determine if there's a significant downward or upward shift
+  // Downward: Senior -> Mid -> Entry (losing senior/mid impressions to lower tiers)
+  // Upward: Entry -> Mid -> Senior (gaining higher tier impressions)
+  
+  let scoreContribution = 0;
+  let issueMessage: string | null = null;
+  let positiveMessage: string | null = null;
+  let flagged = false;
+  
+  // Check for significant downward shift (losing senior or mid to entry)
+  // This happens when senior% drops significantly OR entry% rises significantly
+  const downwardShift = Math.max(-seniorShift, entryShift);
+  const upwardShift = Math.max(seniorShift, -entryShift);
+  
+  if (downwardShift > 50) {
+    // Major downward shift - flag it
+    scoreContribution = -1;
+    flagged = true;
+    if (seniorShift < -50) {
+      issueMessage = `Seniority shift: Senior ${seniorShift.toFixed(0)}pp (flagged)`;
+    } else {
+      issueMessage = `Seniority shift: Entry +${entryShift.toFixed(0)}pp (flagged)`;
+    }
+  } else if (downwardShift > 20) {
+    // Moderate downward shift
+    scoreContribution = -1;
+    if (seniorShift < -20) {
+      issueMessage = `Seniority shift: Senior ${seniorShift.toFixed(0)}pp MoM`;
+    } else if (entryShift > 20) {
+      issueMessage = `Seniority shift: Entry +${entryShift.toFixed(0)}pp MoM`;
+    }
+  } else if (upwardShift > 50) {
+    // Major upward shift - still flag for visibility but positive
+    scoreContribution = 1;
+    flagged = true;
+    if (seniorShift > 50) {
+      positiveMessage = `Seniority shift: Senior +${seniorShift.toFixed(0)}pp (flagged)`;
+    } else {
+      positiveMessage = `Seniority shift: Entry ${entryShift.toFixed(0)}pp (flagged)`;
+    }
+  } else if (upwardShift > 20) {
+    // Moderate upward shift - positive
+    scoreContribution = 1;
+    if (seniorShift > 20) {
+      positiveMessage = `Seniority shift: Senior +${seniorShift.toFixed(0)}pp MoM`;
+    } else if (entryShift < -20) {
+      positiveMessage = `Seniority shift: Entry ${entryShift.toFixed(0)}pp MoM`;
+    }
+  }
+  
+  return {
+    hasData: true,
+    currentDistribution: current,
+    previousDistribution: previous,
+    seniorShift,
+    midShift,
+    entryShift,
+    scoreContribution,
+    issueMessage,
+    positiveMessage,
+    flagged
+  };
 };
 
 const getFallbackName = (urn: string): string | null => {
@@ -2443,6 +2601,26 @@ async function computeAndSaveScoringStatus(accountId: string, campaignMetrics: a
   }
   const accountAvgCpc = accountTotalClicks > 0 ? accountTotalSpend / accountTotalClicks : 0;
   
+  // Fetch seniority data for tier distribution scoring
+  const campaignIds = Array.from(currentPeriodCampaigns.keys());
+  let seniorityData: {
+    currentPeriod: Map<string, Array<{ seniorityUrn: string; seniorityName: string; impressions: number; clicks: number }>>;
+    previousPeriod: Map<string, Array<{ seniorityUrn: string; seniorityName: string; impressions: number; clicks: number }>>;
+  } | null = null;
+  
+  try {
+    seniorityData = await getSeniorityDataForScoring(
+      accountId,
+      campaignIds,
+      currentPeriodStart,
+      currentPeriodEnd,
+      previousPeriodStart,
+      previousPeriodEnd
+    );
+  } catch (err: any) {
+    console.log(`[Audit] Could not fetch seniority data for scoring: ${err.message}`);
+  }
+  
   // Score and save campaigns
   for (const [campaignId, c] of currentPeriodCampaigns) {
     const prev = previousPeriodCampaigns.get(campaignId);
@@ -2491,6 +2669,28 @@ async function computeAndSaveScoringStatus(accountId: string, campaignMetrics: a
       } else if (cpcChange > 20) {
         negativeScore -= 1;
         issues.push(`CPC up ${cpcChange.toFixed(0)}%`);
+      }
+    }
+    
+    // Seniority tier distribution scoring
+    if (seniorityData) {
+      const currentSeniority = seniorityData.currentPeriod.get(campaignId);
+      const previousSeniority = seniorityData.previousPeriod.get(campaignId);
+      
+      const tierShift = computeSeniorityTierShift(currentSeniority, previousSeniority);
+      
+      if (tierShift.hasData) {
+        if (tierShift.scoreContribution < 0) {
+          negativeScore += tierShift.scoreContribution;
+          if (tierShift.issueMessage) {
+            issues.push(tierShift.issueMessage);
+          }
+        } else if (tierShift.scoreContribution > 0) {
+          positiveScore += tierShift.scoreContribution;
+          if (tierShift.positiveMessage) {
+            positiveSignals.push(tierShift.positiveMessage);
+          }
+        }
       }
     }
     
