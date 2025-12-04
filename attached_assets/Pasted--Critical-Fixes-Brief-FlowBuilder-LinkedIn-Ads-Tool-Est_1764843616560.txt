@@ -1,0 +1,184 @@
+# Critical Fixes Brief - FlowBuilder LinkedIn Ads Tool
+
+**Estimated Effort:** 40-60 hours  
+**Priority:** Complete items 1-6 before any production deployment
+
+---
+
+## 1. Replace In-Memory Session Storage
+
+**Location:** `server/index.ts` line 181
+
+**Current Code:**
+```typescript
+const sessions: Map<string, Session> = new Map();
+```
+
+**Issue:** Sessions lost on server restart. Won't work with multiple instances. Memory leak.
+
+**Fix:** Replace with Redis or database-backed sessions. Add session expiry cleanup.
+
+---
+
+## 2. Add Authentication to Canvas Endpoints
+
+**Location:** `server/index.ts` lines ~4040-4270
+
+**Issue:** These routes have NO authentication - anyone can access any canvas:
+- `POST /api/canvas`
+- `GET /api/canvas/:canvasId`
+- `PUT /api/canvas/:canvasId`
+- `DELETE /api/canvas/:canvasId`
+- `POST /api/canvas/:canvasId/save`
+- All `/api/canvas/comments/*` routes
+
+**Fix:** 
+1. Add `requireAuth` middleware to all canvas routes
+2. Verify `owner_user_id` matches the logged-in user before allowing access
+3. Store LinkedIn user ID in session during OAuth callback
+
+---
+
+## 3. Remove Exposed API Key from Frontend Bundle
+
+**Location:** `vite.config.ts` lines 27-29
+
+**Current Code:**
+```typescript
+define: {
+  'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+  'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
+}
+```
+
+**Issue:** API key visible in browser dev tools to anyone.
+
+**Fix:** Delete these lines entirely. AI calls already route through backend.
+
+---
+
+## 4. Restrict CORS Origins
+
+**Location:** `server/index.ts` line 160
+
+**Current Code:**
+```typescript
+app.use(cors({ credentials: true, origin: true }));
+```
+
+**Issue:** Accepts requests from ANY website.
+
+**Fix:** Replace with explicit allowlist:
+```typescript
+app.use(cors({ 
+  credentials: true, 
+  origin: ['https://your-production-domain.com']
+}));
+```
+
+---
+
+## 5. Add Rate Limiting
+
+**Location:** `server/index.ts`
+
+**Issue:** No rate limits. Vulnerable to abuse, especially on expensive AI endpoints.
+
+**Fix:** Install `express-rate-limit` and add:
+- General: 100 requests / 15 min
+- AI endpoints (`/api/ai/*`): 10 requests / min  
+- Auth endpoints: 20 requests / 15 min
+
+---
+
+## 6. Validate Environment Variables at Startup
+
+**Location:** `server/index.ts` lines 164-165, 1493-1494
+
+**Issue:** Missing env vars cause runtime failures with unclear errors.
+
+**Required Variables:**
+- `DATABASE_URL`
+- `LINKEDIN_CLIENT_ID`
+- `LINKEDIN_CLIENT_SECRET`
+- `AI_INTEGRATIONS_OPENAI_API_KEY`
+- `AI_INTEGRATIONS_OPENAI_BASE_URL`
+
+**Fix:** Add startup validation using `zod` or similar. Fail immediately with clear message if any are missing.
+
+---
+
+## 7. Add React Error Boundaries
+
+**Location:** `App.tsx`
+
+**Issue:** Any error in IdeateCanvas (2,854 lines) or AuditPage (1,684 lines) crashes the entire app with a white screen.
+
+**Fix:** Create an ErrorBoundary component and wrap each major view. Show a user-friendly error message with refresh button.
+
+---
+
+## 8. Add Health Check Endpoints
+
+**Location:** `server/index.ts`
+
+**Issue:** No endpoints for load balancers or orchestrators to verify app health.
+
+**Fix:** Add:
+- `GET /health` - Returns 200 if process is running
+- `GET /ready` - Returns 200 if database is connected, 503 if not
+
+---
+
+## 9. Add Security Headers
+
+**Location:** `server/index.ts`
+
+**Issue:** Missing standard security headers (CSP, X-Frame-Options, etc.)
+
+**Fix:** Install and configure `helmet` middleware.
+
+---
+
+## 10. Add Request Cancellation in React
+
+**Location:** `App.tsx` useEffect blocks
+
+**Issue:** Fast account switching causes race conditions. Requests aren't cancelled on component unmount.
+
+**Fix:** Use `AbortController` in data fetching useEffects. Cancel pending requests in cleanup function.
+
+---
+
+## Dependencies to Install
+
+```bash
+npm install express-rate-limit helmet zod ioredis
+```
+
+---
+
+## Files That Need Changes
+
+| File | Changes |
+|------|---------|
+| `server/index.ts` | Sessions, auth, CORS, rate limiting, health checks, headers |
+| `vite.config.ts` | Remove API key exposure |
+| `App.tsx` | Error boundaries, request cancellation |
+| `server/database.ts` | Add user ownership queries |
+| NEW: `components/ErrorBoundary.tsx` | Create error boundary component |
+| NEW: `server/config.ts` | Environment validation |
+
+---
+
+## Acceptance Criteria
+
+- [ ] Sessions persist across server restarts
+- [ ] Cannot access another user's canvas without authentication
+- [ ] No secrets visible in browser network/source tabs
+- [ ] Requests from unknown origins are rejected
+- [ ] Rapid repeated requests return 429 error
+- [ ] App fails to start with clear error if required env vars are missing
+- [ ] Component errors show friendly message instead of white screen
+- [ ] `/health` and `/ready` endpoints respond correctly
+- [ ] Security headers present in all responses (check with securityheaders.com)
