@@ -109,6 +109,12 @@ type CompanySortField = 'impressions' | 'clicks' | 'engagement_rate' | 'company_
 type SortDir = 'asc' | 'desc';
 type DateRange = '7' | '30' | '90';
 
+interface DrilldownSyncStatus {
+  hourly: { lastSyncAt: string | null; status: 'pending' | 'syncing' | 'completed' | 'error' };
+  jobTitles: { lastSyncAt: string | null; status: 'pending' | 'syncing' | 'completed' | 'error' };
+  companies: { lastSyncAt: string | null; status: 'pending' | 'syncing' | 'completed' | 'error' };
+}
+
 const METRICS = [
   { key: 'impressions', label: 'Impressions', format: (v: number) => v.toLocaleString() },
   { key: 'clicks', label: 'Clicks', format: (v: number) => v.toLocaleString() },
@@ -148,6 +154,86 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
   const [companiesCampaigns, setCompaniesCampaigns] = useState<Array<{ campaignId: string; campaignName: string }>>([]);
   const [selectedCompaniesCampaign, setSelectedCompaniesCampaign] = useState<string | undefined>(undefined);
   const [companiesDateRange, setCompaniesDateRange] = useState<DateRange>('90');
+  
+  const [drilldownSyncStatus, setDrilldownSyncStatus] = useState<DrilldownSyncStatus | null>(null);
+  const [syncingType, setSyncingType] = useState<'hourly' | 'job_titles' | 'companies' | null>(null);
+
+  const fetchDrilldownSyncStatus = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/audit/drilldown-status/${accountId}`, {
+        credentials: 'include'
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setDrilldownSyncStatus(data);
+        return data;
+      }
+    } catch (error) {
+      console.error('Error fetching drilldown sync status:', error);
+    }
+    return null;
+  }, [accountId]);
+
+  const triggerDrilldownSync = async (dataType: 'hourly' | 'job_titles' | 'companies') => {
+    setSyncingType(dataType);
+    try {
+      const response = await fetch(`/api/audit/drilldown-sync/${accountId}/${dataType}`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      if (response.ok) {
+        await fetchDrilldownSyncStatus();
+        startPollingSync(dataType);
+      }
+    } catch (error) {
+      console.error(`Error triggering ${dataType} sync:`, error);
+      setSyncingType(null);
+    }
+  };
+
+  const startPollingSync = (dataType: 'hourly' | 'job_titles' | 'companies') => {
+    const pollInterval = setInterval(async () => {
+      const status = await fetchDrilldownSyncStatus();
+      const syncStatus = dataType === 'hourly' ? status?.hourly?.status :
+                         dataType === 'job_titles' ? status?.jobTitles?.status :
+                         status?.companies?.status;
+      
+      if (syncStatus === 'completed' || syncStatus === 'error') {
+        clearInterval(pollInterval);
+        setSyncingType(null);
+        
+        if (syncStatus === 'completed') {
+          if (dataType === 'hourly') {
+            fetchCampaigns();
+            fetchData();
+          } else if (dataType === 'job_titles') {
+            fetchJobTitlesCampaigns();
+            fetchJobTitles(1, jobTitlesSortBy, jobTitlesSortDir, selectedJobTitlesCampaign, jobTitlesDateRange);
+          } else if (dataType === 'companies') {
+            fetchCompaniesCampaigns();
+            fetchCompanies(1, companiesSortBy, companiesSortDir, selectedCompaniesCampaign, companiesDateRange);
+          }
+        }
+      }
+    }, 2000);
+    
+    setTimeout(() => clearInterval(pollInterval), 600000);
+  };
+
+  const formatSyncTime = (timestamp: string | null) => {
+    if (!timestamp) return 'Never synced';
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${diffDays}d ago`;
+  };
 
   const checkAuditStatus = useCallback(async () => {
     try {
@@ -201,6 +287,12 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
       fetchData();
     }
   }, [selectedCampaign, selectedMetric]);
+
+  useEffect(() => {
+    if (auditStatus?.optedIn) {
+      fetchDrilldownSyncStatus();
+    }
+  }, [auditStatus, fetchDrilldownSyncStatus]);
 
   const fetchJobTitlesCampaigns = async () => {
     try {
@@ -546,12 +638,40 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
                   <Clock className="w-5 h-5 text-blue-600" />
                   Hourly Performance Heatmap
                 </h2>
-                {heatmapData.dateRange && (
-                  <span className="text-sm text-gray-500 flex items-center gap-1">
-                    <Calendar className="w-4 h-4" />
-                    {heatmapData.dateRange.start} to {heatmapData.dateRange.end}
-                  </span>
-                )}
+                <div className="flex items-center gap-4">
+                  {heatmapData.dateRange && (
+                    <span className="text-sm text-gray-500 flex items-center gap-1">
+                      <Calendar className="w-4 h-4" />
+                      {heatmapData.dateRange.start} to {heatmapData.dateRange.end}
+                    </span>
+                  )}
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-gray-400">
+                      {formatSyncTime(drilldownSyncStatus?.hourly?.lastSyncAt || null)}
+                    </span>
+                    <button
+                      onClick={() => triggerDrilldownSync('hourly')}
+                      disabled={syncingType === 'hourly'}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        syncingType === 'hourly'
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
+                      }`}
+                    >
+                      {syncingType === 'hourly' ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Syncing...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          Sync Hourly
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div className="overflow-x-auto">
@@ -864,6 +984,34 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
                       </select>
                     </div>
                   )}
+                  
+                  {/* Sync Button */}
+                  <div className="flex items-center gap-2 text-sm border-l border-gray-200 pl-4">
+                    <span className="text-gray-400">
+                      {formatSyncTime(drilldownSyncStatus?.jobTitles?.lastSyncAt || null)}
+                    </span>
+                    <button
+                      onClick={() => triggerDrilldownSync('job_titles')}
+                      disabled={syncingType === 'job_titles'}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        syncingType === 'job_titles'
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-purple-50 text-purple-600 hover:bg-purple-100'
+                      }`}
+                    >
+                      {syncingType === 'job_titles' ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Syncing...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          Sync Job Titles
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1050,6 +1198,34 @@ export default function DrilldownPage({ accountId, accountName, onBack, onNaviga
                       </select>
                     </div>
                   )}
+                  
+                  {/* Sync Button */}
+                  <div className="flex items-center gap-2 text-sm border-l border-gray-200 pl-4">
+                    <span className="text-gray-400">
+                      {formatSyncTime(drilldownSyncStatus?.companies?.lastSyncAt || null)}
+                    </span>
+                    <button
+                      onClick={() => triggerDrilldownSync('companies')}
+                      disabled={syncingType === 'companies'}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        syncingType === 'companies'
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-orange-50 text-orange-600 hover:bg-orange-100'
+                      }`}
+                    >
+                      {syncingType === 'companies' ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Syncing...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          Sync Companies
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
