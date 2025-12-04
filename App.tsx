@@ -140,6 +140,8 @@ const App: React.FC = () => {
 
   // Fetch Data when Account Changes
   useEffect(() => {
+    const abortController = new AbortController();
+    
     const loadData = async () => {
       if (!selectedAccountId || !isAuthenticated) {
         setData(null);
@@ -148,23 +150,36 @@ const App: React.FC = () => {
       
       setIsLoading(true);
       try {
-        const result = await buildAccountHierarchyFromApi(selectedAccountId, activeOnly);
-        setData(result);
-        setSelectedNode(null);
-        setError(null);
+        const result = await buildAccountHierarchyFromApi(selectedAccountId, activeOnly, abortController.signal);
+        if (!abortController.signal.aborted) {
+          setData(result);
+          setSelectedNode(null);
+          setError(null);
+        }
       } catch (err: any) {
+        if (err.name === 'CanceledError' || err.name === 'AbortError' || abortController.signal.aborted) {
+          return; // Request was cancelled, ignore
+        }
         console.error('Failed to load data:', err);
         setError('Failed to load account data');
       } finally {
-        setIsLoading(false);
+        if (!abortController.signal.aborted) {
+          setIsLoading(false);
+        }
       }
     };
     
     loadData();
+    
+    return () => {
+      abortController.abort();
+    };
   }, [selectedAccountId, isAuthenticated, activeOnly]);
 
   // Fetch audit summary for Structure view (only from database, no LinkedIn API calls)
   useEffect(() => {
+    const abortController = new AbortController();
+    
     const loadAuditSummary = async () => {
       if (!selectedAccountId || !isAuthenticated) {
         setAuditSummary(null);
@@ -172,15 +187,26 @@ const App: React.FC = () => {
       }
       
       try {
-        const response = await axios.get(`/api/audit/structure-summary/${selectedAccountId}`);
-        setAuditSummary(response.data);
+        const response = await axios.get(`/api/audit/structure-summary/${selectedAccountId}`, {
+          signal: abortController.signal
+        });
+        if (!abortController.signal.aborted) {
+          setAuditSummary(response.data);
+        }
       } catch (err: any) {
+        if (err.name === 'CanceledError' || abortController.signal.aborted) {
+          return; // Request was cancelled, ignore
+        }
         console.warn('Could not load audit summary:', err.message);
         setAuditSummary(null);
       }
     };
     
     loadAuditSummary();
+    
+    return () => {
+      abortController.abort();
+    };
   }, [selectedAccountId, isAuthenticated]);
 
   const handleLogin = async () => {

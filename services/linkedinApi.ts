@@ -49,9 +49,10 @@ export const getAdAccounts = async (): Promise<any[]> => {
   return response.data.elements || [];
 };
 
-export const getAccountHierarchy = async (accountId: string, activeOnly: boolean = false, depth: 'summary' | 'full' = 'full'): Promise<any> => {
+export const getAccountHierarchy = async (accountId: string, activeOnly: boolean = false, depth: 'summary' | 'full' = 'full', signal?: AbortSignal): Promise<any> => {
   const response = await api.get(`/linkedin/account/${accountId}/hierarchy`, {
-    params: { activeOnly: activeOnly.toString(), depth }
+    params: { activeOnly: activeOnly.toString(), depth },
+    signal
   });
   return response.data;
 };
@@ -861,10 +862,10 @@ const collectTargetingUrns = (campaigns: any[]): string[] => {
   return [...new Set(urns)];
 };
 
-export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly: boolean = false, depth: 'summary' | 'full' = 'full'): Promise<AccountStructure | null> => {
+export const buildAccountHierarchyFromApi = async (accountId: string, activeOnly: boolean = false, signal?: AbortSignal): Promise<AccountStructure | null> => {
   try {
-    console.log(`Fetching hierarchy for account: ${accountId} (activeOnly: ${activeOnly}, depth: ${depth})`);
-    const rawData = await getAccountHierarchy(accountId, activeOnly, depth);
+    console.log(`Fetching hierarchy for account: ${accountId} (activeOnly: ${activeOnly})`);
+    const rawData = await getAccountHierarchy(accountId, activeOnly, 'full', signal);
     
     console.log('Raw API response:', rawData);
     

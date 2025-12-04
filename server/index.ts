@@ -9,6 +9,8 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import OpenAI from 'openai';
+import logger from './logger.js';
+import { pool } from './database.js';
 import { 
   initDatabase, 
   getSnapshot, 
@@ -240,6 +242,27 @@ app.use('/api/', (req, res, next) => {
 app.use(express.json());
 app.use(cookieParser());
 
+// Apply CSRF protection to all state-changing routes (with exceptions)
+app.use((req, res, next) => {
+  // Skip CSRF for safe methods
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    return next();
+  }
+  
+  // Skip CSRF for OAuth callback (uses state parameter instead)
+  if (req.path === '/api/auth/callback') {
+    return next();
+  }
+  
+  // Skip CSRF for health/ready endpoints
+  if (req.path === '/health' || req.path === '/ready') {
+    return next();
+  }
+  
+  // Apply CSRF validation
+  return validateCsrf(req, res, next);
+});
+
 const LINKEDIN_CLIENT_ID = process.env.LINKEDIN_CLIENT_ID;
 const LINKEDIN_CLIENT_SECRET = process.env.LINKEDIN_CLIENT_SECRET;
 
@@ -257,7 +280,38 @@ interface Session {
   state: string | null;
   userId: string | null;
   userName: string | null;
+  csrfToken: string | null;
 }
+
+const generateCsrfToken = (): string => {
+  return crypto.randomBytes(32).toString('hex');
+};
+
+const validateCsrf = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    return next();
+  }
+  
+  const sessionId = req.cookies?.session_id;
+  if (!sessionId) {
+    return res.status(403).json({ error: 'CSRF validation failed: no session' });
+  }
+  
+  const session = await getSession(sessionId);
+  const headerToken = req.headers['x-csrf-token'] as string;
+  const cookieToken = req.cookies?.csrf_token;
+  
+  if (!session.csrfToken || !headerToken) {
+    return res.status(403).json({ error: 'CSRF validation failed: missing token' });
+  }
+  
+  if (session.csrfToken !== headerToken || session.csrfToken !== cookieToken) {
+    logger.warn({ sessionId: sessionId.substring(0, 8) }, 'CSRF token mismatch');
+    return res.status(403).json({ error: 'CSRF validation failed: token mismatch' });
+  }
+  
+  next();
+};
 
 // In-memory cache for sessions (backed by database for persistence)
 const sessionCache: Map<string, Session> = new Map();
@@ -276,22 +330,24 @@ const getSession = async (sessionId: string): Promise<Session> => {
       expiresAt: dbSession.expires_at ? dbSession.expires_at.getTime() : null,
       state: dbSession.state,
       userId: dbSession.user_id,
-      userName: dbSession.user_name
+      userName: dbSession.user_name,
+      csrfToken: dbSession.csrf_token || null
     };
     sessionCache.set(sessionId, session);
     return session;
   }
   
-  // Create new session
-  const newSession: Session = { accessToken: null, expiresAt: null, state: null, userId: null, userName: null };
+  // Create new session with CSRF token
+  const csrfToken = generateCsrfToken();
+  const newSession: Session = { accessToken: null, expiresAt: null, state: null, userId: null, userName: null, csrfToken };
   sessionCache.set(sessionId, newSession);
-  await createDbSession(sessionId);
+  await createDbSession(sessionId, csrfToken);
   return newSession;
 };
 
 const updateSession = async (sessionId: string, updates: Partial<Session>): Promise<void> => {
   // Update cache
-  const current = sessionCache.get(sessionId) || { accessToken: null, expiresAt: null, state: null, userId: null, userName: null };
+  const current = sessionCache.get(sessionId) || { accessToken: null, expiresAt: null, state: null, userId: null, userName: null, csrfToken: null };
   const updated = { ...current, ...updates };
   sessionCache.set(sessionId, updated);
   
@@ -320,22 +376,47 @@ const ensureSession = async (req: express.Request, res: express.Response): Promi
     // Validate session exists in database
     const dbSession = await getDbSession(sessionId);
     if (dbSession) {
+      // Ensure CSRF cookie is set if we have a token
+      if (dbSession.csrf_token && !req.cookies?.csrf_token) {
+        res.cookie('csrf_token', dbSession.csrf_token, {
+          httpOnly: false,
+          secure: isSecure(req),
+          sameSite: 'strict',
+          maxAge: 7 * 24 * 60 * 60 * 1000
+        });
+      }
       return sessionId;
     }
   }
   
-  // Create new session
+  // Create new session with CSRF token
   sessionId = generateSessionId();
+  const csrfToken = generateCsrfToken();
+  
   res.cookie('session_id', sessionId, { 
     httpOnly: true, 
     secure: isSecure(req),
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000
   });
-  await createDbSession(sessionId);
-  sessionCache.set(sessionId, { accessToken: null, expiresAt: null, state: null, userId: null, userName: null });
+  res.cookie('csrf_token', csrfToken, {
+    httpOnly: false,
+    secure: isSecure(req),
+    sameSite: 'strict',
+    maxAge: 7 * 24 * 60 * 60 * 1000
+  });
+  
+  await createDbSession(sessionId, csrfToken);
+  sessionCache.set(sessionId, { accessToken: null, expiresAt: null, state: null, userId: null, userName: null, csrfToken });
   return sessionId;
 };
+
+// CSRF token endpoint - frontend can fetch this to get the token
+app.get('/api/csrf-token', async (req, res) => {
+  const sessionId = await ensureSession(req, res);
+  const session = await getSession(sessionId);
+  res.json({ csrfToken: session.csrfToken });
+});
 
 app.get('/api/auth/url', async (req, res) => {
   const sessionId = await ensureSession(req, res);
@@ -1631,15 +1712,18 @@ app.post('/api/ai/audit', async (req, res) => {
     
     let accountData: any = clientAccountData || null;
     
-    if (!accountData && isLiveData && sessionId && sessions[sessionId]?.accessToken) {
-      try {
-        const hierarchyResponse = await axios.get(
-          `http://localhost:${PORT}/api/linkedin/account/${accountId}/hierarchy?activeOnly=false`,
-          { headers: { Cookie: `linkedinSession=${sessionId}` } }
-        );
-        accountData = hierarchyResponse.data;
-      } catch (err: any) {
-        console.warn('Failed to fetch account data for AI:', err.message);
+    if (!accountData && isLiveData && sessionId) {
+      const session = sessionCache.get(sessionId);
+      if (session?.accessToken) {
+        try {
+          const hierarchyResponse = await axios.get(
+            `http://localhost:${PORT}/api/linkedin/account/${accountId}/hierarchy?activeOnly=false`,
+            { headers: { Cookie: `linkedinSession=${sessionId}` } }
+          );
+          accountData = hierarchyResponse.data;
+        } catch (err: any) {
+          console.warn('Failed to fetch account data for AI:', err.message);
+        }
       }
     }
     
@@ -4337,7 +4421,7 @@ app.get('/api/audit/structure-summary/:accountId', requireAuth, async (req, res)
     
     // Build lightweight summary from precomputed data
     const campaignsMap: Record<string, { scoringStatus: string; issues: string[]; positiveSignals: string[] }> = {};
-    const adsMap: Record<string, { scoringStatus: string; issues: string[]; campaignId: string }> = {};
+    const adsMap: Record<string, { scoringStatus: string; issues: string[]; scoringBreakdown: any[]; positiveSignals: string[]; scoringMetadata: any; campaignId: string }> = {};
     
     for (const c of scoringData.campaigns) {
       // Ensure arrays are properly parsed (handle both string JSON and already-parsed arrays)
@@ -4927,6 +5011,28 @@ if (isProduction) {
 }
 
 const HOST = '0.0.0.0';
-app.listen(PORT, HOST, () => {
-  console.log(`LinkedIn API server running on http://${HOST}:${PORT}`);
+const server = app.listen(PORT, HOST, () => {
+  logger.info({ port: PORT, host: HOST }, 'LinkedIn API server running');
 });
+
+// Graceful shutdown handling
+const gracefulShutdown = (signal: string) => {
+  logger.info({ signal }, 'Received shutdown signal, shutting down gracefully');
+  
+  server.close(() => {
+    logger.info('HTTP server closed');
+    pool.end(() => {
+      logger.info('Database pool closed');
+      process.exit(0);
+    });
+  });
+  
+  // Force shutdown after 30 seconds
+  setTimeout(() => {
+    logger.error('Forced shutdown after timeout');
+    process.exit(1);
+  }, 30000);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

@@ -2,7 +2,12 @@ import pg from 'pg';
 
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
+  max: 20,                       // Maximum connections in pool
+  idleTimeoutMillis: 30000,      // Close idle connections after 30 seconds
+  connectionTimeoutMillis: 5000, // Fail if can't connect within 5 seconds
 });
+
+export { pool };
 
 export async function initDatabase() {
   const client = await pool.connect();
@@ -254,9 +259,18 @@ export async function initDatabase() {
         state VARCHAR(64),
         user_id VARCHAR(100),
         user_name VARCHAR(255),
+        csrf_token VARCHAR(64),
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()
       );
+
+      -- Add csrf_token column if it doesn't exist (migration for existing tables)
+      DO $$ 
+      BEGIN 
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'user_sessions' AND column_name = 'csrf_token') THEN
+          ALTER TABLE user_sessions ADD COLUMN csrf_token VARCHAR(64);
+        END IF;
+      END $$;
 
       CREATE INDEX IF NOT EXISTS idx_sessions_expires ON user_sessions(expires_at);
     `);
@@ -1208,6 +1222,7 @@ export interface DbSession {
   state: string | null;
   user_id: string | null;
   user_name: string | null;
+  csrf_token: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -1220,12 +1235,12 @@ export async function getDbSession(sessionId: string): Promise<DbSession | null>
   return result.rows[0] || null;
 }
 
-export async function createDbSession(sessionId: string): Promise<DbSession> {
+export async function createDbSession(sessionId: string, csrfToken?: string): Promise<DbSession> {
   const result = await pool.query(
-    `INSERT INTO user_sessions (id) VALUES ($1)
-     ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
+    `INSERT INTO user_sessions (id, csrf_token) VALUES ($1, $2)
+     ON CONFLICT (id) DO UPDATE SET updated_at = NOW(), csrf_token = COALESCE($2, user_sessions.csrf_token)
      RETURNING *`,
-    [sessionId]
+    [sessionId, csrfToken || null]
   );
   return result.rows[0];
 }
