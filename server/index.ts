@@ -1321,7 +1321,7 @@ app.get('/api/linkedin/account/:accountId/hierarchy', requireAuth, requireAccoun
             postData = response;
           } else if (reference.includes('urn:li:ugcPost:')) {
             const postId = reference.replace('urn:li:ugcPost:', '');
-            const response = await linkedinApiRequest(sessionId, `/ugcPosts/${postId}`, {});
+            const response = await linkedinApiRequest(sessionId, `/posts/${postId}`, {});
             postData = response;
           }
           
@@ -3571,8 +3571,13 @@ async function syncCompaniesData(
       
       let companyAnalytics: any = { elements: [] };
       try {
+        console.log(`[Companies] Fetching campaign ${campaignId} for ${period}-day period...`);
         companyAnalytics = await linkedinApiRequestWithToken(accessToken, `/adAnalytics`, {}, companyAnalyticsQuery);
+        console.log(`[Companies] Campaign ${campaignId}: got ${companyAnalytics.elements?.length || 0} company entries`);
       } catch (err: any) {
+        const errorDetail = err.response?.data ? JSON.stringify(err.response.data) : err.message;
+        console.error(`[Companies] API error for campaign ${campaignId}: ${err.response?.status || 'unknown'} - ${errorDetail}`);
+        
         if (err.response?.status === 429) {
           console.warn(`[Companies] Rate limited, waiting 30s before retry...`);
           await delay(30000);
