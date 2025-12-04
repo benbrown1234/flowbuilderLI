@@ -67,7 +67,11 @@ import {
   saveJobTitleAnalytics,
   getJobTitleAnalytics,
   hasJobTitleData,
-  getCampaignsWithJobTitleData
+  getCampaignsWithJobTitleData,
+  saveCompanyAnalytics,
+  getCompanyAnalytics,
+  hasCompanyData,
+  getCampaignsWithCompanyData
 } from './database.js';
 import { runAuditRules, calculateAccountScore } from './auditRules.js';
 
@@ -5075,6 +5079,53 @@ app.get('/api/audit/drilldown/job-title-campaigns/:accountId', requireAuth, requ
   } catch (err: any) {
     console.error('Job title campaigns error:', err.message);
     res.status(500).json({ error: 'Failed to get campaigns with job title data' });
+  }
+});
+
+// Get company analytics with pagination
+app.get('/api/audit/drilldown/companies/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
+  const { accountId } = req.params;
+  const { page, pageSize, sortBy, sortDir, campaignId, dateRange } = req.query;
+  
+  try {
+    const data = await getCompanyAnalytics(accountId, {
+      page: page ? parseInt(page as string) : 1,
+      pageSize: pageSize ? parseInt(pageSize as string) : 25,
+      sortBy: (sortBy as 'impressions' | 'clicks' | 'engagement_rate' | 'company_name') || 'impressions',
+      sortDir: (sortDir as 'asc' | 'desc') || 'desc',
+      campaignId: campaignId as string | undefined,
+      dateRange: (dateRange as '7' | '30' | '90') || '90'
+    });
+    res.json(data);
+  } catch (err: any) {
+    console.error('Companies drilldown error:', err.message);
+    res.status(500).json({ error: 'Failed to get company data' });
+  }
+});
+
+// Check if company data exists for account
+app.get('/api/audit/drilldown/companies-status/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
+  const { accountId } = req.params;
+  
+  try {
+    const hasData = await hasCompanyData(accountId);
+    res.json({ hasData });
+  } catch (err: any) {
+    console.error('Companies status error:', err.message);
+    res.status(500).json({ error: 'Failed to check company data' });
+  }
+});
+
+// Get list of campaigns with company data available
+app.get('/api/audit/drilldown/company-campaigns/:accountId', requireAuth, requireAccountAccess, async (req, res) => {
+  const { accountId } = req.params;
+  
+  try {
+    const campaigns = await getCampaignsWithCompanyData(accountId);
+    res.json(campaigns);
+  } catch (err: any) {
+    console.error('Company campaigns error:', err.message);
+    res.status(500).json({ error: 'Failed to get campaigns with company data' });
   }
 });
 
