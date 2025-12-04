@@ -3816,7 +3816,7 @@ app.get('/api/audit/drilldown-status/:accountId', requireAuth, requireAccountAcc
 });
 
 // Sync individual drilldown data type
-app.post('/api/audit/drilldown-sync/:accountId/:dataType', requireAuth, requireAccountAccess, async (req, res) => {
+app.post('/api/audit/drilldown/sync/:accountId/:dataType', requireAuth, requireAccountAccess, async (req, res) => {
   const { accountId, dataType } = req.params;
   
   if (!['hourly', 'job_titles', 'companies'].includes(dataType)) {
