@@ -3179,6 +3179,171 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     
     console.log(`[JobTitles] Completed: saved ${totalJobTitlesSaved} total job title entries across all periods`);
     
+    // Fetch Company analytics per campaign for multiple date ranges (7, 30, 90 days)
+    console.log('[Companies] Fetching company analytics per campaign for 7, 30, and 90 day periods...');
+    
+    let totalCompaniesSaved = 0;
+    const allCompanyUrns = new Set<string>();
+    const allCompanyDataByPeriod: Record<string, Array<{ campaignId: string; companyUrn: string; impressions: number; clicks: number }>> = {
+      '7': [],
+      '30': [],
+      '90': []
+    };
+    
+    // Fetch companies for each period
+    for (const { days, period } of periods) {
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      
+      console.log(`[Companies] Fetching ${period}-day data...`);
+      
+      for (const campaignId of activeCampaignIds) {
+        await delay(300);
+        
+        const encodedCampaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`);
+        const companyAnalyticsQuery = `q=analytics&pivot=MEMBER_COMPANY&dateRange=(start:(year:${startDate.getFullYear()},month:${startDate.getMonth() + 1},day:${startDate.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&campaigns=List(${encodedCampaignUrn})&fields=impressions,clicks,pivotValues`;
+        
+        let companyAnalytics: any = { elements: [] };
+        try {
+          companyAnalytics = await linkedinApiRequest(sessionId, `/adAnalytics`, {}, companyAnalyticsQuery);
+        } catch (err: any) {
+          continue;
+        }
+        
+        // Collect company data and URNs
+        for (const elem of (companyAnalytics.elements || [])) {
+          const companyUrn = elem.pivotValues?.[0];
+          if (!companyUrn || !companyUrn.includes('organization:')) continue;
+          
+          allCompanyUrns.add(companyUrn);
+          allCompanyDataByPeriod[period].push({
+            campaignId,
+            companyUrn,
+            impressions: elem.impressions || 0,
+            clicks: elem.clicks || 0
+          });
+        }
+      }
+      
+      console.log(`[Companies] ${period}-day: collected ${allCompanyDataByPeriod[period].length} entries`);
+    }
+    
+    console.log(`[Companies] Total unique companies to resolve: ${allCompanyUrns.size}`);
+    
+    // Resolve all company URNs to their names and URLs
+    const resolvedCompanies: Record<string, { name: string; url?: string }> = {};
+    const companyUrnsToResolve = Array.from(allCompanyUrns).filter(urn => !urnCache[urn]);
+    
+    console.log(`[Companies] Need to resolve ${companyUrnsToResolve.length} new company URNs (${allCompanyUrns.size - companyUrnsToResolve.length} already cached)`);
+    
+    if (companyUrnsToResolve.length > 0) {
+      const batchSize = 50;
+      for (let i = 0; i < companyUrnsToResolve.length; i += batchSize) {
+        const batch = companyUrnsToResolve.slice(i, i + batchSize);
+        
+        await delay(300);
+        
+        for (const companyUrn of batch) {
+          try {
+            // Extract organization ID from URN (urn:li:organization:12345)
+            const orgId = companyUrn.match(/:(\d+)$/)?.[1];
+            if (orgId) {
+              const orgResponse = await linkedinApiRequest(
+                sessionId,
+                `/organizations/${orgId}`,
+                {},
+                'projection=(localizedName,vanityName)'
+              );
+              
+              if (orgResponse) {
+                const name = orgResponse.localizedName || `Company ${orgId}`;
+                const vanityName = orgResponse.vanityName;
+                const url = vanityName ? `https://www.linkedin.com/company/${vanityName}` : null;
+                resolvedCompanies[companyUrn] = { name, url: url || undefined };
+                urnCache[companyUrn] = name;
+              }
+            }
+          } catch (orgErr: any) {
+            // If organization API fails, try to get name from adTargetingEntities
+            try {
+              const entityResponse = await linkedinApiRequest(
+                sessionId,
+                '/adTargetingEntities',
+                {},
+                `q=urns&queryVersion=QUERY_USES_URNS&urns=List(${encodeURIComponent(companyUrn)})&locale=(language:en,country:US)`
+              );
+              
+              if (entityResponse.results?.[companyUrn]) {
+                const entity = entityResponse.results[companyUrn];
+                const name = entity.name || entity.value || `Company ${companyUrn.split(':').pop()}`;
+                resolvedCompanies[companyUrn] = { name };
+                urnCache[companyUrn] = name;
+              }
+            } catch (entityErr: any) {
+              // Fallback: use organization ID as name
+              const orgId = companyUrn.match(/:(\d+)$/)?.[1] || 'Unknown';
+              resolvedCompanies[companyUrn] = { name: `Company ${orgId}` };
+            }
+          }
+          
+          await delay(100); // Extra delay for organization API
+        }
+        
+        console.log(`[Companies] Resolved batch ${Math.floor(i / batchSize) + 1}: ${Object.keys(resolvedCompanies).length} companies so far`);
+      }
+      
+      if (Object.keys(resolvedCompanies).length > 0) {
+        saveUrnCache();
+        console.log(`[Companies] Saved ${Object.keys(resolvedCompanies).length} new company names to cache`);
+      }
+    }
+    
+    // Process and save data for each period
+    for (const { period } of periods) {
+      const allCompanyData = allCompanyDataByPeriod[period];
+      
+      // Group by campaign and aggregate
+      const byCampaign: Record<string, Array<{ companyUrn: string; companyName: string; companyUrl?: string; impressions: number; clicks: number }>> = {};
+      
+      for (const item of allCompanyData) {
+        if (!byCampaign[item.campaignId]) {
+          byCampaign[item.campaignId] = [];
+        }
+        
+        // Get resolved name or fallback
+        let companyName: string;
+        let companyUrl: string | undefined;
+        
+        if (resolvedCompanies[item.companyUrn]) {
+          companyName = resolvedCompanies[item.companyUrn].name;
+          companyUrl = resolvedCompanies[item.companyUrn].url;
+        } else if (urnCache[item.companyUrn]) {
+          companyName = urnCache[item.companyUrn];
+        } else {
+          const orgId = item.companyUrn.match(/:(\d+)$/)?.[1] || 'Unknown';
+          companyName = `Company ${orgId}`;
+        }
+        
+        byCampaign[item.campaignId].push({
+          companyUrn: item.companyUrn,
+          companyName,
+          companyUrl,
+          impressions: item.impressions,
+          clicks: item.clicks
+        });
+      }
+      
+      // Save each campaign's data with the period
+      for (const [campaignId, companies] of Object.entries(byCampaign)) {
+        await saveCompanyAnalytics(accountId, campaignId, companies, period);
+        totalCompaniesSaved += companies.length;
+      }
+      
+      console.log(`[Companies] ${period}-day: saved ${Object.values(byCampaign).reduce((sum, c) => sum + c.length, 0)} entries across ${Object.keys(byCampaign).length} campaigns`);
+    }
+    
+    console.log(`[Companies] Completed: saved ${totalCompaniesSaved} total company entries across all periods`);
+    
     // Compute and save scoring status for Structure view caching
     console.log('Computing and saving scoring status...');
     await computeAndSaveScoringStatus(accountId, campaignMetrics, creativeMetrics);
@@ -3186,7 +3351,7 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     await updateAuditAccountSyncStatus(accountId, 'completed');
     console.log(`=== Audit sync completed for account ${accountId} ===\n`);
     
-    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length, hourlyMetrics: hourlyMetrics.length, jobTitleMetrics: totalJobTitlesSaved };
+    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length, hourlyMetrics: hourlyMetrics.length, jobTitleMetrics: totalJobTitlesSaved, companyMetrics: totalCompaniesSaved };
     
   } catch (err: any) {
     console.error(`Audit sync error for account ${accountId}:`, err.message);
@@ -3627,6 +3792,171 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     
     console.log(`[JobTitles] Completed: saved ${totalJobTitlesSaved} total job title entries across all periods`);
     
+    // Fetch Company analytics per campaign for multiple date ranges (7, 30, 90 days)
+    console.log('[Companies] Fetching company analytics per campaign for 7, 30, and 90 day periods...');
+    
+    let totalCompaniesSaved = 0;
+    const allCompanyUrns = new Set<string>();
+    const allCompanyDataByPeriod: Record<string, Array<{ campaignId: string; companyUrn: string; impressions: number; clicks: number }>> = {
+      '7': [],
+      '30': [],
+      '90': []
+    };
+    
+    // Fetch companies for each period
+    for (const { days, period } of periods) {
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+      
+      console.log(`[Companies] Fetching ${period}-day data...`);
+      
+      for (const campaignId of activeCampaignIds) {
+        await delay(300);
+        
+        const encodedCampaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`);
+        const companyAnalyticsQuery = `q=analytics&pivot=MEMBER_COMPANY&dateRange=(start:(year:${startDate.getFullYear()},month:${startDate.getMonth() + 1},day:${startDate.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&campaigns=List(${encodedCampaignUrn})&fields=impressions,clicks,pivotValues`;
+        
+        let companyAnalytics: any = { elements: [] };
+        try {
+          companyAnalytics = await linkedinApiRequestWithToken(accessToken, `/adAnalytics`, {}, companyAnalyticsQuery);
+        } catch (err: any) {
+          continue;
+        }
+        
+        // Collect company data and URNs
+        for (const elem of (companyAnalytics.elements || [])) {
+          const companyUrn = elem.pivotValues?.[0];
+          if (!companyUrn || !companyUrn.includes('organization:')) continue;
+          
+          allCompanyUrns.add(companyUrn);
+          allCompanyDataByPeriod[period].push({
+            campaignId,
+            companyUrn,
+            impressions: elem.impressions || 0,
+            clicks: elem.clicks || 0
+          });
+        }
+      }
+      
+      console.log(`[Companies] ${period}-day: collected ${allCompanyDataByPeriod[period].length} entries`);
+    }
+    
+    console.log(`[Companies] Total unique companies to resolve: ${allCompanyUrns.size}`);
+    
+    // Resolve all company URNs to their names and URLs
+    const resolvedCompanies: Record<string, { name: string; url?: string }> = {};
+    const companyUrnsToResolve = Array.from(allCompanyUrns).filter(urn => !urnCache[urn]);
+    
+    console.log(`[Companies] Need to resolve ${companyUrnsToResolve.length} new company URNs (${allCompanyUrns.size - companyUrnsToResolve.length} already cached)`);
+    
+    if (companyUrnsToResolve.length > 0) {
+      const batchSize = 50;
+      for (let i = 0; i < companyUrnsToResolve.length; i += batchSize) {
+        const batch = companyUrnsToResolve.slice(i, i + batchSize);
+        
+        await delay(300);
+        
+        for (const companyUrn of batch) {
+          try {
+            // Extract organization ID from URN (urn:li:organization:12345)
+            const orgId = companyUrn.match(/:(\d+)$/)?.[1];
+            if (orgId) {
+              const orgResponse = await linkedinApiRequestWithToken(
+                accessToken,
+                `/organizations/${orgId}`,
+                {},
+                'projection=(localizedName,vanityName)'
+              );
+              
+              if (orgResponse) {
+                const name = orgResponse.localizedName || `Company ${orgId}`;
+                const vanityName = orgResponse.vanityName;
+                const url = vanityName ? `https://www.linkedin.com/company/${vanityName}` : null;
+                resolvedCompanies[companyUrn] = { name, url: url || undefined };
+                urnCache[companyUrn] = name;
+              }
+            }
+          } catch (orgErr: any) {
+            // If organization API fails, try to get name from adTargetingEntities
+            try {
+              const entityResponse = await linkedinApiRequestWithToken(
+                accessToken,
+                '/adTargetingEntities',
+                {},
+                `q=urns&queryVersion=QUERY_USES_URNS&urns=List(${encodeURIComponent(companyUrn)})&locale=(language:en,country:US)`
+              );
+              
+              if (entityResponse.results?.[companyUrn]) {
+                const entity = entityResponse.results[companyUrn];
+                const name = entity.name || entity.value || `Company ${companyUrn.split(':').pop()}`;
+                resolvedCompanies[companyUrn] = { name };
+                urnCache[companyUrn] = name;
+              }
+            } catch (entityErr: any) {
+              // Fallback: use organization ID as name
+              const orgId = companyUrn.match(/:(\d+)$/)?.[1] || 'Unknown';
+              resolvedCompanies[companyUrn] = { name: `Company ${orgId}` };
+            }
+          }
+          
+          await delay(100); // Extra delay for organization API
+        }
+        
+        console.log(`[Companies] Resolved batch ${Math.floor(i / batchSize) + 1}: ${Object.keys(resolvedCompanies).length} companies so far`);
+      }
+      
+      if (Object.keys(resolvedCompanies).length > 0) {
+        saveUrnCache();
+        console.log(`[Companies] Saved ${Object.keys(resolvedCompanies).length} new company names to cache`);
+      }
+    }
+    
+    // Process and save data for each period
+    for (const { period } of periods) {
+      const allCompanyData = allCompanyDataByPeriod[period];
+      
+      // Group by campaign and aggregate
+      const companiesByCampaign: Record<string, Array<{ companyUrn: string; companyName: string; companyUrl?: string; impressions: number; clicks: number }>> = {};
+      
+      for (const item of allCompanyData) {
+        if (!companiesByCampaign[item.campaignId]) {
+          companiesByCampaign[item.campaignId] = [];
+        }
+        
+        // Get resolved name or fallback
+        let companyName: string;
+        let companyUrl: string | undefined;
+        
+        if (resolvedCompanies[item.companyUrn]) {
+          companyName = resolvedCompanies[item.companyUrn].name;
+          companyUrl = resolvedCompanies[item.companyUrn].url;
+        } else if (urnCache[item.companyUrn]) {
+          companyName = urnCache[item.companyUrn];
+        } else {
+          const orgId = item.companyUrn.match(/:(\d+)$/)?.[1] || 'Unknown';
+          companyName = `Company ${orgId}`;
+        }
+        
+        companiesByCampaign[item.campaignId].push({
+          companyUrn: item.companyUrn,
+          companyName,
+          companyUrl,
+          impressions: item.impressions,
+          clicks: item.clicks
+        });
+      }
+      
+      // Save each campaign's data with the period
+      for (const [campaignId, companies] of Object.entries(companiesByCampaign)) {
+        await saveCompanyAnalytics(accountId, campaignId, companies, period);
+        totalCompaniesSaved += companies.length;
+      }
+      
+      console.log(`[Companies] ${period}-day: saved ${Object.values(companiesByCampaign).reduce((sum, c) => sum + c.length, 0)} entries across ${Object.keys(companiesByCampaign).length} campaigns`);
+    }
+    
+    console.log(`[Companies] Completed: saved ${totalCompaniesSaved} total company entries across all periods`);
+    
     // Compute and save scoring status for Structure view caching
     console.log('Computing and saving scoring status...');
     await computeAndSaveScoringStatus(accountId, campaignMetrics, creativeMetrics);
@@ -3634,7 +3964,7 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     await updateAuditAccountSyncStatus(accountId, 'completed');
     console.log(`=== Audit sync completed for account ${accountId} ===\n`);
     
-    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length, hourlyMetrics: hourlyMetrics.length, jobTitleMetrics: totalJobTitlesSaved };
+    return { success: true, campaignMetrics: campaignMetrics.length, creativeMetrics: creativeMetrics.length, hourlyMetrics: hourlyMetrics.length, jobTitleMetrics: totalJobTitlesSaved, companyMetrics: totalCompaniesSaved };
     
   } catch (err: any) {
     console.error(`Audit sync error for account ${accountId}:`, err.message);
