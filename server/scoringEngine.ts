@@ -832,10 +832,11 @@ export function scoreCampaign(
   const percentage = (totalScore / 100) * 100;
   
   // Determine status based on percentage
+  // Thresholds: 0-49 = needs_attention, 50-69 = mild_issues (Monitor Closely), 70-100 = performing_well (Strong Performance)
   let status: 'needs_attention' | 'mild_issues' | 'performing_well';
-  if (percentage < 40) {
+  if (percentage < 50) {
     status = 'needs_attention';
-  } else if (percentage < 60) {
+  } else if (percentage < 70) {
     status = 'mild_issues';
   } else {
     status = 'performing_well';

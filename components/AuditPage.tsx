@@ -262,7 +262,8 @@ function ScoreBadge({ score, status }: { score?: number; status?: ScoringStatus 
   if (score === undefined) return null;
   
   const getScoreColor = () => {
-    if (status === 'needs_attention' || score < 40) return 'bg-red-100 text-red-700 border-red-200';
+    // Thresholds: 0-49 = Needs Attention (red), 50-69 = Monitor Closely (amber), 70-100 = Strong Performance (green)
+    if (status === 'needs_attention' || score < 50) return 'bg-red-100 text-red-700 border-red-200';
     if (status === 'mild_issues' || score < 70) return 'bg-amber-100 text-amber-700 border-amber-200';
     return 'bg-green-100 text-green-700 border-green-200';
   };
@@ -661,9 +662,9 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
       return <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium"><XCircle className="w-3 h-3" /> Needs Attention</span>;
     }
     if (campaign.scoringStatus === 'mild_issues') {
-      return <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-700 rounded text-xs font-medium"><AlertTriangle className="w-3 h-3" /> Mild Issues</span>;
+      return <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-700 rounded text-xs font-medium"><AlertTriangle className="w-3 h-3" /> Monitor Closely</span>;
     }
-    return <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-medium"><CheckCircle2 className="w-3 h-3" /> Performing Well</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-medium"><CheckCircle2 className="w-3 h-3" /> Strong Performance</span>;
   };
   
   return (
@@ -1115,12 +1116,12 @@ function AdDetailSidebar({ ad, accountId, onClose }: {
       return <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium"><XCircle className="w-3 h-3" /> Needs Attention</span>;
     }
     if (ad.scoringStatus === 'mild_issues') {
-      return <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-700 rounded text-xs font-medium"><AlertTriangle className="w-3 h-3" /> Mild Issues</span>;
+      return <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-700 rounded text-xs font-medium"><AlertTriangle className="w-3 h-3" /> Monitor Closely</span>;
     }
     if (ad.scoringStatus === 'insufficient_data') {
       return <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium"><Info className="w-3 h-3" /> Insufficient Data</span>;
     }
-    return <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-medium"><CheckCircle2 className="w-3 h-3" /> Performing Well</span>;
+    return <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-medium"><CheckCircle2 className="w-3 h-3" /> Strong Performance</span>;
   };
   
   return (
@@ -1668,16 +1669,16 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
 
   const getTabLabel = (tab: StatusTab) => {
     if (tab === 'needs_attention') return 'Needs Attention';
-    if (tab === 'mild_issues') return 'Mild Issues';
-    return 'Performing Well';
+    if (tab === 'mild_issues') return 'Monitor Closely';
+    return 'Strong Performance';
   };
 
   const getEmptyMessage = (tab: StatusTab, type: 'campaigns' | 'ads') => {
     if (tab === 'needs_attention') return `No ${type} need urgent attention`;
     if (tab === 'mild_issues') {
-      return type === 'ads' ? 'No ads with insufficient data' : `No ${type} with mild issues`;
+      return type === 'ads' ? 'No ads with insufficient data' : `No ${type} need close monitoring`;
     }
-    return `No ${type} performing well yet`;
+    return `No ${type} with strong performance yet`;
   };
 
   const currentCampaigns = campaignsByStatus[activeTab];

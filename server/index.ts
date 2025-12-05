@@ -3120,7 +3120,9 @@ async function computeAndSaveScoring100(
   campaignMetrics: any[],
   creativeMetrics: any[],
   trackingData: Map<string, any>,
-  creativeLifecycle: Map<string, any>
+  creativeLifecycle: Map<string, any>,
+  periodTotalPenetration?: Map<string, { penetration: number | null, reach: number | null }>,
+  prevPeriodTotalPenetration?: Map<string, { penetration: number | null, reach: number | null }>
 ) {
   console.log(`\n[Scoring100] ========================================`);
   console.log(`[Scoring100] Starting 100-point scoring for account ${accountId}`);
@@ -3223,6 +3225,44 @@ async function computeAndSaveScoring100(
     accountTotals.totalConversions += c.conversions;
   }
   
+  // Apply period-total penetration and reach from ALL-granularity queries
+  // These override the daily values which only capture the last day's snapshot
+  if (periodTotalPenetration && periodTotalPenetration.size > 0) {
+    console.log(`[Scoring100] Applying period-total penetration/reach from ALL query (${periodTotalPenetration.size} campaigns)`);
+    for (const [campaignId, c] of campaignData) {
+      const totalData = periodTotalPenetration.get(campaignId);
+      if (totalData) {
+        if (totalData.reach !== null && totalData.reach > 0) {
+          const oldReach = c.reach;
+          c.reach = totalData.reach;
+          // Recalculate frequency using period-total reach
+          c.frequency = c.reach > 0 ? c.impressions / c.reach : null;
+          console.log(`[Scoring100] Campaign ${campaignId}: reach ${oldReach} → ${c.reach}, frequency recalc to ${c.frequency?.toFixed(2) || 'null'}`);
+        }
+        if (totalData.penetration !== null) {
+          c.penetration = totalData.penetration;
+        }
+      }
+    }
+  }
+  
+  // Apply previous period total penetration and reach
+  if (prevPeriodTotalPenetration && prevPeriodTotalPenetration.size > 0) {
+    console.log(`[Scoring100] Applying prev period-total penetration/reach (${prevPeriodTotalPenetration.size} campaigns)`);
+    for (const [campaignId, c] of campaignData) {
+      const prevTotalData = prevPeriodTotalPenetration.get(campaignId);
+      if (prevTotalData) {
+        if (prevTotalData.reach !== null && prevTotalData.reach > 0) {
+          c.prevReach = prevTotalData.reach;
+          c.prevFrequency = c.prevReach > 0 ? c.prevImpressions / c.prevReach : null;
+        }
+        if (prevTotalData.penetration !== null) {
+          c.prevPenetration = prevTotalData.penetration;
+        }
+      }
+    }
+  }
+  
   // Calculate account averages
   accountTotals.ctr = accountTotals.totalImpressions > 0 
     ? (accountTotals.totalClicks / accountTotals.totalImpressions) * 100 : 0;
@@ -3233,20 +3273,33 @@ async function computeAndSaveScoring100(
   accountTotals.cpa = accountTotals.totalConversions > 0 
     ? accountTotals.totalSpend / accountTotals.totalConversions : 0;
   
-  // Get seniority data from database
-  const seniorityDataResult = await getSeniorityDataSimple(accountId);
-  const seniorityMap = new Map<string, SeniorityDataRow[]>();
-  for (const s of seniorityDataResult) {
-    if (!seniorityMap.has(s.campaign_id)) {
-      seniorityMap.set(s.campaign_id, []);
+  // Get seniority data from database with proper period-over-period comparison
+  const campaignIds = Array.from(campaignData.keys());
+  const { getSeniorityDataForScoring } = await import('./database.js');
+  const { currentPeriod: seniorityCurrentPeriod, previousPeriod: seniorityPreviousPeriod } = await getSeniorityDataForScoring(
+    accountId,
+    campaignIds,
+    currentStart,
+    now,
+    prevStart,
+    new Date(currentStart.getTime() - 1) // Previous period ends just before current starts
+  );
+  console.log(`[Scoring100] Seniority data: ${seniorityCurrentPeriod.size} campaigns current period, ${seniorityPreviousPeriod.size} campaigns previous period`);
+  
+  // Helper function to calculate decision-maker percentage from seniority data
+  const calculateDMPercentage = (entries: Array<{ seniorityName: string; impressions: number }> | undefined): number | null => {
+    if (!entries || entries.length === 0) return null;
+    const decisionMakerTitles = ['Director', 'VP', 'CXO', 'Owner', 'Partner', 'Senior'];
+    let dmImpressions = 0;
+    let totalImpressions = 0;
+    for (const s of entries) {
+      totalImpressions += s.impressions;
+      if (s.seniorityName && decisionMakerTitles.some(title => s.seniorityName.includes(title))) {
+        dmImpressions += s.impressions;
+      }
     }
-    seniorityMap.get(s.campaign_id)!.push({
-      seniority: s.seniority,
-      impressions: Number(s.impressions) || 0,
-      clicks: Number(s.clicks) || 0,
-      ctr: Number(s.ctr) || 0
-    });
-  }
+    return totalImpressions > 0 ? (dmImpressions / totalImpressions) * 100 : null;
+  };
   
   // Score each campaign
   let scoredCount = 0;
@@ -3311,34 +3364,22 @@ async function computeAndSaveScoring100(
       linkedInAudienceNetwork: campaign.hasLan || false
     } : undefined;
     
-    // Convert seniority array to SeniorityData format
-    const seniorityArray = seniorityMap.get(campaignId) || [];
+    // Convert seniority data to SeniorityData format using proper period-over-period comparison
+    const currentSeniorityEntries = seniorityCurrentPeriod.get(campaignId);
+    const previousSeniorityEntries = seniorityPreviousPeriod.get(campaignId);
     let seniorityData: import('./scoringEngine').SeniorityData | undefined = undefined;
     
-    if (seniorityArray.length > 0) {
-      // Calculate decision-maker percentage (Director, VP, CXO, Owner, Partner, Senior)
-      const decisionMakerTitles = ['Director', 'VP', 'CXO', 'Owner', 'Partner', 'Senior'];
-      let dmImpressions = 0;
-      let totalImpressions = 0;
-      
-      for (const s of seniorityArray) {
-        totalImpressions += s.impressions;
-        if (s.seniority && decisionMakerTitles.some(title => s.seniority.includes(title))) {
-          dmImpressions += s.impressions;
-        }
-      }
-      
-      // Only set hasData: true if we have meaningful impression data
-      if (totalImpressions > 0) {
-        const currentDecisionMakerPct = (dmImpressions / totalImpressions) * 100;
-        
-        seniorityData = {
-          currentDecisionMakerPct,
-          previousDecisionMakerPct: currentDecisionMakerPct, // Use same for now (no historical data)
-          hasData: true
-        };
-        console.log(`[Scoring100] Campaign ${campaignId} seniority: ${currentDecisionMakerPct.toFixed(1)}% decision-makers (${dmImpressions}/${totalImpressions} impressions)`);
-      }
+    const currentDMPct = calculateDMPercentage(currentSeniorityEntries);
+    const previousDMPct = calculateDMPercentage(previousSeniorityEntries);
+    
+    if (currentDMPct !== null) {
+      seniorityData = {
+        currentDecisionMakerPct: currentDMPct,
+        previousDecisionMakerPct: previousDMPct !== null ? previousDMPct : currentDMPct, // Fall back to current if no previous data
+        hasData: true
+      };
+      const shift = previousDMPct !== null ? currentDMPct - previousDMPct : 0;
+      console.log(`[Scoring100] Campaign ${campaignId} seniority: ${currentDMPct.toFixed(1)}% DM (prev: ${previousDMPct?.toFixed(1) ?? 'N/A'}%, shift: ${shift >= 0 ? '+' : ''}${shift.toFixed(1)}%)`);
     }
     
     // Score the campaign with correct 7 parameters
@@ -3734,8 +3775,20 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
       await saveCreativeDailyMetrics(accountId, creativeMetrics);
     }
     
-    // NOTE: Drilldown data (hourly, job titles, companies) is now synced separately
+    // NOTE: Drilldown data (hourly, job titles, companies) is synced separately
     // via the Drilldown page sync buttons, not as part of the main audit refresh
+    
+    // Sync seniority data for scoring (required for seniority quality metric)
+    try {
+      console.log('[Audit] Syncing seniority data for scoring...');
+      const activeCampaignIds = campaigns.filter((c: any) => c.status === 'ACTIVE').map((c: any) => extractId(c.id));
+      if (activeCampaignIds.length > 0) {
+        await syncSenioritiesDataWithSession(sessionId, accountId, activeCampaignIds, now);
+        console.log('[Audit] Seniority data sync complete');
+      }
+    } catch (seniorityErr: any) {
+      console.warn('[Audit] Seniority sync failed (non-fatal):', seniorityErr.message);
+    }
     
     // Compute and save scoring status for Structure view caching (legacy point-based system)
     console.log('Computing and saving scoring status...');
@@ -3748,7 +3801,7 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
         getCampaignTrackingData(accountId),
         getCreativeLifecycleData(accountId)
       ]);
-      await computeAndSaveScoring100(accountId, campaignMetrics, creativeMetrics, trackingData, creativeLifecycle);
+      await computeAndSaveScoring100(accountId, campaignMetrics, creativeMetrics, trackingData, creativeLifecycle, currentPeriodPenetration, prevPeriodPenetration);
     } catch (scoringErr: any) {
       console.warn('100-point scoring failed (non-fatal):', scoringErr.message);
     }
@@ -4179,6 +4232,60 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     console.log('Computing and saving scoring status...');
     await computeAndSaveScoringStatus(accountId, campaignMetrics, creativeMetrics);
     
+    // Fetch period-total penetration and reach for accurate frequency/penetration scoring
+    const current28End = new Date();
+    const current28Start = new Date(current28End.getTime() - (28 * 24 * 60 * 60 * 1000));
+    const prev28End = new Date(current28Start.getTime() - (1 * 24 * 60 * 60 * 1000));
+    const prev28Start = new Date(prev28End.getTime() - (28 * 24 * 60 * 60 * 1000));
+    
+    let currentPeriodPenetration = new Map<string, { penetration: number | null, reach: number | null }>();
+    let prevPeriodPenetration = new Map<string, { penetration: number | null, reach: number | null }>();
+    
+    try {
+      const currentPeriodQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${current28Start.getFullYear()},month:${current28Start.getMonth() + 1},day:${current28Start.getDate()}),end:(year:${current28End.getFullYear()},month:${current28End.getMonth() + 1},day:${current28End.getDate()}))&timeGranularity=ALL&accounts=List(${encodedAccountUrn})&fields=impressions,audiencePenetration,approximateMemberReach,pivotValues`;
+      
+      const response = await linkedinApiRequestWithToken(accessToken, '/adAnalytics', {}, currentPeriodQuery);
+      console.log(`[Scoring100] Got ${response.elements?.length || 0} current period TOTAL analytics rows`);
+      for (const elem of (response.elements || [])) {
+        const campaignId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
+        if (campaignId) {
+          currentPeriodPenetration.set(campaignId, {
+            penetration: elem.audiencePenetration !== null && elem.audiencePenetration !== undefined ? elem.audiencePenetration : null,
+            reach: elem.approximateMemberReach !== null && elem.approximateMemberReach !== undefined ? elem.approximateMemberReach : null
+          });
+        }
+      }
+      
+      await delay(300);
+      const prevPeriodQuery = `q=analytics&pivot=CAMPAIGN&dateRange=(start:(year:${prev28Start.getFullYear()},month:${prev28Start.getMonth() + 1},day:${prev28Start.getDate()}),end:(year:${prev28End.getFullYear()},month:${prev28End.getMonth() + 1},day:${prev28End.getDate()}))&timeGranularity=ALL&accounts=List(${encodedAccountUrn})&fields=impressions,audiencePenetration,approximateMemberReach,pivotValues`;
+      
+      const prevResponse = await linkedinApiRequestWithToken(accessToken, '/adAnalytics', {}, prevPeriodQuery);
+      console.log(`[Scoring100] Got ${prevResponse.elements?.length || 0} previous period TOTAL analytics rows`);
+      for (const elem of (prevResponse.elements || [])) {
+        const campaignId = elem.pivotValues?.[0] ? extractId(elem.pivotValues[0]) : null;
+        if (campaignId) {
+          prevPeriodPenetration.set(campaignId, {
+            penetration: elem.audiencePenetration !== null && elem.audiencePenetration !== undefined ? elem.audiencePenetration : null,
+            reach: elem.approximateMemberReach !== null && elem.approximateMemberReach !== undefined ? elem.approximateMemberReach : null
+          });
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Scoring100] Could not fetch TOTAL granularity penetration:', err.message);
+    }
+    
+    // Sync seniority data for scoring (required for seniority quality metric)
+    try {
+      console.log('[Audit] Syncing seniority data for scoring...');
+      const activeCampaignIds = campaigns.filter((c: any) => c.status === 'ACTIVE').map((c: any) => extractId(c.id));
+      if (activeCampaignIds.length > 0) {
+        await syncSenioritiesData(accessToken, accountId, activeCampaignIds, new Date());
+        console.log('[Audit] Seniority data sync complete');
+      }
+    } catch (seniorityErr: any) {
+      console.warn('[Audit] Seniority sync failed (non-fatal):', seniorityErr.message);
+    }
+    
     // Also compute 100-point scoring with causation analysis
     try {
       console.log('Computing 100-point scoring with causation engine...');
@@ -4186,7 +4293,7 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
         getCampaignTrackingData(accountId),
         getCreativeLifecycleData(accountId)
       ]);
-      await computeAndSaveScoring100(accountId, campaignMetrics, creativeMetrics, trackingData, creativeLifecycle);
+      await computeAndSaveScoring100(accountId, campaignMetrics, creativeMetrics, trackingData, creativeLifecycle, currentPeriodPenetration, prevPeriodPenetration);
     } catch (scoringErr: any) {
       console.warn('100-point scoring failed (non-fatal):', scoringErr.message);
     }
@@ -4659,7 +4766,123 @@ async function syncCompaniesData(
   console.log(`[Companies] Completed: saved ${totalCompaniesSaved} total company entries`);
 }
 
-// Sync seniorities data only
+// Sync seniorities data only (session-based version for runAuditSync)
+async function syncSenioritiesDataWithSession(
+  sessionId: string, 
+  accountId: string, 
+  activeCampaignIds: string[],
+  now: Date
+) {
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  
+  console.log('[Seniorities] Fetching seniority analytics for 28-day current period...');
+  
+  const periods: Array<{ days: number; period: '7' | '30' | '90' }> = [
+    { days: 28, period: '30' }  // Use 28-day period to match scoring comparison
+  ];
+  
+  let totalSenioritiesSaved = 0;
+  const allSeniorityUrns = new Set<string>();
+  const allSeniorityDataByPeriod: Record<string, Array<{ campaignId: string; seniorityUrn: string; impressions: number; clicks: number }>> = {
+    '7': [], '30': [], '90': []
+  };
+  
+  // Fetch seniorities for scoring period
+  for (const { days, period } of periods) {
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - days);
+    
+    console.log(`[Seniorities] Fetching ${days}-day data for scoring...`);
+    
+    for (const campaignId of activeCampaignIds) {
+      await delay(500);
+      
+      const encodedCampaignUrn = encodeURIComponent(`urn:li:sponsoredCampaign:${campaignId}`);
+      const seniorityAnalyticsQuery = `q=analytics&pivot=MEMBER_SENIORITY&dateRange=(start:(year:${startDate.getFullYear()},month:${startDate.getMonth() + 1},day:${startDate.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&campaigns=List(${encodedCampaignUrn})&fields=impressions,clicks,pivotValues`;
+      
+      let seniorityAnalytics: any = { elements: [] };
+      try {
+        seniorityAnalytics = await linkedinApiRequest(sessionId, `/adAnalytics`, {}, seniorityAnalyticsQuery);
+      } catch (err: any) {
+        if (err.response?.status === 429) {
+          console.warn(`[Seniorities] Rate limited, waiting 30s before retry...`);
+          await delay(30000);
+          try {
+            seniorityAnalytics = await linkedinApiRequest(sessionId, `/adAnalytics`, {}, seniorityAnalyticsQuery);
+          } catch (retryErr: any) {
+            console.error(`[Seniorities] Retry failed for campaign ${campaignId}`);
+            continue;
+          }
+        } else {
+          continue;
+        }
+      }
+      
+      // Collect seniority data and URNs
+      for (const elem of (seniorityAnalytics.elements || [])) {
+        const seniorityUrn = elem.pivotValues?.[0];
+        if (!seniorityUrn || !seniorityUrn.includes('seniority:')) continue;
+        
+        allSeniorityUrns.add(seniorityUrn);
+        allSeniorityDataByPeriod[period].push({
+          campaignId,
+          seniorityUrn,
+          impressions: elem.impressions || 0,
+          clicks: elem.clicks || 0
+        });
+      }
+    }
+    
+    console.log(`[Seniorities] ${period}-day: collected ${allSeniorityDataByPeriod[period].length} entries`);
+  }
+  
+  console.log(`[Seniorities] Total unique seniorities: ${allSeniorityUrns.size}`);
+  
+  // Resolve all seniority URNs using cache or common seniorities
+  const resolvedSeniorities: Record<string, string> = {};
+  for (const seniorityUrn of allSeniorityUrns) {
+    if (urnCache[seniorityUrn]) {
+      resolvedSeniorities[seniorityUrn] = urnCache[seniorityUrn];
+    } else {
+      const seniorityIdMatch = seniorityUrn.match(/seniority:(\d+)/);
+      if (seniorityIdMatch) {
+        const seniorityId = seniorityIdMatch[1];
+        if (COMMON_SENIORITIES[seniorityId]) {
+          resolvedSeniorities[seniorityUrn] = COMMON_SENIORITIES[seniorityId];
+          urnCache[seniorityUrn] = COMMON_SENIORITIES[seniorityId];
+        } else {
+          resolvedSeniorities[seniorityUrn] = `Seniority ${seniorityId}`;
+        }
+      }
+    }
+  }
+  
+  // Save seniorities with resolved names
+  for (const { period } of periods) {
+    const periodData = allSeniorityDataByPeriod[period];
+    const byCampaign: Record<string, Array<{ seniorityUrn: string; seniorityName: string; impressions: number; clicks: number }>> = {};
+    
+    for (const item of periodData) {
+      if (!byCampaign[item.campaignId]) byCampaign[item.campaignId] = [];
+      byCampaign[item.campaignId].push({
+        seniorityUrn: item.seniorityUrn,
+        seniorityName: resolvedSeniorities[item.seniorityUrn] || 'Unknown Seniority',
+        impressions: item.impressions,
+        clicks: item.clicks
+      });
+    }
+    
+    for (const [campaignId, seniorities] of Object.entries(byCampaign)) {
+      await saveSeniorityAnalytics(accountId, campaignId, seniorities, period);
+      totalSenioritiesSaved += seniorities.length;
+    }
+  }
+  
+  saveUrnCache();
+  console.log(`[Seniorities] Completed: saved ${totalSenioritiesSaved} total seniority entries`);
+}
+
+// Sync seniorities data only (token-based version for runAuditSyncWithToken)
 async function syncSenioritiesData(
   accessToken: string, 
   accountId: string, 

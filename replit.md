@@ -17,13 +17,13 @@ The application features a React 19 frontend with TypeScript and Vite, communica
     *   **Remarketing Flow**: Illustrates audience movement through a 3-column marketing funnel (Cold Campaigns → Remarketing Audiences → Remarketing Campaigns).
 *   **Account Audit**:
     *   **Opt-In System**: Account-level opt-in for weekly performance tracking.
-    *   **3-Tier Dashboard**: Displays campaigns categorized into "Needs Attention," "Mild Issues," and "Performing Well."
-    *   **100-Point Scoring System**: Campaigns are scored across Engagement Quality (45 pts), Cost Efficiency (35 pts), and Audience Quality (20 pts), with thresholds for classification (<40: needs_attention, 40-69: mild_issues, ≥70: performing_well). Includes false positive protections with minimum impression/click/conversion thresholds.
+    *   **3-Tier Dashboard**: Displays campaigns categorized into "Needs Attention," "Monitor Closely," and "Strong Performance."
+    *   **100-Point Scoring System**: Campaigns are scored across Engagement Quality (45 pts), Cost Efficiency (35 pts), and Audience Quality (20 pts), with thresholds for classification (0-49: needs_attention, 50-69: monitor_closely, 70-100: strong_performance). Includes false positive protections with minimum impression/click/conversion thresholds.
     *   **3-Layer Causation Engine**: Diagnoses performance changes by analyzing Creative Layer (ad age, CTR decay), Bidding Layer (bid movement, bid vs suggested), and Targeting Layer (audience size changes, penetration, criteria diffs).
     *   **Ad Diagnostic Flags**: Color-coded indicators for individual ad performance (Green, Grey, Red, Yellow, Blue, Purple).
     *   **Metrics & Comparisons**: Uses 4-week on 4-week comparisons for all metrics, including advanced metrics like Frequency, Audience Penetration, and Avg Dwell Time.
     *   **Special Flags**: Displays LAN, Expansion, and Maximize Delivery badges.
-    *   **Data Sync**: Weekly sync for most campaigns; daily for campaigns with LAN/Expansion. Manual refresh available.
+    *   **Data Sync**: Weekly sync for most campaigns; daily for campaigns with LAN/Expansion. Manual refresh available. Seniority data is synced daily alongside audit for scoring.
 *   **Tracking Layer**:
     *   Captures daily settings snapshots (bid, budget, audience size) and versioned targeting changes to power the Causation Engine.
     *   Uses LinkedIn API for real-time audience counts and suggested bid ranges.

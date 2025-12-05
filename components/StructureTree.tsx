@@ -171,10 +171,10 @@ export const StructureTree: React.FC<Props> = ({ data, onSelect, onImportToIdeat
                     <span className="w-3 h-2 rounded-sm bg-red-500"></span> Needs Attention
                   </div>
                   <div className="flex items-center gap-2 pointer-events-none">
-                    <span className="w-3 h-2 rounded-sm bg-amber-500"></span> Mild Issues
+                    <span className="w-3 h-2 rounded-sm bg-amber-500"></span> Monitor Closely
                   </div>
                   <div className="flex items-center gap-2 pointer-events-none">
-                    <span className="w-3 h-2 rounded-sm bg-green-500"></span> Performing Well
+                    <span className="w-3 h-2 rounded-sm bg-green-500"></span> Strong Performance
                   </div>
                 </div>
               )}
