@@ -635,7 +635,7 @@ function AdCard({ ad, accountId, showIssues, onClick }: { ad: AdItem; accountId:
   );
 }
 
-function ScoredAdCard({ ad, accountId, campaignId }: { ad: ScoredAd; accountId: string; campaignId: string }) {
+function ScoredAdCard({ ad, accountId, campaignId, onClick, onPreview }: { ad: ScoredAd; accountId: string; campaignId: string; onClick?: () => void; onPreview?: () => void }) {
   const linkedInUrl = getLinkedInAdUrl(accountId, campaignId, ad.adId);
   
   const getContributionBadge = () => {
@@ -719,18 +719,35 @@ function ScoredAdCard({ ad, accountId, campaignId }: { ad: ScoredAd; accountId: 
   };
   
   return (
-    <div className={`bg-white rounded-lg border ${getBorderColor()} p-4`}>
+    <div 
+      className={`bg-white rounded-lg border ${getBorderColor()} p-4 cursor-pointer hover:shadow-md transition-shadow`}
+      onClick={onClick}
+    >
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
-          <a 
-            href={linkedInUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-medium text-gray-900 hover:text-blue-600 flex items-center gap-1 group"
-          >
-            <span className="truncate">{ad.adName}</span>
-            <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 flex-shrink-0" />
-          </a>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-900 truncate">{ad.adName}</span>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onPreview?.();
+              }}
+              className="p-1 hover:bg-purple-100 rounded text-purple-600 opacity-60 hover:opacity-100 transition-opacity"
+              title="View Ad Preview"
+            >
+              <Eye className="w-3.5 h-3.5" />
+            </button>
+            <a 
+              href={linkedInUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="p-1 hover:bg-gray-100 rounded text-gray-400 hover:text-blue-600 transition-colors"
+              title="View in LinkedIn"
+            >
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
           <div className="flex items-center gap-2 mt-1">
             {getAgeStateBadge()}
             {ad.adStatus === 'PAUSED' && (
@@ -1503,6 +1520,342 @@ function AdDetailSidebar({ ad, accountId, onClose }: {
   );
 }
 
+function ScoredAdDetailSidebar({ ad, campaignAverages, accountId, campaignId, onClose, onPreview }: { 
+  ad: ScoredAd; 
+  campaignAverages: CampaignAverages | null;
+  accountId: string;
+  campaignId: string;
+  onClose: () => void;
+  onPreview: () => void;
+}) {
+  const linkedInUrl = getLinkedInAdUrl(accountId, campaignId, ad.adId);
+  
+  const getContributionBadge = () => {
+    switch (ad.contribution) {
+      case 'high_contributor':
+        return <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded text-xs font-medium"><CheckCircle2 className="w-3 h-3" /> High Contributor</span>;
+      case 'neutral_contributor':
+        return <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-medium">Neutral</span>;
+      case 'weak_contributor':
+        return <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium"><XCircle className="w-3 h-3" /> Weak Contributor</span>;
+      case 'learning':
+        return <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium"><Clock className="w-3 h-3" /> Learning</span>;
+      default:
+        return <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-500 rounded text-xs font-medium"><Info className="w-3 h-3" /> Low Volume</span>;
+    }
+  };
+
+  const getAgeStateBadge = () => {
+    if (!ad.ageState) return null;
+    switch (ad.ageState) {
+      case 'learning':
+        return <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-600 rounded">Learning ({ad.adAgeDays}d)</span>;
+      case 'stable':
+        return <span className="text-xs px-2 py-0.5 bg-green-50 text-green-600 rounded">Stable ({ad.adAgeDays}d)</span>;
+      case 'fatigue_risk':
+        return <span className="text-xs px-2 py-0.5 bg-amber-50 text-amber-600 rounded">Fatigue Risk ({ad.adAgeDays}d)</span>;
+    }
+  };
+
+  const formatDelta = (delta: number | null) => {
+    if (delta === null) return '-';
+    const pct = (delta * 100).toFixed(0);
+    return delta >= 0 ? `+${pct}%` : `${pct}%`;
+  };
+
+  const getStatusColor = (status: string | null, type: 'performance' | 'cpc') => {
+    if (!status) return 'text-gray-500';
+    if (type === 'performance') {
+      if (status === 'strong') return 'text-green-600';
+      if (status === 'weak') return 'text-red-600';
+    } else {
+      if (status === 'efficient') return 'text-green-600';
+      if (status === 'inefficient') return 'text-red-600';
+    }
+    return 'text-gray-600';
+  };
+
+  const getRecommendationText = (rec: string) => {
+    const map: Record<string, string> = {
+      'scale_or_duplicate': 'Scale or duplicate this ad - it\'s a top performer',
+      'keep_running': 'Keep running - performance is on track',
+      'pause_or_optimize': 'Consider pausing or optimizing creative',
+      'refresh_or_replace_creative': 'Refresh or replace creative - showing fatigue',
+      'reduce_impression_share_or_pause': 'Reduce impression share or pause',
+      'allow_more_time': 'Allow more time to gather data',
+      'insufficient_data': 'Insufficient data to evaluate',
+      'no_action_ad_paused': 'Ad is paused - no action needed',
+      'strong_message_but_cta_weak': 'Strong message but weak CTA - improve call-to-action',
+      'improve_post_click_experience': 'Improve landing page experience',
+      'pause_or_replace': 'Pause or replace - underperforming',
+      'create_variants': 'Create variants to spread impression load',
+    };
+    return map[rec] || rec.replace(/_/g, ' ');
+  };
+
+  const getConflictReasonText = (reason: string) => {
+    const map: Record<string, string> = {
+      'senior_audience_or_message_depth': 'Low CTR but high dwell - audience reads carefully before acting',
+      'curiosity_clicks': 'High CTR but low dwell - clicks aren\'t converting to engagement',
+      'algorithm_over_serving_weak_ad': 'LinkedIn is over-serving a weak ad - manual intervention needed',
+      'top_ad_over_served': 'Top ad is monopolizing impressions - diversify to reduce risk',
+    };
+    return map[reason] || reason.replace(/_/g, ' ');
+  };
+
+  return (
+    <div className="fixed inset-y-0 right-0 w-96 bg-white shadow-xl z-50 overflow-y-auto">
+      <div className="sticky top-0 bg-white border-b border-gray-200 p-4 flex items-center justify-between">
+        <h3 className="font-semibold text-gray-900">Ad Scoring Details</h3>
+        <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded">
+          <X className="w-5 h-5 text-gray-500" />
+        </button>
+      </div>
+      
+      <div className="p-4 space-y-6">
+        <div>
+          <h4 className="text-lg font-medium text-gray-900 mb-1">{ad.adName}</h4>
+          <div className="flex items-center gap-2 flex-wrap mt-2">
+            {getContributionBadge()}
+            {getAgeStateBadge()}
+            {ad.adStatus === 'PAUSED' && (
+              <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-500 rounded">Paused</span>
+            )}
+          </div>
+          <div className="flex items-center gap-3 mt-3">
+            <a 
+              href={linkedInUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
+            >
+              View in LinkedIn <ExternalLink className="w-3 h-3" />
+            </a>
+            <button
+              onClick={onPreview}
+              className="inline-flex items-center gap-1 text-sm text-purple-600 hover:underline"
+            >
+              <Eye className="w-3 h-3" /> View Preview
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
+          <h5 className="font-medium text-blue-800 mb-2 flex items-center gap-2">
+            <Zap className="w-4 h-4" /> Recommendation
+          </h5>
+          <p className="text-sm text-blue-700">{getRecommendationText(ad.recommendation)}</p>
+        </div>
+
+        {ad.conflictReason && (
+          <div className="bg-purple-50 rounded-lg p-4 border border-purple-100">
+            <h5 className="font-medium text-purple-800 mb-2 flex items-center gap-2">
+              <Info className="w-4 h-4" /> Pattern Detected
+            </h5>
+            <p className="text-sm text-purple-700">{getConflictReasonText(ad.conflictReason)}</p>
+          </div>
+        )}
+
+        {ad.fatigueFlag === 'fatigued' && (
+          <div className="bg-amber-50 rounded-lg p-4 border border-amber-100">
+            <h5 className="font-medium text-amber-800 mb-2 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" /> Creative Fatigue
+            </h5>
+            <p className="text-sm text-amber-700">This ad is showing signs of fatigue. Consider refreshing the creative or pausing to prevent wasted spend.</p>
+          </div>
+        )}
+        
+        <div>
+          <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+            <BarChart3 className="w-4 h-4" /> Performance vs Campaign Average
+          </h5>
+          <div className="bg-gray-50 rounded-lg p-3 space-y-3">
+            <div className="flex justify-between items-center py-2 border-b border-gray-200">
+              <span className="text-sm text-gray-600">CTR</span>
+              <div className="text-right">
+                <span className="text-sm font-medium text-gray-900">{formatCtr(ad.adCtr)}</span>
+                {campaignAverages && (
+                  <span className="text-xs text-gray-500 ml-2">vs {formatCtr(campaignAverages.campaignCtr)}</span>
+                )}
+                <span className={`ml-2 text-xs font-medium ${getStatusColor(ad.ctrStatus, 'performance')}`}>
+                  {formatDelta(ad.ctrDelta)} ({ad.ctrStatus || '-'})
+                </span>
+              </div>
+            </div>
+            <div className="flex justify-between items-center py-2 border-b border-gray-200">
+              <span className="text-sm text-gray-600">Dwell Time</span>
+              <div className="text-right">
+                <span className="text-sm font-medium text-gray-900">{ad.adDwell ? `${ad.adDwell.toFixed(1)}s` : '-'}</span>
+                {campaignAverages?.campaignDwell && (
+                  <span className="text-xs text-gray-500 ml-2">vs {campaignAverages.campaignDwell.toFixed(1)}s</span>
+                )}
+                <span className={`ml-2 text-xs font-medium ${getStatusColor(ad.dwellStatus, 'performance')}`}>
+                  {formatDelta(ad.dwellDelta)} ({ad.dwellStatus || '-'})
+                </span>
+              </div>
+            </div>
+            <div className="flex justify-between items-center py-2">
+              <span className="text-sm text-gray-600">CPC</span>
+              <div className="text-right">
+                <span className="text-sm font-medium text-gray-900">{ad.adCpc ? `$${ad.adCpc.toFixed(2)}` : '-'}</span>
+                {campaignAverages?.campaignCpc && (
+                  <span className="text-xs text-gray-500 ml-2">vs ${campaignAverages.campaignCpc.toFixed(2)}</span>
+                )}
+                <span className={`ml-2 text-xs font-medium ${getStatusColor(ad.cpcStatus, 'cpc')}`}>
+                  {formatDelta(ad.cpcDelta)} ({ad.cpcStatus || '-'})
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+            <Percent className="w-4 h-4" /> Impression Distribution
+          </h5>
+          <div className="bg-gray-50 rounded-lg p-3">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-sm text-gray-600">Share of Campaign</span>
+              <span className={`text-sm font-medium ${
+                ad.distributionFlag === 'over_served' ? 'text-amber-600' :
+                ad.distributionFlag === 'under_served' ? 'text-gray-500' : 'text-gray-900'
+              }`}>
+                {(ad.impressionShare * 100).toFixed(0)}%
+              </span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                className={`h-2 rounded-full ${
+                  ad.distributionFlag === 'over_served' ? 'bg-amber-500' :
+                  ad.distributionFlag === 'under_served' ? 'bg-gray-400' : 'bg-blue-500'
+                }`}
+                style={{ width: `${Math.min(ad.impressionShare * 100, 100)}%` }}
+              />
+            </div>
+            {ad.distributionFlag !== 'normal' && (
+              <p className={`text-xs mt-2 ${ad.distributionFlag === 'over_served' ? 'text-amber-600' : 'text-gray-500'}`}>
+                {ad.distributionFlag === 'over_served' 
+                  ? 'This ad is receiving ≥70% of impressions. Consider creating variants to spread risk.'
+                  : 'This ad is receiving <10% of impressions. LinkedIn may be deprioritizing it.'}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+            <Eye className="w-4 h-4" /> Volume Metrics
+          </h5>
+          <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600">Impressions</span>
+              <span className="font-medium text-gray-900">{formatNumber(ad.adImpressions)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600">Clicks</span>
+              <span className="font-medium text-gray-900">{formatNumber(ad.adClicks)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600">Spend</span>
+              <span className="font-medium text-gray-900">${ad.adSpend.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600">Age</span>
+              <span className="font-medium text-gray-900">{ad.adAgeDays} days</span>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h5 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+            <Target className="w-4 h-4" /> Scoring Thresholds Applied
+          </h5>
+          <div className="bg-gray-50 rounded-lg p-3 space-y-2 text-xs">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-white p-2 rounded border border-gray-200">
+                <p className="text-gray-500 mb-1">Volume Required</p>
+                <p className="font-medium">≥1,000 impressions</p>
+                <p className={ad.lowVolume ? 'text-red-500' : 'text-green-500'}>
+                  {ad.lowVolume ? 'Not met' : 'Met'}
+                </p>
+              </div>
+              <div className="bg-white p-2 rounded border border-gray-200">
+                <p className="text-gray-500 mb-1">Age Classification</p>
+                <p className="font-medium">
+                  {ad.adAgeDays <= 13 ? '≤13d = Learning' : ad.adAgeDays <= 59 ? '14-59d = Stable' : '≥60d = Fatigue Risk'}
+                </p>
+              </div>
+              <div className="bg-white p-2 rounded border border-gray-200">
+                <p className="text-gray-500 mb-1">CTR Thresholds</p>
+                <p className="font-medium">Strong ≥+10% / Weak ≤-15%</p>
+              </div>
+              <div className="bg-white p-2 rounded border border-gray-200">
+                <p className="text-gray-500 mb-1">Dwell Thresholds</p>
+                <p className="font-medium">Strong ≥+10% / Weak ≤-10%</p>
+              </div>
+              <div className="bg-white p-2 rounded border border-gray-200">
+                <p className="text-gray-500 mb-1">CPC Thresholds</p>
+                <p className="font-medium">Efficient ≥+10% / Inefficient ≤-15%</p>
+              </div>
+              <div className="bg-white p-2 rounded border border-gray-200">
+                <p className="text-gray-500 mb-1">Distribution</p>
+                <p className="font-medium">Over ≥70% / Under &lt;10%</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdPreviewModal({ previewHtml, loading, onClose }: {
+  previewHtml: string | null;
+  loading: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div 
+      className="fixed inset-0 bg-black bg-opacity-50 z-[100] flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div 
+        className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-auto relative"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between z-10">
+          <h3 className="font-semibold text-gray-900">Ad Preview</h3>
+          <button
+            onClick={onClose}
+            className="p-1.5 hover:bg-gray-100 rounded-full text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-4">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 text-blue-500 animate-spin mb-3" />
+              <p className="text-sm text-gray-500">Loading preview...</p>
+            </div>
+          ) : previewHtml ? (
+            <div 
+              className="w-full"
+              dangerouslySetInnerHTML={{ __html: previewHtml }} 
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+              <Eye className="w-12 h-12 mb-3 opacity-30" />
+              <p className="text-sm">Preview not available for this ad</p>
+              <p className="text-xs mt-1">The ad may be using a format that doesn't support previews</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StartAuditView({ accountName, onStart, isStarting }: { 
   accountName: string; 
   onStart: () => void;
@@ -1643,6 +1996,10 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
   const [adsLoading, setAdsLoading] = useState(false);
   const [adsError, setAdsError] = useState<string | null>(null);
   const [adsCache, setAdsCache] = useState<Record<string, { ads: ScoredAd[]; averages: CampaignAverages | null }>>({});
+  const [selectedScoredAd, setSelectedScoredAd] = useState<ScoredAd | null>(null);
+  const [previewAdId, setPreviewAdId] = useState<string | null>(null);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const checkAuditStatus = useCallback(async () => {
     if (!accountId) return;
@@ -1775,6 +2132,24 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
       setScoredAds([]);
     } finally {
       setAdsLoading(false);
+    }
+  };
+
+  const fetchAdPreview = async (adId: string) => {
+    if (!accountId) return;
+    setPreviewAdId(adId);
+    setPreviewHtml(null);
+    setPreviewLoading(true);
+    
+    try {
+      const response = await api.get(`/linkedin/account/${accountId}/ad-preview/${adId}`);
+      if (response.data?.elements?.[0]?.preview) {
+        setPreviewHtml(response.data.elements[0].preview);
+      }
+    } catch (err) {
+      console.error('Failed to fetch ad preview:', err);
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
@@ -2111,6 +2486,8 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
                     ad={ad} 
                     accountId={accountId}
                     campaignId={selectedAdsCampaignId}
+                    onClick={() => setSelectedScoredAd(ad)}
+                    onPreview={() => fetchAdPreview(ad.adId)}
                   />
                 ))}
               </div>
@@ -2164,6 +2541,31 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
             onClose={() => setSelectedCampaign(null)} 
           />
         </>
+      )}
+      
+      {selectedScoredAd && selectedAdsCampaignId && (
+        <>
+          <div className="fixed inset-0 bg-black/20 z-40" onClick={() => setSelectedScoredAd(null)} />
+          <ScoredAdDetailSidebar 
+            ad={selectedScoredAd} 
+            campaignAverages={campaignAverages}
+            accountId={accountId}
+            campaignId={selectedAdsCampaignId}
+            onClose={() => setSelectedScoredAd(null)}
+            onPreview={() => fetchAdPreview(selectedScoredAd.adId)}
+          />
+        </>
+      )}
+      
+      {previewAdId && (
+        <AdPreviewModal 
+          previewHtml={previewHtml}
+          loading={previewLoading}
+          onClose={() => {
+            setPreviewAdId(null);
+            setPreviewHtml(null);
+          }}
+        />
       )}
       
       {selectedAd && (
