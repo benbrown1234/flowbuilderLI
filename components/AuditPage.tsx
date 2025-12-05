@@ -691,8 +691,8 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
           <h4 className="text-lg font-medium text-gray-900 mb-2">{campaign.name}</h4>
           <div className="flex items-center gap-2 flex-wrap">
             {getStatusBadge()}
-            {campaign.score !== undefined && (
-              <span className="text-xs text-gray-500">Score: {campaign.score}</span>
+            {campaign.totalScore !== undefined && (
+              <ScoreBadge score={campaign.totalScore} status={campaign.scoringStatus} />
             )}
           </div>
           <a 
@@ -705,19 +705,52 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
           </a>
         </div>
         
-        {/* Score Breakdown */}
-        {(campaign.negativeScore !== undefined || campaign.positiveScore !== undefined) && (
-          <div className="bg-gray-100 rounded-lg p-3 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-600">Score Breakdown</span>
-              <span className="font-medium">
-                <span className="text-red-600">{campaign.negativeScore || 0}</span>
-                {(campaign.positiveScore || 0) > 0 && (
-                  <span className="text-green-600 ml-1">+{campaign.positiveScore}</span>
-                )}
-                <span className="text-gray-900 ml-2">= {campaign.score}</span>
-              </span>
+        {/* 100-Point Score Breakdown */}
+        {(campaign.engagementScore !== undefined || campaign.costScore !== undefined || campaign.audienceScore !== undefined) && (
+          <div className="bg-gray-100 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <span className="font-medium text-gray-700">Score Breakdown</span>
+              <span className="text-lg font-bold text-gray-900">{campaign.totalScore || 0}/100</span>
             </div>
+            <ScoreBreakdownBars 
+              engagementScore={campaign.engagementScore}
+              engagementMax={45}
+              costScore={campaign.costScore}
+              costMax={35}
+              audienceScore={campaign.audienceScore}
+              audienceMax={20}
+            />
+          </div>
+        )}
+        
+        {/* Causation Insights - Why Performance Changed */}
+        {campaign.causationInsights && campaign.causationInsights.length > 0 && (
+          <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
+            <h5 className="font-medium text-blue-800 mb-2 flex items-center gap-2">
+              <TrendingUp className="w-4 h-4" /> Causation Analysis
+            </h5>
+            <ul className="space-y-2">
+              {campaign.causationInsights.map((insight: any, idx: number) => (
+                <li key={idx} className="text-sm">
+                  <div className="flex items-start gap-2">
+                    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+                      insight.layer === 'creative' ? 'bg-purple-100 text-purple-700' :
+                      insight.layer === 'bidding' ? 'bg-orange-100 text-orange-700' :
+                      'bg-cyan-100 text-cyan-700'
+                    }`}>
+                      {insight.layer === 'creative' ? 'Creative' :
+                       insight.layer === 'bidding' ? 'Bidding' : 'Targeting'}
+                    </span>
+                    <div className="flex-1">
+                      <span className="text-blue-700">{insight.message}</span>
+                      {insight.recommendation && (
+                        <p className="text-blue-600 text-xs mt-1 italic">{insight.recommendation}</p>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
         
@@ -1094,36 +1127,32 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
               </div>
             )}
             
-            {/* Final Summary */}
-            <div className="space-y-1 pt-2 border-t border-slate-300">
-              <div className="font-medium text-slate-700">Final Score</div>
+            {/* 100-Point Score Summary */}
+            <div className="space-y-2 pt-2 border-t border-slate-300">
+              <div className="font-medium text-slate-700">Score Summary (100-Point System)</div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Negative Total</span>
-                <span className="text-red-600 font-medium">{campaign.negativeScore || 0}</span>
+                <span className="text-slate-500">Engagement Quality</span>
+                <span className="text-blue-600 font-medium">{campaign.engagementScore || 0}/45</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Positive Total</span>
-                <span className="text-green-600 font-medium">
-                  +{campaign.positiveScore || 0}
-                  {campaign.hasHardFailure && campaign.rawPositiveScore && campaign.rawPositiveScore > 0 && (
-                    <span className="text-slate-400 text-[10px] ml-1">(raw +{campaign.rawPositiveScore} disabled)</span>
-                  )}
-                  {!campaign.hasHardFailure && campaign.rawPositiveScore && campaign.rawPositiveScore > 2 && (
-                    <span className="text-slate-400 text-[10px] ml-1">(raw +{campaign.rawPositiveScore} capped)</span>
-                  )}
-                </span>
+                <span className="text-slate-500">Cost Efficiency</span>
+                <span className="text-green-600 font-medium">{campaign.costScore || 0}/35</span>
               </div>
-              <div className="flex justify-between font-medium">
-                <span className="text-slate-700">Combined Score</span>
-                <span className={`font-bold ${
-                  (campaign.score || 0) <= -3 ? 'text-red-600' :
-                  (campaign.score || 0) < 0 ? 'text-amber-600' : 'text-green-600'
+              <div className="flex justify-between">
+                <span className="text-slate-500">Audience Quality</span>
+                <span className="text-purple-600 font-medium">{campaign.audienceScore || 0}/20</span>
+              </div>
+              <div className="flex justify-between font-medium pt-1 border-t border-slate-200">
+                <span className="text-slate-700">Total Score</span>
+                <span className={`font-bold text-lg ${
+                  (campaign.totalScore || 0) < 40 ? 'text-red-600' :
+                  (campaign.totalScore || 0) < 70 ? 'text-amber-600' : 'text-green-600'
                 }`}>
-                  {campaign.score || 0}
+                  {campaign.totalScore || 0}/100
                 </span>
               </div>
               <div className="text-slate-400 italic text-[10px] pt-1">
-                Tiers: ≤-3 Needs Attention | &lt;0 Mild Issues | ≥0 Performing Well
+                Tiers: &lt;40 Needs Attention | 40-69 Mild Issues | ≥70 Performing Well
               </div>
             </div>
           </div>
@@ -1258,32 +1287,10 @@ function AdDetailSidebar({ ad, accountId, onClose }: {
               ))}
             </div>
             
-            {ad.scoringMetadata && (
-              <div className="mt-3 pt-3 border-t border-slate-300 space-y-1">
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">Negative Total</span>
-                  <span className="text-red-600 font-medium">{ad.scoringMetadata.negativeScore || 0}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">Positive Total</span>
-                  <span className="text-green-600 font-medium">
-                    +{ad.scoringMetadata.positiveScore || 0}
-                    {ad.scoringMetadata.rawPositiveScore && ad.scoringMetadata.rawPositiveScore > 2 && (
-                      <span className="text-slate-400 text-[10px] ml-1">(raw +{ad.scoringMetadata.rawPositiveScore} capped)</span>
-                    )}
-                  </span>
-                </div>
-                <div className="flex justify-between font-medium">
-                  <span className="text-slate-700">Combined Score</span>
-                  <span className={`font-bold ${
-                    (ad.scoringMetadata.score || 0) <= -2 ? 'text-red-600' :
-                    (ad.scoringMetadata.score || 0) < 0 ? 'text-amber-600' : 'text-green-600'
-                  }`}>
-                    {ad.scoringMetadata.score || 0}
-                  </span>
-                </div>
-                <div className="text-slate-400 italic text-[10px] pt-1">
-                  Tiers: ≤-2 Needs Attention | &lt;0 Mild Issues | ≥0 Performing Well
+            {ad.scoringMetadata && ad.scoringMetadata.peerCount && (
+              <div className="mt-3 pt-3 border-t border-slate-300">
+                <div className="text-slate-400 italic text-[10px]">
+                  Compared against {ad.scoringMetadata.peerCount} other ads in this campaign
                 </div>
               </div>
             )}
