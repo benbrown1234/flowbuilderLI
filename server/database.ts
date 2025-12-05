@@ -320,6 +320,101 @@ export async function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_canvas_versions_canvas ON ideate_canvas_versions(canvas_id);
       CREATE INDEX IF NOT EXISTS idx_canvas_comments_canvas ON ideate_canvas_comments(canvas_id);
 
+      -- =============================================
+      -- TRACKING LAYER TABLES (for Causation Engine)
+      -- =============================================
+
+      -- Campaign settings history: daily snapshots of settings that affect performance
+      CREATE TABLE IF NOT EXISTS campaign_settings_history (
+        id SERIAL PRIMARY KEY,
+        account_id VARCHAR(50) NOT NULL,
+        campaign_id VARCHAR(50) NOT NULL,
+        snapshot_date DATE NOT NULL,
+        -- Bid settings
+        bid_value DECIMAL(12,4),
+        bid_strategy VARCHAR(50),
+        cost_type VARCHAR(50),
+        optimization_target VARCHAR(100),
+        -- Budget settings
+        daily_budget DECIMAL(12,2),
+        lifetime_budget DECIMAL(12,2),
+        -- Expansion settings
+        audience_expansion_enabled BOOLEAN DEFAULT FALSE,
+        linkedin_audience_network BOOLEAN DEFAULT FALSE,
+        -- Auction insights
+        suggested_bid_min DECIMAL(12,4),
+        suggested_bid_max DECIMAL(12,4),
+        suggested_bid_default DECIMAL(12,4),
+        bid_floor DECIMAL(12,4),
+        bid_ceiling DECIMAL(12,4),
+        -- Audience size estimate
+        audience_size_total BIGINT,
+        audience_size_active BIGINT,
+        -- Campaign state
+        campaign_status VARCHAR(50),
+        objective_type VARCHAR(100),
+        -- Metadata
+        currency VARCHAR(10) DEFAULT 'USD',
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(account_id, campaign_id, snapshot_date)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_settings_history_campaign ON campaign_settings_history(campaign_id, snapshot_date DESC);
+      CREATE INDEX IF NOT EXISTS idx_settings_history_account ON campaign_settings_history(account_id, snapshot_date DESC);
+
+      -- Targeting changes: track when targeting criteria changes
+      CREATE TABLE IF NOT EXISTS targeting_changes (
+        id SERIAL PRIMARY KEY,
+        account_id VARCHAR(50) NOT NULL,
+        campaign_id VARCHAR(50) NOT NULL,
+        detected_at TIMESTAMP DEFAULT NOW(),
+        change_type VARCHAR(20) NOT NULL, -- 'added', 'removed', 'modified'
+        facet_type VARCHAR(100) NOT NULL, -- 'job_titles', 'seniorities', 'industries', 'company_sizes', 'skills', etc.
+        facet_values_before JSONB,
+        facet_values_after JSONB,
+        audience_size_before BIGINT,
+        audience_size_after BIGINT,
+        targeting_hash_before VARCHAR(64),
+        targeting_hash_after VARCHAR(64),
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_targeting_changes_campaign ON targeting_changes(campaign_id, detected_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_targeting_changes_account ON targeting_changes(account_id, detected_at DESC);
+
+      -- Creative lifecycle: track ad state changes over time
+      CREATE TABLE IF NOT EXISTS creative_lifecycle (
+        id SERIAL PRIMARY KEY,
+        account_id VARCHAR(50) NOT NULL,
+        creative_id VARCHAR(50) NOT NULL,
+        campaign_id VARCHAR(50),
+        -- Lifecycle dates
+        first_active_date DATE,
+        last_active_date DATE,
+        total_active_days INTEGER DEFAULT 0,
+        -- Current state
+        current_status VARCHAR(50),
+        status_changed_at TIMESTAMP,
+        -- Content tracking (to detect creative changes)
+        content_hash VARCHAR(64),
+        content_changed_at TIMESTAMP,
+        -- Performance at key milestones
+        impressions_at_launch BIGINT,
+        ctr_at_launch DECIMAL(8,4),
+        impressions_at_week1 BIGINT,
+        ctr_at_week1 DECIMAL(8,4),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(account_id, creative_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_creative_lifecycle_campaign ON creative_lifecycle(campaign_id);
+      CREATE INDEX IF NOT EXISTS idx_creative_lifecycle_status ON creative_lifecycle(current_status);
+      CREATE INDEX IF NOT EXISTS idx_creative_lifecycle_first_active ON creative_lifecycle(first_active_date);
+
+      -- Add impression_share column to analytics_creative_daily for ad-level share tracking
+      ALTER TABLE analytics_creative_daily ADD COLUMN IF NOT EXISTS impression_share DECIMAL(8,4);
+
       -- Database-backed sessions for persistence across restarts
       CREATE TABLE IF NOT EXISTS user_sessions (
         id VARCHAR(64) PRIMARY KEY,
@@ -2207,6 +2302,395 @@ export async function hasCompanyData(accountId: string): Promise<boolean> {
     [accId]
   );
   return result.rows[0]?.exists || false;
+}
+
+// =============================================
+// TRACKING LAYER FUNCTIONS (for Causation Engine)
+// =============================================
+
+export interface CampaignSettingsSnapshot {
+  accountId: string;
+  campaignId: string;
+  snapshotDate: Date;
+  bidValue?: number | null;
+  bidStrategy?: string | null;
+  costType?: string | null;
+  optimizationTarget?: string | null;
+  dailyBudget?: number | null;
+  lifetimeBudget?: number | null;
+  audienceExpansionEnabled?: boolean;
+  linkedinAudienceNetwork?: boolean;
+  suggestedBidMin?: number | null;
+  suggestedBidMax?: number | null;
+  suggestedBidDefault?: number | null;
+  bidFloor?: number | null;
+  bidCeiling?: number | null;
+  audienceSizeTotal?: number | null;
+  audienceSizeActive?: number | null;
+  campaignStatus?: string | null;
+  objectiveType?: string | null;
+  currency?: string;
+}
+
+export async function saveCampaignSettingsSnapshot(snapshot: CampaignSettingsSnapshot): Promise<void> {
+  const accId = String(snapshot.accountId);
+  const campId = String(snapshot.campaignId);
+  const snapshotDate = snapshot.snapshotDate;
+  
+  await pool.query(
+    `INSERT INTO campaign_settings_history (
+      account_id, campaign_id, snapshot_date,
+      bid_value, bid_strategy, cost_type, optimization_target,
+      daily_budget, lifetime_budget,
+      audience_expansion_enabled, linkedin_audience_network,
+      suggested_bid_min, suggested_bid_max, suggested_bid_default,
+      bid_floor, bid_ceiling,
+      audience_size_total, audience_size_active,
+      campaign_status, objective_type, currency
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+    ON CONFLICT (account_id, campaign_id, snapshot_date) DO UPDATE SET
+      bid_value = EXCLUDED.bid_value,
+      bid_strategy = EXCLUDED.bid_strategy,
+      cost_type = EXCLUDED.cost_type,
+      optimization_target = EXCLUDED.optimization_target,
+      daily_budget = EXCLUDED.daily_budget,
+      lifetime_budget = EXCLUDED.lifetime_budget,
+      audience_expansion_enabled = EXCLUDED.audience_expansion_enabled,
+      linkedin_audience_network = EXCLUDED.linkedin_audience_network,
+      suggested_bid_min = EXCLUDED.suggested_bid_min,
+      suggested_bid_max = EXCLUDED.suggested_bid_max,
+      suggested_bid_default = EXCLUDED.suggested_bid_default,
+      bid_floor = EXCLUDED.bid_floor,
+      bid_ceiling = EXCLUDED.bid_ceiling,
+      audience_size_total = EXCLUDED.audience_size_total,
+      audience_size_active = EXCLUDED.audience_size_active,
+      campaign_status = EXCLUDED.campaign_status,
+      objective_type = EXCLUDED.objective_type,
+      currency = EXCLUDED.currency`,
+    [
+      accId, campId, snapshotDate,
+      snapshot.bidValue, snapshot.bidStrategy, snapshot.costType, snapshot.optimizationTarget,
+      snapshot.dailyBudget, snapshot.lifetimeBudget,
+      snapshot.audienceExpansionEnabled ?? false, snapshot.linkedinAudienceNetwork ?? false,
+      snapshot.suggestedBidMin, snapshot.suggestedBidMax, snapshot.suggestedBidDefault,
+      snapshot.bidFloor, snapshot.bidCeiling,
+      snapshot.audienceSizeTotal, snapshot.audienceSizeActive,
+      snapshot.campaignStatus, snapshot.objectiveType, snapshot.currency || 'USD'
+    ]
+  );
+}
+
+export async function getCampaignSettingsHistory(
+  accountId: string, 
+  campaignId: string, 
+  days: number = 30
+): Promise<CampaignSettingsSnapshot[]> {
+  const accId = String(accountId);
+  const campId = String(campaignId);
+  
+  const result = await pool.query(
+    `SELECT * FROM campaign_settings_history 
+     WHERE account_id = $1 AND campaign_id = $2 AND snapshot_date >= NOW() - INTERVAL '${days} days'
+     ORDER BY snapshot_date DESC`,
+    [accId, campId]
+  );
+  
+  return result.rows.map(row => ({
+    accountId: row.account_id,
+    campaignId: row.campaign_id,
+    snapshotDate: row.snapshot_date,
+    bidValue: row.bid_value ? parseFloat(row.bid_value) : null,
+    bidStrategy: row.bid_strategy,
+    costType: row.cost_type,
+    optimizationTarget: row.optimization_target,
+    dailyBudget: row.daily_budget ? parseFloat(row.daily_budget) : null,
+    lifetimeBudget: row.lifetime_budget ? parseFloat(row.lifetime_budget) : null,
+    audienceExpansionEnabled: row.audience_expansion_enabled,
+    linkedinAudienceNetwork: row.linkedin_audience_network,
+    suggestedBidMin: row.suggested_bid_min ? parseFloat(row.suggested_bid_min) : null,
+    suggestedBidMax: row.suggested_bid_max ? parseFloat(row.suggested_bid_max) : null,
+    suggestedBidDefault: row.suggested_bid_default ? parseFloat(row.suggested_bid_default) : null,
+    bidFloor: row.bid_floor ? parseFloat(row.bid_floor) : null,
+    bidCeiling: row.bid_ceiling ? parseFloat(row.bid_ceiling) : null,
+    audienceSizeTotal: row.audience_size_total ? parseInt(row.audience_size_total) : null,
+    audienceSizeActive: row.audience_size_active ? parseInt(row.audience_size_active) : null,
+    campaignStatus: row.campaign_status,
+    objectiveType: row.objective_type,
+    currency: row.currency
+  }));
+}
+
+export async function getLatestCampaignSettings(
+  accountId: string, 
+  campaignId: string
+): Promise<CampaignSettingsSnapshot | null> {
+  const accId = String(accountId);
+  const campId = String(campaignId);
+  
+  const result = await pool.query(
+    `SELECT * FROM campaign_settings_history 
+     WHERE account_id = $1 AND campaign_id = $2
+     ORDER BY snapshot_date DESC LIMIT 1`,
+    [accId, campId]
+  );
+  
+  if (result.rows.length === 0) return null;
+  
+  const row = result.rows[0];
+  return {
+    accountId: row.account_id,
+    campaignId: row.campaign_id,
+    snapshotDate: row.snapshot_date,
+    bidValue: row.bid_value ? parseFloat(row.bid_value) : null,
+    bidStrategy: row.bid_strategy,
+    costType: row.cost_type,
+    optimizationTarget: row.optimization_target,
+    dailyBudget: row.daily_budget ? parseFloat(row.daily_budget) : null,
+    lifetimeBudget: row.lifetime_budget ? parseFloat(row.lifetime_budget) : null,
+    audienceExpansionEnabled: row.audience_expansion_enabled,
+    linkedinAudienceNetwork: row.linkedin_audience_network,
+    suggestedBidMin: row.suggested_bid_min ? parseFloat(row.suggested_bid_min) : null,
+    suggestedBidMax: row.suggested_bid_max ? parseFloat(row.suggested_bid_max) : null,
+    suggestedBidDefault: row.suggested_bid_default ? parseFloat(row.suggested_bid_default) : null,
+    bidFloor: row.bid_floor ? parseFloat(row.bid_floor) : null,
+    bidCeiling: row.bid_ceiling ? parseFloat(row.bid_ceiling) : null,
+    audienceSizeTotal: row.audience_size_total ? parseInt(row.audience_size_total) : null,
+    audienceSizeActive: row.audience_size_active ? parseInt(row.audience_size_active) : null,
+    campaignStatus: row.campaign_status,
+    objectiveType: row.objective_type,
+    currency: row.currency
+  };
+}
+
+export interface TargetingChange {
+  accountId: string;
+  campaignId: string;
+  changeType: 'added' | 'removed' | 'modified';
+  facetType: string;
+  facetValuesBefore?: any;
+  facetValuesAfter?: any;
+  audienceSizeBefore?: number | null;
+  audienceSizeAfter?: number | null;
+  targetingHashBefore?: string | null;
+  targetingHashAfter?: string | null;
+}
+
+export async function saveTargetingChange(change: TargetingChange): Promise<void> {
+  const accId = String(change.accountId);
+  const campId = String(change.campaignId);
+  
+  await pool.query(
+    `INSERT INTO targeting_changes (
+      account_id, campaign_id, change_type, facet_type,
+      facet_values_before, facet_values_after,
+      audience_size_before, audience_size_after,
+      targeting_hash_before, targeting_hash_after
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      accId, campId, change.changeType, change.facetType,
+      change.facetValuesBefore ? JSON.stringify(change.facetValuesBefore) : null,
+      change.facetValuesAfter ? JSON.stringify(change.facetValuesAfter) : null,
+      change.audienceSizeBefore, change.audienceSizeAfter,
+      change.targetingHashBefore, change.targetingHashAfter
+    ]
+  );
+}
+
+export async function getTargetingChanges(
+  accountId: string, 
+  campaignId: string, 
+  days: number = 30
+): Promise<TargetingChange[]> {
+  const accId = String(accountId);
+  const campId = String(campaignId);
+  
+  const result = await pool.query(
+    `SELECT * FROM targeting_changes 
+     WHERE account_id = $1 AND campaign_id = $2 AND detected_at >= NOW() - INTERVAL '${days} days'
+     ORDER BY detected_at DESC`,
+    [accId, campId]
+  );
+  
+  return result.rows.map(row => ({
+    accountId: row.account_id,
+    campaignId: row.campaign_id,
+    changeType: row.change_type,
+    facetType: row.facet_type,
+    facetValuesBefore: row.facet_values_before,
+    facetValuesAfter: row.facet_values_after,
+    audienceSizeBefore: row.audience_size_before ? parseInt(row.audience_size_before) : null,
+    audienceSizeAfter: row.audience_size_after ? parseInt(row.audience_size_after) : null,
+    targetingHashBefore: row.targeting_hash_before,
+    targetingHashAfter: row.targeting_hash_after
+  }));
+}
+
+export interface CreativeLifecycle {
+  accountId: string;
+  creativeId: string;
+  campaignId?: string | null;
+  firstActiveDate?: Date | null;
+  lastActiveDate?: Date | null;
+  totalActiveDays?: number;
+  currentStatus?: string | null;
+  statusChangedAt?: Date | null;
+  contentHash?: string | null;
+  contentChangedAt?: Date | null;
+  impressionsAtLaunch?: number | null;
+  ctrAtLaunch?: number | null;
+  impressionsAtWeek1?: number | null;
+  ctrAtWeek1?: number | null;
+}
+
+export async function upsertCreativeLifecycle(lifecycle: CreativeLifecycle): Promise<void> {
+  const accId = String(lifecycle.accountId);
+  const creativeId = String(lifecycle.creativeId);
+  const campaignId = lifecycle.campaignId ? String(lifecycle.campaignId) : null;
+  
+  await pool.query(
+    `INSERT INTO creative_lifecycle (
+      account_id, creative_id, campaign_id,
+      first_active_date, last_active_date, total_active_days,
+      current_status, status_changed_at,
+      content_hash, content_changed_at,
+      impressions_at_launch, ctr_at_launch,
+      impressions_at_week1, ctr_at_week1
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+    ON CONFLICT (account_id, creative_id) DO UPDATE SET
+      campaign_id = COALESCE(EXCLUDED.campaign_id, creative_lifecycle.campaign_id),
+      first_active_date = COALESCE(creative_lifecycle.first_active_date, EXCLUDED.first_active_date),
+      last_active_date = GREATEST(creative_lifecycle.last_active_date, EXCLUDED.last_active_date),
+      total_active_days = EXCLUDED.total_active_days,
+      current_status = EXCLUDED.current_status,
+      status_changed_at = CASE 
+        WHEN creative_lifecycle.current_status IS DISTINCT FROM EXCLUDED.current_status 
+        THEN NOW() 
+        ELSE creative_lifecycle.status_changed_at 
+      END,
+      content_hash = CASE 
+        WHEN EXCLUDED.content_hash IS NOT NULL AND creative_lifecycle.content_hash IS DISTINCT FROM EXCLUDED.content_hash 
+        THEN EXCLUDED.content_hash 
+        ELSE creative_lifecycle.content_hash 
+      END,
+      content_changed_at = CASE 
+        WHEN EXCLUDED.content_hash IS NOT NULL AND creative_lifecycle.content_hash IS DISTINCT FROM EXCLUDED.content_hash 
+        THEN NOW() 
+        ELSE creative_lifecycle.content_changed_at 
+      END,
+      impressions_at_launch = COALESCE(creative_lifecycle.impressions_at_launch, EXCLUDED.impressions_at_launch),
+      ctr_at_launch = COALESCE(creative_lifecycle.ctr_at_launch, EXCLUDED.ctr_at_launch),
+      impressions_at_week1 = COALESCE(EXCLUDED.impressions_at_week1, creative_lifecycle.impressions_at_week1),
+      ctr_at_week1 = COALESCE(EXCLUDED.ctr_at_week1, creative_lifecycle.ctr_at_week1),
+      updated_at = NOW()`,
+    [
+      accId, creativeId, campaignId,
+      lifecycle.firstActiveDate, lifecycle.lastActiveDate, lifecycle.totalActiveDays || 0,
+      lifecycle.currentStatus, lifecycle.statusChangedAt,
+      lifecycle.contentHash, lifecycle.contentChangedAt,
+      lifecycle.impressionsAtLaunch, lifecycle.ctrAtLaunch,
+      lifecycle.impressionsAtWeek1, lifecycle.ctrAtWeek1
+    ]
+  );
+}
+
+export async function getCreativeLifecycle(
+  accountId: string, 
+  creativeId: string
+): Promise<CreativeLifecycle | null> {
+  const accId = String(accountId);
+  const crId = String(creativeId);
+  
+  const result = await pool.query(
+    `SELECT * FROM creative_lifecycle WHERE account_id = $1 AND creative_id = $2`,
+    [accId, crId]
+  );
+  
+  if (result.rows.length === 0) return null;
+  
+  const row = result.rows[0];
+  return {
+    accountId: row.account_id,
+    creativeId: row.creative_id,
+    campaignId: row.campaign_id,
+    firstActiveDate: row.first_active_date,
+    lastActiveDate: row.last_active_date,
+    totalActiveDays: row.total_active_days,
+    currentStatus: row.current_status,
+    statusChangedAt: row.status_changed_at,
+    contentHash: row.content_hash,
+    contentChangedAt: row.content_changed_at,
+    impressionsAtLaunch: row.impressions_at_launch ? parseInt(row.impressions_at_launch) : null,
+    ctrAtLaunch: row.ctr_at_launch ? parseFloat(row.ctr_at_launch) : null,
+    impressionsAtWeek1: row.impressions_at_week1 ? parseInt(row.impressions_at_week1) : null,
+    ctrAtWeek1: row.ctr_at_week1 ? parseFloat(row.ctr_at_week1) : null
+  };
+}
+
+export async function getCampaignCreativeLifecycles(
+  accountId: string, 
+  campaignId: string
+): Promise<CreativeLifecycle[]> {
+  const accId = String(accountId);
+  const campId = String(campaignId);
+  
+  const result = await pool.query(
+    `SELECT * FROM creative_lifecycle 
+     WHERE account_id = $1 AND campaign_id = $2
+     ORDER BY first_active_date DESC`,
+    [accId, campId]
+  );
+  
+  return result.rows.map(row => ({
+    accountId: row.account_id,
+    creativeId: row.creative_id,
+    campaignId: row.campaign_id,
+    firstActiveDate: row.first_active_date,
+    lastActiveDate: row.last_active_date,
+    totalActiveDays: row.total_active_days,
+    currentStatus: row.current_status,
+    statusChangedAt: row.status_changed_at,
+    contentHash: row.content_hash,
+    contentChangedAt: row.content_changed_at,
+    impressionsAtLaunch: row.impressions_at_launch ? parseInt(row.impressions_at_launch) : null,
+    ctrAtLaunch: row.ctr_at_launch ? parseFloat(row.ctr_at_launch) : null,
+    impressionsAtWeek1: row.impressions_at_week1 ? parseInt(row.impressions_at_week1) : null,
+    ctrAtWeek1: row.ctr_at_week1 ? parseFloat(row.ctr_at_week1) : null
+  }));
+}
+
+export async function getTrackingDataSummary(accountId: string, campaignId: string): Promise<{
+  settingsSnapshots: number;
+  targetingChanges: number;
+  creativeLifecycles: number;
+  oldestSnapshot: Date | null;
+  latestSnapshot: Date | null;
+}> {
+  const accId = String(accountId);
+  const campId = String(campaignId);
+  
+  const [settingsResult, targetingResult, lifecycleResult] = await Promise.all([
+    pool.query(
+      `SELECT COUNT(*) as count, MIN(snapshot_date) as oldest, MAX(snapshot_date) as latest 
+       FROM campaign_settings_history WHERE account_id = $1 AND campaign_id = $2`,
+      [accId, campId]
+    ),
+    pool.query(
+      `SELECT COUNT(*) as count FROM targeting_changes WHERE account_id = $1 AND campaign_id = $2`,
+      [accId, campId]
+    ),
+    pool.query(
+      `SELECT COUNT(*) as count FROM creative_lifecycle WHERE account_id = $1 AND campaign_id = $2`,
+      [accId, campId]
+    )
+  ]);
+  
+  return {
+    settingsSnapshots: parseInt(settingsResult.rows[0]?.count || '0'),
+    targetingChanges: parseInt(targetingResult.rows[0]?.count || '0'),
+    creativeLifecycles: parseInt(lifecycleResult.rows[0]?.count || '0'),
+    oldestSnapshot: settingsResult.rows[0]?.oldest || null,
+    latestSnapshot: settingsResult.rows[0]?.latest || null
+  };
 }
 
 export default pool;
