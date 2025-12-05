@@ -1036,15 +1036,20 @@ function encodeTargetingCriteriaForApi(targetingCriteria: any): string {
   }
   
   try {
+    // Build the targeting criteria in LinkedIn's Rest.li format
+    // Format: (include:(and:List((or:(facet:List(values))),(...))))
     const andList = targetingCriteria.include.and.map((orGroup: any) => {
       const orEntries = Object.entries(orGroup.or || {}).map(([facet, values]: [string, any]) => {
-        const encodedFacet = encodeURIComponent(facet);
-        const encodedValues = (values as string[]).map(v => encodeURIComponent(v)).join(',');
-        return `(${encodedFacet}:List(${encodedValues}))`;
+        // Don't URL encode here - let the values stay as-is
+        const valuesList = (values as string[]).join(',');
+        return `${facet}:List(${valuesList})`;
       }).join(',');
       return `(or:(${orEntries}))`;
     }).join(',');
-    return `(include:(and:List(${andList})))`;
+    
+    const encoded = `(include:(and:List(${andList})))`;
+    console.log('[TargetingEncode] Encoded criteria:', encoded.substring(0, 200) + '...');
+    return encoded;
   } catch (err) {
     console.error('Error encoding targeting criteria:', err);
     return '';
