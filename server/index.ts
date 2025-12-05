@@ -5850,8 +5850,37 @@ app.get('/api/audit/data/:accountId', requireAuth, requireAccountAccess, async (
       });
     }
     
-    // Get precomputed scoring data for ads from database
+    // Get precomputed scoring data for ads and campaigns from database
     const scoringData = await getStructureScoringData(accountId);
+    
+    // Build campaign scoring map with 100-point scoring data
+    const campaignScoringMap = new Map<string, {
+      totalScore?: number;
+      engagementScore?: number;
+      costScore?: number;
+      audienceScore?: number;
+      scoringBreakdown100?: any[];
+      causationData?: any[];
+    }>();
+    
+    for (const c of scoringData.campaigns) {
+      let breakdown = c.scoring_breakdown;
+      let causation = c.causation_data;
+      
+      if (typeof breakdown === 'string') try { breakdown = JSON.parse(breakdown); } catch { breakdown = []; }
+      if (typeof causation === 'string') try { causation = JSON.parse(causation); } catch { causation = []; }
+      
+      campaignScoringMap.set(c.campaign_id, {
+        totalScore: c.scoring_total,
+        engagementScore: c.scoring_engagement,
+        costScore: c.scoring_cost,
+        audienceScore: c.scoring_audience,
+        scoringBreakdown100: Array.isArray(breakdown) ? breakdown : [],
+        causationData: Array.isArray(causation) ? causation : []
+      });
+    }
+    
+    // Build ad scoring map
     const adScoringMap = new Map<string, { 
       scoringStatus: string; 
       issues: string[]; 
@@ -6003,8 +6032,25 @@ app.get('/api/audit/data/:accountId', requireAuth, requireAccountAccess, async (
     // Determine sync frequency based on LAN/Expansion
     const syncFrequency = hasLanOrExpansion ? 'daily' : 'weekly';
     
+    // Enrich campaigns with 100-point scoring data from database
+    const enrichedCampaigns = campaigns.map(campaign => {
+      const scoring100 = campaignScoringMap.get(campaign.id);
+      if (scoring100) {
+        return {
+          ...campaign,
+          totalScore: scoring100.totalScore,
+          engagementScore: scoring100.engagementScore,
+          costScore: scoring100.costScore,
+          audienceScore: scoring100.audienceScore,
+          scoreBreakdown: scoring100.scoringBreakdown100,
+          causationInsights: scoring100.causationData
+        };
+      }
+      return campaign;
+    });
+    
     res.json({
-      campaigns,
+      campaigns: enrichedCampaigns,
       ads,
       alerts,
       lastSyncAt: auditAccount.last_sync_at,
@@ -6060,13 +6106,25 @@ app.get('/api/audit/structure-summary/:accountId', requireAuth, requireAccountAc
     }
     
     // Build lightweight summary from precomputed data
-    const campaignsMap: Record<string, { scoringStatus: string; issues: string[]; positiveSignals: string[] }> = {};
+    const campaignsMap: Record<string, { 
+      scoringStatus: string; 
+      issues: string[]; 
+      positiveSignals: string[];
+      totalScore?: number;
+      engagementScore?: number;
+      costScore?: number;
+      audienceScore?: number;
+      scoringBreakdown?: any[];
+      causationData?: any[];
+    }> = {};
     const adsMap: Record<string, { scoringStatus: string; issues: string[]; scoringBreakdown: any[]; positiveSignals: string[]; scoringMetadata: any; campaignId: string }> = {};
     
     for (const c of scoringData.campaigns) {
       // Ensure arrays are properly parsed (handle both string JSON and already-parsed arrays)
       let issues = c.scoring_issues;
       let positiveSignals = c.scoring_positive_signals;
+      let breakdown = c.scoring_breakdown;
+      let causation = c.causation_data;
       
       if (typeof issues === 'string') {
         try { issues = JSON.parse(issues); } catch { issues = []; }
@@ -6074,11 +6132,23 @@ app.get('/api/audit/structure-summary/:accountId', requireAuth, requireAccountAc
       if (typeof positiveSignals === 'string') {
         try { positiveSignals = JSON.parse(positiveSignals); } catch { positiveSignals = []; }
       }
+      if (typeof breakdown === 'string') {
+        try { breakdown = JSON.parse(breakdown); } catch { breakdown = []; }
+      }
+      if (typeof causation === 'string') {
+        try { causation = JSON.parse(causation); } catch { causation = []; }
+      }
       
       campaignsMap[c.campaign_id] = {
         scoringStatus: c.scoring_status,
         issues: Array.isArray(issues) ? issues : [],
-        positiveSignals: Array.isArray(positiveSignals) ? positiveSignals : []
+        positiveSignals: Array.isArray(positiveSignals) ? positiveSignals : [],
+        totalScore: c.scoring_total,
+        engagementScore: c.scoring_engagement,
+        costScore: c.scoring_cost,
+        audienceScore: c.scoring_audience,
+        scoringBreakdown: Array.isArray(breakdown) ? breakdown : [],
+        causationData: Array.isArray(causation) ? causation : []
       };
     }
     

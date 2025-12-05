@@ -117,6 +117,31 @@ interface CampaignItem {
   issues: string[];
   positiveSignals?: string[];
   flags?: string[];
+  // New 100-point scoring system
+  totalScore?: number;
+  engagementScore?: number;
+  engagementMax?: number;
+  costScore?: number;
+  costMax?: number;
+  audienceScore?: number;
+  audienceMax?: number;
+  scoreBreakdown?: Array<{
+    category: string;
+    metric: string;
+    maxPoints: number;
+    earnedPoints: number;
+    value: string;
+    threshold?: string;
+    trend?: string;
+  }>;
+  causationInsights?: Array<{
+    layer: string;
+    type: string;
+    severity: string;
+    message: string;
+    recommendation?: string;
+  }>;
+  narrative?: string;
 }
 
 type AdScoringStatus = 'needs_attention' | 'mild_issues' | 'performing_well' | 'insufficient_data';
@@ -233,6 +258,124 @@ function PerformanceIndicator({ change, isPositive }: { change: number | null; i
   );
 }
 
+function ScoreBadge({ score, status }: { score?: number; status?: ScoringStatus }) {
+  if (score === undefined) return null;
+  
+  const getScoreColor = () => {
+    if (status === 'needs_attention' || score < 40) return 'bg-red-100 text-red-700 border-red-200';
+    if (status === 'mild_issues' || score < 70) return 'bg-amber-100 text-amber-700 border-amber-200';
+    return 'bg-green-100 text-green-700 border-green-200';
+  };
+  
+  return (
+    <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full border text-sm font-semibold ${getScoreColor()}`}>
+      <span>{score}</span>
+      <span className="text-xs opacity-70">/100</span>
+    </div>
+  );
+}
+
+function ScoreBreakdownBars({ 
+  engagementScore, engagementMax,
+  costScore, costMax,
+  audienceScore, audienceMax
+}: { 
+  engagementScore?: number; engagementMax?: number;
+  costScore?: number; costMax?: number;
+  audienceScore?: number; audienceMax?: number;
+}) {
+  if (engagementScore === undefined && costScore === undefined && audienceScore === undefined) {
+    return null;
+  }
+  
+  const bars = [
+    { label: 'Engagement', score: engagementScore || 0, max: engagementMax || 45, color: 'bg-blue-500' },
+    { label: 'Cost', score: costScore || 0, max: costMax || 35, color: 'bg-green-500' },
+    { label: 'Audience', score: audienceScore || 0, max: audienceMax || 20, color: 'bg-purple-500' },
+  ];
+  
+  return (
+    <div className="space-y-1.5 mt-3">
+      {bars.map(bar => {
+        const percentage = bar.max > 0 ? (bar.score / bar.max) * 100 : 0;
+        const getBarBgColor = () => {
+          if (percentage >= 70) return bar.color;
+          if (percentage >= 40) return bar.color.replace('500', '400');
+          return 'bg-gray-300';
+        };
+        
+        return (
+          <div key={bar.label} className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 w-20">{bar.label}</span>
+            <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div 
+                className={`h-full rounded-full transition-all ${getBarBgColor()}`}
+                style={{ width: `${Math.min(percentage, 100)}%` }}
+              />
+            </div>
+            <span className="text-xs font-medium text-gray-600 w-12 text-right">{bar.score}/{bar.max}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function CausationPanel({ insights }: { insights?: CampaignItem['causationInsights'] }) {
+  if (!insights || insights.length === 0) return null;
+  
+  const primaryCause = insights.find(i => i.severity === 'primary');
+  const secondaryCauses = insights.filter(i => i.severity === 'secondary').slice(0, 2);
+  
+  const getSeverityIcon = (severity: string) => {
+    if (severity === 'primary') return <AlertTriangle className="w-4 h-4 text-red-500" />;
+    if (severity === 'secondary') return <Info className="w-4 h-4 text-amber-500" />;
+    return <Info className="w-4 h-4 text-blue-500" />;
+  };
+  
+  const getLayerBadge = (layer: string) => {
+    const colors: Record<string, string> = {
+      creative: 'bg-purple-100 text-purple-700',
+      bidding: 'bg-blue-100 text-blue-700',
+      targeting: 'bg-green-100 text-green-700',
+    };
+    return colors[layer] || 'bg-gray-100 text-gray-700';
+  };
+  
+  return (
+    <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+      {primaryCause && (
+        <div className="flex items-start gap-2">
+          {getSeverityIcon('primary')}
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <span className={`text-xs px-1.5 py-0.5 rounded ${getLayerBadge(primaryCause.layer)}`}>
+                {primaryCause.layer}
+              </span>
+              <span className="text-xs font-medium text-red-700">Primary Cause</span>
+            </div>
+            <p className="text-xs text-gray-700 mt-0.5">{primaryCause.message}</p>
+            {primaryCause.recommendation && (
+              <p className="text-xs text-gray-500 mt-0.5 italic">{primaryCause.recommendation}</p>
+            )}
+          </div>
+        </div>
+      )}
+      {secondaryCauses.map((cause, idx) => (
+        <div key={idx} className="flex items-start gap-2">
+          {getSeverityIcon('secondary')}
+          <div className="flex-1">
+            <span className={`text-xs px-1.5 py-0.5 rounded ${getLayerBadge(cause.layer)}`}>
+              {cause.layer}
+            </span>
+            <p className="text-xs text-gray-600 mt-0.5">{cause.message}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CampaignCard({ campaign, accountId, showIssues, onClick }: { campaign: CampaignItem; accountId: string; showIssues: boolean; onClick?: () => void }) {
   const linkedInUrl = getLinkedInCampaignUrl(accountId, campaign.id);
   
@@ -271,7 +414,10 @@ function CampaignCard({ campaign, accountId, showIssues, onClick }: { campaign: 
             <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 flex-shrink-0" />
           </a>
         </div>
-        <PerformanceIndicator change={campaign.ctrChange} isPositive={campaign.ctrChange > 0} />
+        <div className="flex items-center gap-2">
+          <ScoreBadge score={campaign.totalScore} status={campaign.scoringStatus} />
+          <PerformanceIndicator change={campaign.ctrChange} isPositive={campaign.ctrChange > 0} />
+        </div>
       </div>
       
       <div className="grid grid-cols-3 gap-4 text-center mb-3">
@@ -310,8 +456,18 @@ function CampaignCard({ campaign, accountId, showIssues, onClick }: { campaign: 
         </div>
       </div>
       
+      {/* Score Breakdown Bars */}
+      <ScoreBreakdownBars 
+        engagementScore={campaign.engagementScore}
+        engagementMax={campaign.engagementMax}
+        costScore={campaign.costScore}
+        costMax={campaign.costMax}
+        audienceScore={campaign.audienceScore}
+        audienceMax={campaign.audienceMax}
+      />
+      
       {(campaign.hasLan || campaign.hasExpansion || campaign.hasMaximizeDelivery || campaign.hasUnderspending) && (
-        <div className="flex items-center gap-2 flex-wrap mb-2">
+        <div className="flex items-center gap-2 flex-wrap mb-2 mt-3">
           {campaign.hasLan && (
             <span className="inline-flex items-center gap-1 text-blue-600 text-xs bg-blue-50 rounded px-2 py-1">
               <Zap className="w-3 h-3" />
@@ -339,7 +495,10 @@ function CampaignCard({ campaign, accountId, showIssues, onClick }: { campaign: 
         </div>
       )}
       
-      {showIssues && campaign.issues.length > 0 && (
+      {/* Causation Insights */}
+      {showIssues && <CausationPanel insights={campaign.causationInsights} />}
+      
+      {showIssues && campaign.issues.length > 0 && !campaign.causationInsights?.length && (
         <div className={`mt-2 pt-2 border-t ${getIssueBorderColor()} space-y-1`}>
           {campaign.issues.map((issue, idx) => (
             <div key={idx} className={`flex items-center gap-2 ${getIssueTextColor()} text-xs`}>
