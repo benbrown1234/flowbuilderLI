@@ -6170,6 +6170,7 @@ app.get('/api/audit/data/:accountId', requireAuth, requireAccountAccess, async (
       audienceScore?: number;
       scoringBreakdown100?: any[];
       causationData?: any[];
+      scoringStatus100?: string;
     }>();
     
     for (const c of scoringData.campaigns) {
@@ -6185,7 +6186,8 @@ app.get('/api/audit/data/:accountId', requireAuth, requireAccountAccess, async (
         costScore: c.scoring_cost,
         audienceScore: c.scoring_audience,
         scoringBreakdown100: Array.isArray(breakdown) ? breakdown : [],
-        causationData: Array.isArray(causation) ? causation : []
+        causationData: Array.isArray(causation) ? causation : [],
+        scoringStatus100: c.scoring_status
       });
     }
     
@@ -6300,7 +6302,9 @@ app.get('/api/audit/data/:accountId', requireAuth, requireAccountAccess, async (
       
       // Inherit campaign issues for context (but keep ad's own status separate)
       const campaignIssues = parentCampaign?.issues || [];
-      const campaignScoringStatus = parentCampaign?.scoringStatus || 'performing_well';
+      // Use 100-point scoring status from campaignScoringMap if available
+      const campaignScoring100 = campaignScoringMap.get(c.campaignId);
+      const campaignScoringStatus = campaignScoring100?.scoringStatus100 || parentCampaign?.scoringStatus || 'performing_well';
       
       return {
         id: c.creativeId,
@@ -6342,11 +6346,17 @@ app.get('/api/audit/data/:accountId', requireAuth, requireAccountAccess, async (
     const syncFrequency = hasLanOrExpansion ? 'daily' : 'weekly';
     
     // Enrich campaigns with 100-point scoring data from database
+    // CRITICAL: Use the 100-point scoring status (not legacy system) for proper tab classification
     const enrichedCampaigns = campaigns.map(campaign => {
       const scoring100 = campaignScoringMap.get(campaign.id);
       if (scoring100) {
+        // Override scoringStatus with the 100-point system's status
+        // This ensures score 51/100 shows in "Monitor Closely" not "Needs Attention"
+        const scoringStatus100 = scoring100.scoringStatus100 || campaign.scoringStatus;
         return {
           ...campaign,
+          scoringStatus: scoringStatus100,
+          isPerformingWell: scoringStatus100 === 'performing_well',
           totalScore: scoring100.totalScore,
           engagementScore: scoring100.engagementScore,
           costScore: scoring100.costScore,
