@@ -2368,7 +2368,7 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
               <span className={`text-xs px-2 py-0.5 rounded-full ${
                 activeTab === tab ? 'bg-white/50' : 'bg-gray-100'
               }`}>
-                {counts.campaigns + counts.ads}
+                {counts.campaigns}
               </span>
             </button>
           );
