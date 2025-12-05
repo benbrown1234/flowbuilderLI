@@ -1029,6 +1029,152 @@ async function linkedinApiRequestPaginated(sessionId: string, endpoint: string, 
   return allElements;
 }
 
+// Helper function to encode targeting criteria for LinkedIn API
+function encodeTargetingCriteriaForApi(targetingCriteria: any): string {
+  if (!targetingCriteria?.include?.and) {
+    return '';
+  }
+  
+  try {
+    const andList = targetingCriteria.include.and.map((orGroup: any) => {
+      const orEntries = Object.entries(orGroup.or || {}).map(([facet, values]: [string, any]) => {
+        const encodedFacet = encodeURIComponent(facet);
+        const encodedValues = (values as string[]).map(v => encodeURIComponent(v)).join(',');
+        return `(${encodedFacet}:List(${encodedValues}))`;
+      }).join(',');
+      return `(or:(${orEntries}))`;
+    }).join(',');
+    return `(include:(and:List(${andList})))`;
+  } catch (err) {
+    console.error('Error encoding targeting criteria:', err);
+    return '';
+  }
+}
+
+// Fetch audience count for a campaign's targeting criteria
+interface AudienceCountResult {
+  total: number;
+  active: number;
+  error?: string;
+}
+
+async function fetchAudienceCount(
+  accessToken: string, 
+  targetingCriteria: any
+): Promise<AudienceCountResult> {
+  try {
+    const encodedCriteria = encodeTargetingCriteriaForApi(targetingCriteria);
+    
+    if (!encodedCriteria) {
+      return { total: 0, active: 0, error: 'No valid targeting criteria' };
+    }
+    
+    const queryString = `q=targetingCriteriaV2&targetingCriteria=${encodedCriteria}`;
+    
+    console.log(`[AudienceCount] Fetching audience count...`);
+    
+    const response = await linkedinApiRequestWithToken(
+      accessToken,
+      '/audienceCounts',
+      {},
+      queryString
+    );
+    
+    if (response.elements && response.elements.length > 0) {
+      const result = response.elements[0];
+      console.log(`[AudienceCount] Result: total=${result.total}, active=${result.active}`);
+      return {
+        total: result.total || 0,
+        active: result.active || 0
+      };
+    }
+    
+    return { total: 0, active: 0, error: 'No audience data returned' };
+  } catch (err: any) {
+    console.error('[AudienceCount] Error:', err.response?.data || err.message);
+    return { 
+      total: 0, 
+      active: 0, 
+      error: err.response?.data?.message || err.message 
+    };
+  }
+}
+
+// Fetch suggested bid for a campaign
+interface BudgetPricingResult {
+  suggestedBidMin?: number;
+  suggestedBidMax?: number;
+  suggestedBidDefault?: number;
+  bidFloor?: number;
+  bidCeiling?: number;
+  currency?: string;
+  error?: string;
+}
+
+async function fetchBudgetPricing(
+  accessToken: string,
+  accountId: string,
+  campaign: any
+): Promise<BudgetPricingResult> {
+  try {
+    // Determine bid type from campaign
+    let bidType = 'CPM';
+    if (campaign.costType === 'CPC') bidType = 'CPC';
+    else if (campaign.costType === 'CPV') bidType = 'CPV';
+    
+    // Determine campaign type
+    let campaignType = 'SPONSORED_UPDATES';
+    if (campaign.type === 'TEXT_AD') campaignType = 'TEXT_AD';
+    else if (campaign.type === 'SPONSORED_INMAILS' || campaign.format === 'MESSAGE_AD') {
+      campaignType = 'SPONSORED_INMAILS';
+    }
+    
+    const accountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+    const objectiveType = campaign.objectiveType || 'BRAND_AWARENESS';
+    const optimizationTargetType = campaign.optimizationTargetType || 'NONE';
+    
+    const encodedCriteria = encodeTargetingCriteriaForApi(campaign.targetingCriteria);
+    const targetingParam = encodedCriteria ? `&targetingCriteria=${encodedCriteria}` : '';
+    
+    const queryString = `q=criteriaV2&account=${accountUrn}&bidType=${bidType}&campaignType=${campaignType}&objectiveType=${objectiveType}&optimizationTargetType=${optimizationTargetType}&matchType=EXACT${targetingParam}`;
+    
+    console.log(`[BudgetPricing] Fetching for campaign ${campaign.id}...`);
+    
+    const response = await linkedinApiRequestWithToken(
+      accessToken,
+      '/adBudgetPricing',
+      {},
+      queryString
+    );
+    
+    if (response.elements && response.elements.length > 0) {
+      const pricing = response.elements[0];
+      const result: BudgetPricingResult = {
+        currency: pricing.bidLimits?.max?.currencyCode || 'USD'
+      };
+      
+      if (pricing.suggestedBid) {
+        result.suggestedBidMin = pricing.suggestedBid.min?.amount ? parseFloat(pricing.suggestedBid.min.amount) : undefined;
+        result.suggestedBidMax = pricing.suggestedBid.max?.amount ? parseFloat(pricing.suggestedBid.max.amount) : undefined;
+        result.suggestedBidDefault = pricing.suggestedBid.default?.amount ? parseFloat(pricing.suggestedBid.default.amount) : undefined;
+      }
+      
+      if (pricing.bidLimits) {
+        result.bidFloor = pricing.bidLimits.min?.amount ? parseFloat(pricing.bidLimits.min.amount) : undefined;
+        result.bidCeiling = pricing.bidLimits.max?.amount ? parseFloat(pricing.bidLimits.max.amount) : undefined;
+      }
+      
+      console.log(`[BudgetPricing] Result: suggested=${result.suggestedBidDefault}, floor=${result.bidFloor}, ceiling=${result.bidCeiling}`);
+      return result;
+    }
+    
+    return { error: 'No pricing data returned' };
+  } catch (err: any) {
+    console.error('[BudgetPricing] Error:', err.response?.data || err.message);
+    return { error: err.response?.data?.message || err.message };
+  }
+}
+
 const requireAuth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const sessionId = req.cookies?.session_id;
   
@@ -6137,6 +6283,204 @@ app.delete('/api/canvas/comments/:commentId', requireAuth, async (req, res) => {
   } catch (err: any) {
     console.error('Delete comment error:', err.message);
     res.status(500).json({ error: 'Failed to delete comment' });
+  }
+});
+
+// =============================================
+// TEST ENDPOINTS (for Tracking Layer verification)
+// =============================================
+
+// Test audience count for a specific campaign
+app.get('/api/test/audience-count/:accountId/:campaignId', requireAuth, requireAccountAccess, async (req, res) => {
+  try {
+    const { accountId, campaignId } = req.params;
+    const session = (req as any).session as Session;
+    
+    // Fetch campaign to get targeting criteria
+    const campaignUrn = `urn:li:sponsoredCampaign:${campaignId}`;
+    const encodedUrn = encodeURIComponent(campaignUrn);
+    
+    console.log(`[Test] Fetching audience count for campaign ${campaignId}...`);
+    
+    const campaignResponse = await linkedinApiRequestWithToken(
+      session.accessToken!,
+      `/adAccounts/${accountId}/adCampaigns/${encodedUrn}`,
+      {}
+    );
+    
+    if (!campaignResponse || !campaignResponse.targetingCriteria) {
+      return res.json({
+        error: 'Campaign not found or has no targeting criteria',
+        campaign: campaignResponse
+      });
+    }
+    
+    // Fetch audience count
+    const audienceResult = await fetchAudienceCount(
+      session.accessToken!,
+      campaignResponse.targetingCriteria
+    );
+    
+    // Fetch budget pricing
+    const pricingResult = await fetchBudgetPricing(
+      session.accessToken!,
+      accountId,
+      {
+        id: campaignId,
+        costType: campaignResponse.costType,
+        type: campaignResponse.type,
+        format: campaignResponse.format,
+        objectiveType: campaignResponse.objectiveType,
+        optimizationTargetType: campaignResponse.optimizationTargetType,
+        targetingCriteria: campaignResponse.targetingCriteria
+      }
+    );
+    
+    res.json({
+      campaignId,
+      campaignName: campaignResponse.name,
+      status: campaignResponse.status,
+      audienceCount: audienceResult,
+      budgetPricing: pricingResult,
+      rawTargetingCriteria: campaignResponse.targetingCriteria
+    });
+  } catch (err: any) {
+    console.error('[Test] Audience count error:', err.response?.data || err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Test tracking data summary for a campaign
+app.get('/api/test/tracking/:accountId/:campaignId', requireAuth, requireAccountAccess, async (req, res) => {
+  try {
+    const { accountId, campaignId } = req.params;
+    
+    // Import tracking functions
+    const { 
+      getTrackingDataSummary, 
+      getCampaignSettingsHistory, 
+      getTargetingChanges,
+      getCampaignCreativeLifecycles
+    } = await import('./database.js');
+    
+    const [summary, settingsHistory, targetingChanges, creativeLifecycles] = await Promise.all([
+      getTrackingDataSummary(accountId, campaignId),
+      getCampaignSettingsHistory(accountId, campaignId, 14), // Last 14 days
+      getTargetingChanges(accountId, campaignId, 14),
+      getCampaignCreativeLifecycles(accountId, campaignId)
+    ]);
+    
+    res.json({
+      campaignId,
+      summary,
+      settingsHistory,
+      targetingChanges,
+      creativeLifecycles
+    });
+  } catch (err: any) {
+    console.error('[Test] Tracking data error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Test: Manually trigger a settings snapshot for a campaign
+app.post('/api/test/snapshot/:accountId/:campaignId', requireAuth, requireAccountAccess, async (req, res) => {
+  try {
+    const { accountId, campaignId } = req.params;
+    const session = (req as any).session as Session;
+    
+    // Fetch campaign data
+    const campaignUrn = `urn:li:sponsoredCampaign:${campaignId}`;
+    const encodedUrn = encodeURIComponent(campaignUrn);
+    
+    console.log(`[Test] Creating snapshot for campaign ${campaignId}...`);
+    
+    const campaignResponse = await linkedinApiRequestWithToken(
+      session.accessToken!,
+      `/adAccounts/${accountId}/adCampaigns/${encodedUrn}`,
+      {}
+    );
+    
+    if (!campaignResponse) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+    
+    // Fetch audience count
+    const audienceResult = await fetchAudienceCount(
+      session.accessToken!,
+      campaignResponse.targetingCriteria
+    );
+    
+    // Fetch budget pricing
+    const pricingResult = await fetchBudgetPricing(
+      session.accessToken!,
+      accountId,
+      {
+        id: campaignId,
+        costType: campaignResponse.costType,
+        type: campaignResponse.type,
+        format: campaignResponse.format,
+        objectiveType: campaignResponse.objectiveType,
+        optimizationTargetType: campaignResponse.optimizationTargetType,
+        targetingCriteria: campaignResponse.targetingCriteria
+      }
+    );
+    
+    // Save the snapshot
+    const { saveCampaignSettingsSnapshot } = await import('./database.js');
+    
+    // Extract bid value from unitCost
+    let bidValue: number | null = null;
+    if (campaignResponse.unitCost?.amount) {
+      bidValue = parseFloat(campaignResponse.unitCost.amount) / 100; // Convert from minor units
+    }
+    
+    // Extract daily budget
+    let dailyBudget: number | null = null;
+    if (campaignResponse.dailyBudget?.amount) {
+      dailyBudget = parseFloat(campaignResponse.dailyBudget.amount) / 100;
+    }
+    
+    // Extract lifetime budget
+    let lifetimeBudget: number | null = null;
+    if (campaignResponse.totalBudget?.amount) {
+      lifetimeBudget = parseFloat(campaignResponse.totalBudget.amount) / 100;
+    }
+    
+    const snapshot = {
+      accountId,
+      campaignId,
+      snapshotDate: new Date(),
+      bidValue,
+      bidStrategy: campaignResponse.optimizationTargetType || null,
+      costType: campaignResponse.costType || null,
+      optimizationTarget: campaignResponse.optimizationTargetType || null,
+      dailyBudget,
+      lifetimeBudget,
+      audienceExpansionEnabled: campaignResponse.audienceExpansionEnabled || false,
+      linkedinAudienceNetwork: campaignResponse.offSiteDeliveryEnabled || false,
+      suggestedBidMin: pricingResult.suggestedBidMin || null,
+      suggestedBidMax: pricingResult.suggestedBidMax || null,
+      suggestedBidDefault: pricingResult.suggestedBidDefault || null,
+      bidFloor: pricingResult.bidFloor || null,
+      bidCeiling: pricingResult.bidCeiling || null,
+      audienceSizeTotal: audienceResult.total || null,
+      audienceSizeActive: audienceResult.active || null,
+      campaignStatus: campaignResponse.status,
+      objectiveType: campaignResponse.objectiveType,
+      currency: pricingResult.currency || 'USD'
+    };
+    
+    await saveCampaignSettingsSnapshot(snapshot);
+    
+    res.json({
+      success: true,
+      message: 'Snapshot created successfully',
+      snapshot
+    });
+  } catch (err: any) {
+    console.error('[Test] Snapshot error:', err.response?.data || err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
