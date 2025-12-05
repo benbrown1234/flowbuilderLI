@@ -1388,7 +1388,7 @@ export function analyzeCausation(
   
   // Penetration exhaustion (>60% = audience fatigue)
   if (current.audiencePenetration && current.audiencePenetration > 60) {
-    const currentFreq = current.impressions > 0 && current.uniqueReach ? current.impressions / current.uniqueReach : 0;
+    const currentFreq = current.impressions > 0 && current.reach ? current.impressions / current.reach : 0;
     insights.push({
       layer: 'targeting',
       type: 'audience_exhaustion',

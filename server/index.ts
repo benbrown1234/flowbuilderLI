@@ -3053,6 +3053,67 @@ async function computeAndSaveScoringStatus(accountId: string, campaignMetrics: a
   console.log(`Saved scoring for ${currentPeriodCampaigns.size} campaigns and ${currentPeriodAds.size} ads`);
 }
 
+// Local extended interface for aggregated campaign data (different from scoringEngine.CampaignMetrics)
+interface AggregatedCampaignData {
+  campaignId: string;
+  campaignName: string;
+  status: string;
+  impressions: number;
+  clicks: number;
+  spend: number;
+  conversions: number;
+  prevImpressions: number;
+  prevClicks: number;
+  prevSpend: number;
+  prevConversions: number;
+  ctr: number;
+  prevCtr: number;
+  cpc: number;
+  prevCpc: number;
+  cpm: number;
+  prevCpm: number;
+  cpa: number;
+  prevCpa: number;
+  dwellTime: number | null;
+  prevDwellTime: number | null;
+  frequency: number | null;
+  prevFrequency: number | null;
+  penetration: number | null;
+  prevPenetration: number | null;
+  reach: number;
+  prevReach: number;
+  audienceSize: number;
+  dailyBudget: number;
+  budgetUtilization: number;
+  hasLan: boolean;
+  hasExpansion: boolean;
+  activeDays: number;
+  firstActiveDate: Date | null;
+}
+
+// Local seniority data from database (different from scoringEngine.SeniorityData)
+interface SeniorityDataRow {
+  seniority: string;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+}
+
+// Local extended interface for aggregated ad data (different from scoringEngine.AdMetrics)
+interface AggregatedAdData {
+  adId: string;
+  campaignId: string;
+  impressions: number;
+  clicks: number;
+  spend: number;
+  conversions: number;
+  ctr: number;
+  dwellTime: number | null;
+  cpc: number;
+  ageDays: number;
+  status: string;
+}
+
 // New 100-point scoring system with causation engine
 async function computeAndSaveScoring100(
   accountId: string,
@@ -3071,7 +3132,7 @@ async function computeAndSaveScoring100(
   prevStart.setDate(prevStart.getDate() - 28);
   
   // Aggregate campaign metrics
-  const campaignData = new Map<string, CampaignMetrics>();
+  const campaignData = new Map<string, AggregatedCampaignData>();
   const accountTotals = {
     ctr: 0, cpc: 0, cpm: 0, cpa: 0,
     totalImpressions: 0, totalClicks: 0, totalSpend: 0, totalConversions: 0
@@ -3163,7 +3224,7 @@ async function computeAndSaveScoring100(
   
   // Get seniority data from database
   const seniorityDataResult = await getSeniorityDataSimple(accountId);
-  const seniorityMap = new Map<string, SeniorityData[]>();
+  const seniorityMap = new Map<string, SeniorityDataRow[]>();
   for (const s of seniorityDataResult) {
     if (!seniorityMap.has(s.campaign_id)) {
       seniorityMap.set(s.campaign_id, []);
@@ -3185,27 +3246,103 @@ async function computeAndSaveScoring100(
       continue;
     }
     
-    // Get tracking data for causation
-    const tracking: TrackingData = trackingData.get(campaignId) || {
-      currentBid: null,
-      prevBid: null,
-      suggestedBidMin: null,
-      suggestedBidMax: null,
-      audienceSizeCurrent: null,
-      audienceSizePrev: null,
-      targetingHash: null,
-      prevTargetingHash: null,
-      lastChangeDate: null
+    // Build proper CampaignMetrics for current period (matching scoringEngine interface)
+    // Use nullish coalescing (??) to preserve zero values but treat null as undefined
+    const currentMetrics: import('./scoringEngine').CampaignMetrics = {
+      impressions: campaign.impressions,
+      clicks: campaign.clicks,
+      spend: campaign.spend,
+      conversions: campaign.conversions,
+      activeDays: campaign.activeDays,
+      reach: campaign.reach > 0 ? campaign.reach : undefined,
+      dwellTimeSeconds: campaign.dwellTime ?? undefined,
+      audienceSize: campaign.audienceSize > 0 ? campaign.audienceSize : undefined,
+      audiencePenetration: campaign.penetration ?? undefined
     };
     
-    // Get seniority data
-    const seniority = seniorityMap.get(campaignId) || [];
+    // Build previous period metrics (if available)
+    const previousMetrics: import('./scoringEngine').CampaignMetrics | undefined = 
+      campaign.prevImpressions > 0 ? {
+        impressions: campaign.prevImpressions,
+        clicks: campaign.prevClicks,
+        spend: campaign.prevSpend,
+        conversions: campaign.prevConversions,
+        activeDays: campaign.activeDays, // Use same active days
+        reach: campaign.prevReach > 0 ? campaign.prevReach : undefined,
+        dwellTimeSeconds: campaign.prevDwellTime ?? undefined,
+        audienceSize: campaign.audienceSize > 0 ? campaign.audienceSize : undefined,
+        audiencePenetration: campaign.prevPenetration ?? undefined
+      } : undefined;
     
-    // Score the campaign
-    const result = scoreCampaign(campaign, accountTotals, seniority, tracking);
+    // Calculate campaign age in days
+    const campaignAgeDays = campaign.firstActiveDate 
+      ? Math.floor((now.getTime() - campaign.firstActiveDate.getTime()) / (1000 * 60 * 60 * 24))
+      : 0;
     
-    // Analyze causation
-    const causation = analyzeCausation(campaign, tracking, null);
+    // Get tracking data for causation
+    const rawTracking = trackingData.get(campaignId);
+    const tracking: import('./scoringEngine').TrackingData | undefined = rawTracking ? {
+      suggestedBidMin: rawTracking.suggestedBidMin || undefined,
+      suggestedBidMax: rawTracking.suggestedBidMax || undefined,
+      previousSuggestedBidMin: rawTracking.prevSuggestedBidMin || undefined,
+      previousSuggestedBidMax: rawTracking.prevSuggestedBidMax || undefined,
+      audienceSize: rawTracking.audienceSizeCurrent || undefined,
+      previousAudienceSize: rawTracking.audienceSizePrev || undefined,
+      bidValue: rawTracking.currentBid || undefined,
+      previousBidValue: rawTracking.prevBid || undefined,
+      audienceExpansion: campaign.hasExpansion || false,
+      linkedInAudienceNetwork: campaign.hasLan || false
+    } : undefined;
+    
+    // Convert seniority array to SeniorityData format
+    const seniorityArray = seniorityMap.get(campaignId) || [];
+    let seniorityData: import('./scoringEngine').SeniorityData | undefined = undefined;
+    
+    if (seniorityArray.length > 0) {
+      // Calculate decision-maker percentage (Director, VP, CXO, Owner, Partner, Senior)
+      const decisionMakerTitles = ['Director', 'VP', 'CXO', 'Owner', 'Partner', 'Senior'];
+      let dmImpressions = 0;
+      let totalImpressions = 0;
+      
+      for (const s of seniorityArray) {
+        totalImpressions += s.impressions;
+        if (s.seniority && decisionMakerTitles.some(title => s.seniority.includes(title))) {
+          dmImpressions += s.impressions;
+        }
+      }
+      
+      // Only set hasData: true if we have meaningful impression data
+      if (totalImpressions > 0) {
+        const currentDecisionMakerPct = (dmImpressions / totalImpressions) * 100;
+        
+        seniorityData = {
+          currentDecisionMakerPct,
+          previousDecisionMakerPct: currentDecisionMakerPct, // Use same for now (no historical data)
+          hasData: true
+        };
+        console.log(`[Scoring100] Campaign ${campaignId} seniority: ${currentDecisionMakerPct.toFixed(1)}% decision-makers (${dmImpressions}/${totalImpressions} impressions)`);
+      }
+    }
+    
+    // Score the campaign with correct 7 parameters
+    const result = scoreCampaign(
+      currentMetrics,
+      previousMetrics,
+      accountTotals.cpc,
+      accountTotals.cpm,
+      accountTotals.cpa,
+      seniorityData,
+      campaignAgeDays
+    );
+    
+    // Analyze causation with correct 5 parameters
+    const causation = analyzeCausation(
+      currentMetrics,
+      previousMetrics,
+      tracking,
+      [], // adDiagnostics - will be populated later
+      seniorityData
+    );
     
     // Save to database
     await updateCampaignScoring100(accountId, campaignId, {
@@ -3221,10 +3358,11 @@ async function computeAndSaveScoring100(
     });
     
     scoredCount++;
+    console.log(`[Scoring100] Scored campaign ${campaignId}: ${result.totalScore}/100 (${result.status})`);
   }
   
   // Score ads within each campaign
-  const adData = new Map<string, AdMetrics>();
+  const adData = new Map<string, AggregatedAdData>();
   const campaignAdStats = new Map<string, { totalImpressions: number, avgCtr: number, avgDwell: number, avgCpc: number }>();
   
   // First pass: aggregate ad metrics
@@ -3292,7 +3430,20 @@ async function computeAndSaveScoring100(
     const stats = campaignAdStats.get(ad.campaignId);
     if (!stats || ad.impressions < 100) continue;
     
-    const diagnostic = diagnoseAd(ad, stats.avgCtr, stats.avgDwell, stats.avgCpc, stats.totalImpressions);
+    // Convert aggregated ad data to AdMetrics format for diagnoseAd
+    const adMetrics: import('./scoringEngine').AdMetrics = {
+      creativeId: ad.adId,
+      campaignId: ad.campaignId,
+      impressions: ad.impressions,
+      clicks: ad.clicks,
+      spend: ad.spend,
+      conversions: ad.conversions,
+      dwellTimeSeconds: ad.dwellTime || undefined,
+      firstActiveDate: undefined,
+      status: ad.status
+    };
+    
+    const diagnostic = diagnoseAd(adMetrics, stats.avgCtr, stats.avgDwell, stats.avgCpc, stats.totalImpressions, undefined);
     
     await updateCreativeDiagnostic(accountId, adId, diagnostic);
     adScoredCount++;
