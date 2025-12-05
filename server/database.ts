@@ -2223,10 +2223,10 @@ export async function getCampaignTrackingData(accountId: string): Promise<Map<st
   
   // Get targeting changes
   const targetingResult = await pool.query(
-    `SELECT DISTINCT ON (campaign_id) campaign_id, targeting_hash, prev_targeting_hash, changed_at
+    `SELECT DISTINCT ON (campaign_id) campaign_id, targeting_hash_after, targeting_hash_before, detected_at
      FROM targeting_changes
      WHERE account_id = $1
-     ORDER BY campaign_id, changed_at DESC`,
+     ORDER BY campaign_id, detected_at DESC`,
     [String(accountId)]
   );
   
@@ -2234,9 +2234,9 @@ export async function getCampaignTrackingData(accountId: string): Promise<Map<st
     const existing = trackingMap.get(row.campaign_id) || {};
     trackingMap.set(row.campaign_id, {
       ...existing,
-      targetingHash: row.targeting_hash,
-      prevTargetingHash: row.prev_targeting_hash,
-      targetingChangeDate: row.changed_at ? new Date(row.changed_at) : null
+      targetingHash: row.targeting_hash_after,
+      prevTargetingHash: row.targeting_hash_before,
+      targetingChangeDate: row.detected_at ? new Date(row.detected_at) : null
     });
   }
   
