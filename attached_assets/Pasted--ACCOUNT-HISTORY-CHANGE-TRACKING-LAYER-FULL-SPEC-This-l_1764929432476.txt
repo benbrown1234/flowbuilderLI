@@ -1,0 +1,309 @@
+⭐ ACCOUNT HISTORY & CHANGE TRACKING LAYER (FULL SPEC)
+
+This layer makes your system much smarter than LinkedIn’s native UI.
+
+⸻
+
+================================
+
+⭐ 1. WHAT DATA YOU MUST STORE DAILY
+
+================================
+
+Every 24 hours, snapshot and store:
+
+⸻
+
+🟦 1.1 Campaign Settings
+	•	Campaign name
+	•	Campaign status (active/paused)
+	•	Bid value
+	•	Bid strategy
+	•	Daily/Lifetime budget
+	•	Audience expansion status
+	•	Objective
+	•	Optimisation goal (clicks, impressions, leads)
+	•	Suggested bid (VERY important)
+	•	LinkedIn relevance diagnostics (if available)
+
+⸻
+
+🟧 1.2 Targeting Parameters
+
+Store every dimension:
+	•	Locations
+	•	Job titles
+	•	Job seniority
+	•	Job functions
+	•	Skills
+	•	Industries
+	•	Company list inclusions
+	•	Exclusions
+	•	Audience size estimate
+	•	Matched audience lists
+	•	Lookalike settings
+
+⸻
+
+🟩 1.3 Ads (Creatives)
+
+Track:
+	•	Ads active
+	•	Ads paused
+	•	Ad age (derived)
+	•	Creative format
+	•	Body text / headline
+	•	Image checksum or hash (to detect creative changes)
+	•	Impression share per ad
+	•	Ad introduction date
+	•	Ad pause date
+
+⸻
+
+🟨 1.4 Delivery & Cost Data
+	•	Daily impressions
+	•	Daily clicks
+	•	Daily CPC
+	•	Daily CPM
+	•	Daily spend
+	•	Daily frequency
+	•	Daily penetration
+	•	Daily seniority distribution (LinkedIn demographics)
+
+⸻
+
+================================
+
+⭐ 2. WHAT YOU MUST VERSION
+
+================================
+
+When any value changes, store:
+	•	Previous version
+	•	New version
+	•	Timestamp
+
+Examples:
+
+If bid changes from 8.00 → 6.50
+
+Store both values + timestamp.
+
+If job titles change (added or removed)
+
+Store the diff.
+
+If target audience size drops from 600k → 300k
+
+Store both & diff.
+
+If a creative is paused
+
+Store pause event.
+
+This enables before vs after causation.
+
+⸻
+
+================================
+
+⭐ 3. CHANGE AGE REQUIREMENTS (How long until data is usable?)
+
+================================
+
+These rules prevent misleading conclusions from fresh changes.
+
+⸻
+
+3.1 Targeting Changes
+
+Require: ≥72 hours before judging performance impact.
+
+Reason: LinkedIn needs time to rebalance delivery.
+
+⸻
+
+3.2 Bidding Changes
+
+Require: ≥48 hours before evaluating impact.
+
+Auction stabilises within ~2 days.
+
+⸻
+
+3.3 Creative (Ad) Changes
+
+Require:
+	•	≥72 hours for new ads
+	•	≥48 hours after pausing ads
+	•	≥14 days for fatigue detection
+
+⸻
+
+3.4 Audience Size Collapse / Expansion
+
+Require: ≥72 hours because LinkedIn refreshes inventory slowly.
+
+⸻
+
+3.5 Suggested Bid Shifts
+
+These take effect immediately, but causation confidence increases when the new bid remains shifted ≥48 hours.
+
+⸻
+
+================================
+
+⭐ 4. HOW THE CAUSATION ENGINE USES CHANGE HISTORY
+
+================================
+
+When performance changes (CTR, Dwell, CPC, CPM), the engine checks:
+
+⸻
+
+⭐ 4.1 Did any change occur in the last 48–72 hours?
+
+If yes:
+
+Causation output includes:
+	•	“Recent targeting change detected — impact may not yet be stable.”
+	•	“Bid was adjusted 2 days ago — evaluating post-change effects.”
+	•	“New creatives introduced — early signals only.”
+
+And it lowers “causation confidence” to Medium instead of High.
+
+⸻
+
+⭐ 4.2 Did any change occur 4–14 days ago?
+
+This is the optimal window for attribution.
+
+Example:
+
+CTR dropped –22%
+👉 Bid lowered 6 days ago → primary cause
+👉 Penetration 62% → secondary cause
+
+⸻
+
+⭐ 4.3 Did no settings change?
+
+Then the cause is usually:
+	•	Creative fatigue
+	•	Auction pressure (suggested bid↑)
+	•	Audience composition shift
+	•	Penetration / frequency-driven fatigue
+
+⸻
+
+================================
+
+⭐ 5. HOW THE SYSTEM AVOIDS FALSE POSITIVES USING HISTORY
+
+================================
+
+The system does NOT blame:
+	•	New ads (<3 days old)
+	•	Fresh targeting changes (<3 days old)
+	•	Fresh bid changes (<2 days old)
+	•	Low-volume days
+	•	Partial-week running
+
+Examples of rules:
+
+If CTR ↓ but targeting changed 48 hours ago →
+
+Do NOT assign CTR decline to creative fatigue.
+
+If suggested bid↑ but bid change occurred in last 24 hours →
+
+Don’t assume auction pressure is the primary cause until 48 hours pass.
+
+If ad paused 2 days ago →
+
+Don’t assume performance shift is due to remaining ads yet.
+
+⸻
+
+================================
+
+⭐ 6. INTEGRATION INTO THE UNIFIED SYSTEM
+
+================================
+
+Now I combine this with the previous unified spec to form a complete architecture.
+
+(This turns your system into a professional-grade diagnostic engine.)
+
+⸻
+
+⭐ UPDATED UNIFIED SYSTEM — WITH FULL CHANGE HISTORY LAYER
+
+Below is the combined, final structure:
+
+⸻
+
+⭐ PART 1 — Campaign Scoring (WHAT is happening)
+
+Uses updated dwell/CTR/frequency scoring + false-positive filters.
+
+⸻
+
+⭐ PART 2 — Causation Engine (WHY it’s happening)
+
+Now upgraded with change-history logic:
+
+For every performance shift:
+	•	Check creative state (age, fatigue, distribution)
+	•	Check bidding state (auction pressure, bid changes)
+	•	Check targeting state (audience shifts, seniority)
+	•	Check change history
+	•	If changes are too fresh → neutralise causation
+	•	If changes are older & correlated → causation confirmed
+
+⸻
+
+⭐ PART 3 — Ad-Level Diagnostics Panel (which ads are responsible)
+
+Now upgraded to:
+	•	Detect creative churn
+	•	Detect when ads were added/paused
+	•	Track impression shifts after settings changes
+	•	Compare performance pre-change vs post-change
+	•	Flag weak contributors using new dwell/CTR thresholds
+
+⸻
+
+⭐ PART 4 — System-wide False Positive Suppression
+
+Now includes:
+
+Must have:
+
+✔ Minimum impression/click volume
+✔ Campaign live ≥4 of last 7 days
+✔ Changes older than 48–72 hours
+✔ Ad with ≥1,000 impressions to evaluate
+
+Prevents:
+	•	Misidentifying causes
+	•	Penalising new ads
+	•	Wrongly attributing fresh targeting changes
+	•	Mistaking bid volatility for performance movement
+
+⸻
+
+⭐ PART 5 — Final Explanation Output
+
+Now includes:
+
+“Change Event Narrative”
+
+Example:
+
+Primary Cause: CTR decreased 27% due to targeting narrowed 6 days ago (audience size –38%).
+Secondary Cause: Audience penetration now 58% → fatigue emerging.
+Excluded Causes: Recent bid increase (<48 hours old) not included yet.
+Ad-Level: Ad 4 responsible for 72% impressions and is 65 days old — likely exacerbating decline.
+Confidence: High (all changes older than 72 hours).

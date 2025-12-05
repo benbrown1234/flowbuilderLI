@@ -1,0 +1,282 @@
+Absolutely — here is the complete, unified, end-to-end brief, combining:
+✓ Campaign-level scoring
+✓ Campaign-level causation
+✓ Ad-level diagnostics
+✓ Ad-level causation
+✓ Targeting & bidding diagnostics
+✓ False-positive protections
+✓ UI behaviour (campaign > ad detail view)
+✓ Your updated dwell/CTR/frequency/ad-age thresholds
+✓ Full high-level and low-level logic flows
+
+This is the single authoritative specification for your entire intelligence system.
+
+« UNIFIED PERFORMANCE + CAUSATION + AD-LEVEL DIAGNOSTIC SYSTEM SPEC
+(All components integrated into one coherent model)
+
+Your scoring model measures WHAT is happening, not why.
+It uses absolute thresholds and trend thresholds, with false-positive protections.
+
+Scoring distributes:
+
+A) Engagement Quality — 45 pts
++ Dwell Time (20 pts)
++ CTR (15 pts)
++ Frequency (10 pts)
+
+B) Cost Efficiency — 35 pts
++ CPC (20 pts)
++ CPM (10 pts)
++ CPA (5 pts, only if ≥3 conversions)
+
+C) Audience Quality — 20 pts
++ Penetration (10 pts)
++ Seniority (10 pts)
+
+~ 1.1 Updated Dwell Time Scoring — 20 pts
+
+Absolute Quality (12 pts)
+Dwell Time | Score
+≥15.0s | 12
+13.0-14.9s | 10
+≥1.00% | 10
+0.70-0.99% | 8
+0.50-0.69% | 6
+0.40-0.49% | 4
+0.30-0.39% | 2
+<0.30% | 0
+
+Trend (5 pts)
+Requires ≥2,500 impressions and ≥4/7 days active.
+Change | Score
+≥+20% | 5
++10-19% | 4
+0-9% | 4
+-1 to -10% | 2
+-11-20% | 0
+<-20% | -1
+
+~ 1.3 Frequency Scoring — 10 pts (updated)
+Frequency | Score
+2.0-4.0 | 10
+1.5-1.99 | 7
+<1.5 | 3 (underexposed)
+4.1-6.0 | 4 (high exposure)
+>6.0 | 2 (fatigue emerging)
+>7.0 | 0 (likely fatigue)
+
+~ 1.4 Audience Penetration Scoring — 10 pts
+Penetration | Score
+10-30% | 10
+31-45% | 7
+46-60% | 4
+>60% | 1 (likely fatigue)
+<10% | 2 (under-delivery)
+
+~ 1.5 Seniority Scoring — 10 pts
+Seniority shift toward decision-makers | Score
++10% or more | 10
++5-9% | 7
+Stable | 5
+Shift downward | 0
+
+The system refuses to score trends unless ALL are true:
+✓ Campaign active ≥4 of last 7 days
+✓ Minimum volumes hit:
+  + ≥2,500 impressions (CTR trends)
+  + ≥20 clicks (dwell/CPC trends)
+  + ≥1,000 impressions for frequency/penetration
+  + ≥3 conversions for CPA
+  + ≥1,000 impressions for seniority shift
+✓ Ad must run ≥3 days to evaluate
+✓ Recent changes must be ≥48 hours old
+✓ No scoring on paused/no-delivery campaigns
+
+This prevents zombie trends, false signals, and noise.
+
+This explains WHY the score changed.
+It analyzes 3 layers:
+① Layer 1 — Creative (Ad Level)
+② Layer 2 — Bidding (Auction)
+③ Layer 3 — Targeting (Audience)
+
+~ 3.1 Creative Causation Rules (Ad-Level Insights Used at Campaign Level)
+
+Ad Age (Updated)
+Ad Age | Label
+0-13 days | Learning
+14-59 days | Stable
+≥60 days | Potential fatigue
+
+Creative Fatigue Indicators
++ Age ≥60 days
++ CTR↓ & Dwell↓
++ Impression share >70%
+→ Primary cause: Creative Fatigue
+
+Too Few Ads (<3 active)
+→ LinkedIn serves 1 ad per user per day
+→ Causes: under-exposure, CTR↓, delivery↓
+
+New creative impact
+If new ads (<13 days) show higher dwell/CTR → uplift
+If lower → not responsible for improvement
+
+~ 3.2 Bidding Causation Rules
+
+Suggested Bid Movement
+The MOST important external signal.
+
+Change | Meaning
+↑ >20% | Auction pressure ↑ (competitors bidding more)
+↑ 10-20% | Moderate pressure
+↓ >10% | Cheaper auction
+↓ >20% | Major drop in demand
+
+Effects:
++ CPM↑ with suggested bid↑ → auction inflation
++ CTR↓ with suggested bid↑ → worse placements
++ CPC↑ with stable CTR → cost inflation
+
+Manual Bid Changed
++ Bid↑ → CTR↓, delivery↑
++ Bid↓ → CTR↑, delivery↓
+
+Bidding Strategy Changes
++ Manual → Max Delivery → CPM↑, CPC↓
++ Max Delivery → Manual → risk of volatility
+
+~ 3.3 Targeting Causation Rules
+
+Audience Size Change
+Shrank >20% → CPM↑, CTR↓
+Expanded → CPM↓, CTR more volatile
+
+Penetration >60%
+→ Audience exhaustion → CTR↓ likely
+
+Seniority Shift
++10% seniors → CTR↓, dwell↑, CPC↑
+- seniority → CTR↑, dwell↓
+
+Audience Expansion ON
+→ Lower intent users → CTR↓, CPC↓
+
+When a user clicks a campaign (especially a "bad" one):
+The right panel loads the AD DIAGNOSTIC SYSTEM.
+
+This shows which ads are driving performance, NOT ad-level scores.
+
+~ 4.1 Ad Snapshot Card (per ad)
+
+Each ad card displays:
++ Thumbnail
++ Impressions
++ CTR vs campaign avg
++ Dwell vs campaign avg
++ CPC vs avg
++ CPM vs avg
++ Ad Age bucket (your new rules)
++ Impression share
++ Diagnostic flags
+
+~ 4.2 Ad Diagnostic Flags (Auto-assigned)
+
+Green: High Contributor
++ CTR↑ & dwell↑
++ Ad age 14-59
++ Lower CPC
+
+Grey: Stable Contributor
++ Within ±10% of campaign averages
+
+Red: Weak Contributor
++ CTR↓ ≥15%
++ Dwell↓ ≥10%
++ Old age (≥60 days)
++ Impression share >70%
+
+Yellow: Learning Phase
++ Age <13 days
++ Performance unstable
+
+Blue: Low Volume
++ Impressions <1,000
++ "Cannot evaluate"
+
+Purple: Fatigue
++ Age ≥60 days
++ Dwell↓ & CTR↓
+
+~ 4.3 Ad-Level Causation Examples
+
+If CTR↓ but dwell↑
+→ "Deep B2B content consumption, not click decline."
+
+If CTR↑ but dwell↓
+→ "Curiosity clicks — content not resonating post-click."
+
+If impression share >70%
+→ "Algorithm over-serving this ad; likely causing fatigue."
+
+If only 1-2 ads active
+→ "Campaign delivery throttled — add more ads."
+
+~ 4.4 Ad Contributor Ranking (Green / Grey / Red)
+
+Tiered sorting:
++ Tier 1: High Contributors
++ Tier 2: Neutral
++ Tier 3: Weak Contributors
+
+This helps answer:
+"Which ads are dragging down my campaign?"
+
+~ 4.5 Recommended Actions (Ad-Level)
+
+Examples:
++ "Pause Ad A — pulling down campaign (−32% CTR, -18% dwell)."
++ "Ad B is strong (+27% dwell) — create a variant."
++ "Ad overload: 80% impressions to one creative → refresh needed."
++ "Only 1 active ad — add 2-3 creatives."
+
+STEP 1 — User clicks a campaign
+Campaign summary loads with score.
+
+STEP 2 — False-Positive Checks
+If data insufficient → show "Low confidence / incomplete data."
+
+STEP 3 — Score campaign
+(Using updated rules)
+
+STEP 4 — Show primary causes
+From 3 layers (creative, bidding, targeting)
+
+STEP 5 — Load Ad-Level Diagnostics Panel
++ Rank ads
++ Apply diagnostic flags
++ Highlight weak contributors
++ Highlight strong contributors
+
+STEP 6 — Combine all signals into final narrative
+
+Example output:
+
+Primary Cause: Audience fatigue (penetration 63%, frequency 7.2)
+Secondary: Suggested bid increased +22% → higher CPM and worse placements
+Ad-level: Ad 3 responsible for 74% impressions and is 67 days old → fatigue
+Recommendation: Refresh creatives, add 2-3 variants, expand audience, raise bid 10%
+
+It includes:
+✓ Scoring model
+✓ Causation engine
+✓ Ad-level drilldown
+✓ Updated thresholds
+✓ B2B behavioural logic
+✓ Fatigue logic
+✓ Auction-pressure logic
+✓ Targeting-shift logic
+✓ False-positive protections
+✓ UI interaction model
+
+You now have the full, integrated intelligence architecture.
