@@ -6441,29 +6441,30 @@ app.get('/api/test/audience-count/:accountId/:campaignId', requireAuth, requireA
     const { accountId, campaignId } = req.params;
     const session = (req as any).session as Session;
     
-    // Fetch campaign to get targeting criteria
-    const campaignUrn = `urn:li:sponsoredCampaign:${campaignId}`;
-    const encodedUrn = encodeURIComponent(campaignUrn);
-    
     console.log(`[Test] Fetching audience count for campaign ${campaignId}...`);
     
+    // Fetch campaign using search query (LinkedIn API expects this format)
     const campaignResponse = await linkedinApiRequestWithToken(
       session.accessToken!,
-      `/adAccounts/${accountId}/adCampaigns/${encodedUrn}`,
-      {}
+      `/adAccounts/${accountId}/adCampaigns`,
+      {},
+      `q=search&search=(id:(values:List(${campaignId})))`
     );
     
-    if (!campaignResponse || !campaignResponse.targetingCriteria) {
+    const campaign = campaignResponse.elements?.[0];
+    
+    if (!campaign || !campaign.targetingCriteria) {
       return res.json({
         error: 'Campaign not found or has no targeting criteria',
-        campaign: campaignResponse
+        campaign: campaign || null,
+        rawResponse: campaignResponse
       });
     }
     
     // Fetch audience count
     const audienceResult = await fetchAudienceCount(
       session.accessToken!,
-      campaignResponse.targetingCriteria
+      campaign.targetingCriteria
     );
     
     // Fetch budget pricing
@@ -6472,22 +6473,22 @@ app.get('/api/test/audience-count/:accountId/:campaignId', requireAuth, requireA
       accountId,
       {
         id: campaignId,
-        costType: campaignResponse.costType,
-        type: campaignResponse.type,
-        format: campaignResponse.format,
-        objectiveType: campaignResponse.objectiveType,
-        optimizationTargetType: campaignResponse.optimizationTargetType,
-        targetingCriteria: campaignResponse.targetingCriteria
+        costType: campaign.costType,
+        type: campaign.type,
+        format: campaign.format,
+        objectiveType: campaign.objectiveType,
+        optimizationTargetType: campaign.optimizationTargetType,
+        targetingCriteria: campaign.targetingCriteria
       }
     );
     
     res.json({
       campaignId,
-      campaignName: campaignResponse.name,
-      status: campaignResponse.status,
+      campaignName: campaign.name,
+      status: campaign.status,
       audienceCount: audienceResult,
       budgetPricing: pricingResult,
-      rawTargetingCriteria: campaignResponse.targetingCriteria
+      rawTargetingCriteria: campaign.targetingCriteria
     });
   } catch (err: any) {
     console.error('[Test] Audience count error:', err.response?.data || err.message);
@@ -6534,26 +6535,26 @@ app.post('/api/test/snapshot/:accountId/:campaignId', requireAuth, requireAccoun
     const { accountId, campaignId } = req.params;
     const session = (req as any).session as Session;
     
-    // Fetch campaign data
-    const campaignUrn = `urn:li:sponsoredCampaign:${campaignId}`;
-    const encodedUrn = encodeURIComponent(campaignUrn);
-    
     console.log(`[Test] Creating snapshot for campaign ${campaignId}...`);
     
+    // Fetch campaign using search query (LinkedIn API expects this format)
     const campaignResponse = await linkedinApiRequestWithToken(
       session.accessToken!,
-      `/adAccounts/${accountId}/adCampaigns/${encodedUrn}`,
-      {}
+      `/adAccounts/${accountId}/adCampaigns`,
+      {},
+      `q=search&search=(id:(values:List(${campaignId})))`
     );
     
-    if (!campaignResponse) {
+    const campaign = campaignResponse.elements?.[0];
+    
+    if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
     }
     
     // Fetch audience count
     const audienceResult = await fetchAudienceCount(
       session.accessToken!,
-      campaignResponse.targetingCriteria
+      campaign.targetingCriteria
     );
     
     // Fetch budget pricing
@@ -6562,12 +6563,12 @@ app.post('/api/test/snapshot/:accountId/:campaignId', requireAuth, requireAccoun
       accountId,
       {
         id: campaignId,
-        costType: campaignResponse.costType,
-        type: campaignResponse.type,
-        format: campaignResponse.format,
-        objectiveType: campaignResponse.objectiveType,
-        optimizationTargetType: campaignResponse.optimizationTargetType,
-        targetingCriteria: campaignResponse.targetingCriteria
+        costType: campaign.costType,
+        type: campaign.type,
+        format: campaign.format,
+        objectiveType: campaign.objectiveType,
+        optimizationTargetType: campaign.optimizationTargetType,
+        targetingCriteria: campaign.targetingCriteria
       }
     );
     
@@ -6576,20 +6577,20 @@ app.post('/api/test/snapshot/:accountId/:campaignId', requireAuth, requireAccoun
     
     // Extract bid value from unitCost
     let bidValue: number | null = null;
-    if (campaignResponse.unitCost?.amount) {
-      bidValue = parseFloat(campaignResponse.unitCost.amount) / 100; // Convert from minor units
+    if (campaign.unitCost?.amount) {
+      bidValue = parseFloat(campaign.unitCost.amount) / 100; // Convert from minor units
     }
     
     // Extract daily budget
     let dailyBudget: number | null = null;
-    if (campaignResponse.dailyBudget?.amount) {
-      dailyBudget = parseFloat(campaignResponse.dailyBudget.amount) / 100;
+    if (campaign.dailyBudget?.amount) {
+      dailyBudget = parseFloat(campaign.dailyBudget.amount) / 100;
     }
     
     // Extract lifetime budget
     let lifetimeBudget: number | null = null;
-    if (campaignResponse.totalBudget?.amount) {
-      lifetimeBudget = parseFloat(campaignResponse.totalBudget.amount) / 100;
+    if (campaign.totalBudget?.amount) {
+      lifetimeBudget = parseFloat(campaign.totalBudget.amount) / 100;
     }
     
     const snapshot = {
@@ -6597,13 +6598,13 @@ app.post('/api/test/snapshot/:accountId/:campaignId', requireAuth, requireAccoun
       campaignId,
       snapshotDate: new Date(),
       bidValue,
-      bidStrategy: campaignResponse.optimizationTargetType || null,
-      costType: campaignResponse.costType || null,
-      optimizationTarget: campaignResponse.optimizationTargetType || null,
+      bidStrategy: campaign.optimizationTargetType || null,
+      costType: campaign.costType || null,
+      optimizationTarget: campaign.optimizationTargetType || null,
       dailyBudget,
       lifetimeBudget,
-      audienceExpansionEnabled: campaignResponse.audienceExpansionEnabled || false,
-      linkedinAudienceNetwork: campaignResponse.offSiteDeliveryEnabled || false,
+      audienceExpansionEnabled: campaign.audienceExpansionEnabled || false,
+      linkedinAudienceNetwork: campaign.offSiteDeliveryEnabled || false,
       suggestedBidMin: pricingResult.suggestedBidMin || null,
       suggestedBidMax: pricingResult.suggestedBidMax || null,
       suggestedBidDefault: pricingResult.suggestedBidDefault || null,
@@ -6611,8 +6612,8 @@ app.post('/api/test/snapshot/:accountId/:campaignId', requireAuth, requireAccoun
       bidCeiling: pricingResult.bidCeiling || null,
       audienceSizeTotal: audienceResult.total || null,
       audienceSizeActive: audienceResult.active || null,
-      campaignStatus: campaignResponse.status,
-      objectiveType: campaignResponse.objectiveType,
+      campaignStatus: campaign.status,
+      objectiveType: campaign.objectiveType,
       currency: pricingResult.currency || 'USD'
     };
     
