@@ -497,17 +497,6 @@ function CampaignCard({ campaign, accountId, showIssues, onClick }: { campaign: 
       
       {/* Causation Insights */}
       {showIssues && <CausationPanel insights={campaign.causationInsights} />}
-      
-      {showIssues && campaign.issues.length > 0 && !campaign.causationInsights?.length && (
-        <div className={`mt-2 pt-2 border-t ${getIssueBorderColor()} space-y-1`}>
-          {campaign.issues.map((issue, idx) => (
-            <div key={idx} className={`flex items-center gap-2 ${getIssueTextColor()} text-xs`}>
-              <AlertTriangle className="w-3 h-3 flex-shrink-0" />
-              <span>{issue}</span>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -754,33 +743,81 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
           </div>
         )}
         
-        {campaign.issues.length > 0 && (
-          <div className="bg-red-50 rounded-lg p-4 border border-red-100">
-            <h5 className="font-medium text-red-800 mb-2 flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4" /> Issues Detected
+        {/* 100-Point Scoring Breakdown by Category */}
+        {campaign.scoreBreakdown && campaign.scoreBreakdown.length > 0 && (
+          <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+            <h5 className="font-medium text-slate-800 mb-3 flex items-center gap-2">
+              <BarChart3 className="w-4 h-4" /> Score Breakdown Details
             </h5>
-            <ul className="space-y-1">
-              {campaign.issues.map((issue, idx) => (
-                <li key={idx} className="text-sm text-red-700 flex items-start gap-2">
-                  <span className="text-red-400 mt-1">•</span> {issue}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        
-        {campaign.positiveSignals && campaign.positiveSignals.length > 0 && (
-          <div className="bg-green-50 rounded-lg p-4 border border-green-100">
-            <h5 className="font-medium text-green-800 mb-2 flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4" /> Positive Signals
-            </h5>
-            <ul className="space-y-1">
-              {campaign.positiveSignals.map((signal, idx) => (
-                <li key={idx} className="text-sm text-green-700 flex items-start gap-2">
-                  <span className="text-green-400 mt-1">•</span> {signal}
-                </li>
-              ))}
-            </ul>
+            
+            {/* Engagement Quality */}
+            {campaign.scoreBreakdown.filter(b => b.category === 'engagement').length > 0 && (
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-medium text-blue-700">Engagement Quality</span>
+                  <span className="text-xs text-blue-600">{campaign.engagementScore || 0}/{campaign.engagementMax || 45}</span>
+                </div>
+                <div className="space-y-1">
+                  {campaign.scoreBreakdown.filter(b => b.category === 'engagement').map((item, idx) => (
+                    <div key={idx} className="flex justify-between text-xs py-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className={item.earnedPoints > 0 ? 'text-slate-700' : 'text-slate-400'}>{item.metric}</span>
+                        <span className="text-slate-400">{item.value}</span>
+                      </div>
+                      <span className={item.earnedPoints > 0 ? 'text-blue-600 font-medium' : 'text-slate-400'}>
+                        {item.earnedPoints}/{item.maxPoints}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Cost Efficiency */}
+            {campaign.scoreBreakdown.filter(b => b.category === 'cost').length > 0 && (
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-medium text-green-700">Cost Efficiency</span>
+                  <span className="text-xs text-green-600">{campaign.costScore || 0}/{campaign.costMax || 35}</span>
+                </div>
+                <div className="space-y-1">
+                  {campaign.scoreBreakdown.filter(b => b.category === 'cost').map((item, idx) => (
+                    <div key={idx} className="flex justify-between text-xs py-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className={item.earnedPoints > 0 ? 'text-slate-700' : 'text-slate-400'}>{item.metric}</span>
+                        <span className="text-slate-400">{item.value}</span>
+                      </div>
+                      <span className={item.earnedPoints > 0 ? 'text-green-600 font-medium' : 'text-slate-400'}>
+                        {item.earnedPoints}/{item.maxPoints}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* Audience Quality */}
+            {campaign.scoreBreakdown.filter(b => b.category === 'audience').length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-medium text-purple-700">Audience Quality</span>
+                  <span className="text-xs text-purple-600">{campaign.audienceScore || 0}/{campaign.audienceMax || 20}</span>
+                </div>
+                <div className="space-y-1">
+                  {campaign.scoreBreakdown.filter(b => b.category === 'audience').map((item, idx) => (
+                    <div key={idx} className="flex justify-between text-xs py-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className={item.earnedPoints > 0 ? 'text-slate-700' : 'text-slate-400'}>{item.metric}</span>
+                        <span className="text-slate-400">{item.value}</span>
+                      </div>
+                      <span className={item.earnedPoints > 0 ? 'text-purple-600 font-medium' : 'text-slate-400'}>
+                        {item.earnedPoints}/{item.maxPoints}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
         

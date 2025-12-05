@@ -2797,94 +2797,9 @@ async function computeAndSaveScoringStatus(accountId: string, campaignMetrics: a
     console.log(`[Audit] Could not fetch seniority data for scoring: ${err.message}`);
   }
   
-  // Score and save campaigns
-  for (const [campaignId, c] of currentPeriodCampaigns) {
-    const prev = previousPeriodCampaigns.get(campaignId);
-    const issues: string[] = [];
-    const positiveSignals: string[] = [];
-    let negativeScore = 0;
-    let positiveScore = 0;
-    
-    // Low volume filter
-    if (c.impressions < 1000 || c.spend < 20 || c.activeDays.size < 3) {
-      await updateCampaignScoring(accountId, campaignId, 'low_volume', [], []);
-      continue;
-    }
-    
-    const ctr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
-    const prevCtr = prev && prev.impressions > 0 ? (prev.clicks / prev.impressions) * 100 : 0;
-    const cpc = c.clicks > 0 ? c.spend / c.clicks : 0;
-    const prevCpc = prev && prev.clicks > 0 ? prev.spend / prev.clicks : 0;
-    
-    // CTR scoring
-    if (prev && prevCtr > 0) {
-      const ctrChange = pctChange(ctr, prevCtr);
-      if (ctrChange < -20) {
-        negativeScore -= 2;
-        issues.push(`CTR down ${Math.abs(ctrChange).toFixed(0)}%`);
-      } else if (ctrChange >= 20) {
-        positiveScore += 1;
-        positiveSignals.push(`CTR up ${ctrChange.toFixed(0)}%`);
-      }
-    }
-    
-    if (ctr < 0.3) {
-      negativeScore -= 2;
-      issues.push(`Low CTR (${ctr.toFixed(2)}%)`);
-    } else if (ctr < 0.4) {
-      negativeScore -= 1;
-      issues.push(`CTR below 0.4%`);
-    }
-    
-    // CPC trend scoring (removed account comparison)
-    if (prev && prevCpc > 0) {
-      const cpcChange = pctChange(cpc, prevCpc);
-      if (cpcChange > 25) {
-        negativeScore -= 2;
-        issues.push(`CPC up ${cpcChange.toFixed(0)}%`);
-      } else if (cpcChange > 20) {
-        negativeScore -= 1;
-        issues.push(`CPC up ${cpcChange.toFixed(0)}%`);
-      }
-    }
-    
-    // Seniority tier distribution scoring
-    if (seniorityData) {
-      const currentSeniority = seniorityData.currentPeriod.get(campaignId);
-      const previousSeniority = seniorityData.previousPeriod.get(campaignId);
-      
-      const tierShift = computeSeniorityTierShift(currentSeniority, previousSeniority);
-      
-      if (tierShift.hasData) {
-        if (tierShift.scoreContribution < 0) {
-          negativeScore += tierShift.scoreContribution;
-          if (tierShift.issueMessage) {
-            issues.push(tierShift.issueMessage);
-          }
-        } else if (tierShift.scoreContribution > 0) {
-          positiveScore += tierShift.scoreContribution;
-          if (tierShift.positiveMessage) {
-            positiveSignals.push(tierShift.positiveMessage);
-          }
-        }
-      }
-    }
-    
-    // Determine status
-    const effectivePositive = Math.min(positiveScore, 2);
-    const finalScore = negativeScore + effectivePositive;
-    
-    let scoringStatus: string;
-    if (finalScore <= -3) {
-      scoringStatus = 'needs_attention';
-    } else if (finalScore < 0) {
-      scoringStatus = 'mild_issues';
-    } else {
-      scoringStatus = 'performing_well';
-    }
-    
-    await updateCampaignScoring(accountId, campaignId, scoringStatus, issues, positiveSignals);
-  }
+  // NOTE: Campaign scoring is now handled by the 100-point scoring system (scoreCampaignsWithNew100PointSystem)
+  // The old algorithm below has been removed to prevent overwriting the new scoring data
+  // Low volume campaigns are now flagged in the 100-point system via eligibility checks
   
   // Score and save creatives with peer comparison within campaigns
   const currentPeriodAds = new Map<string, any>();
