@@ -5665,26 +5665,16 @@ app.get('/api/audit/data/:accountId', requireAuth, requireAccountAccess, async (
       const hasMaximizeDelivery = liveSettings.hasMaximizeDelivery || false;
       
       // Calculate new metrics from aggregated analytics data
-      // Audience Penetration: Prefer TOTAL API (cumulative), fallback to DB MAX (daily max)
+      // Audience Penetration: Use same TOTAL API data as Advanced Metrics (28-day cumulative)
       const totalPenetrationData = currentPeriodPenetration.get(c.campaignId);
       const prevTotalPenetrationData = prevPeriodPenetration.get(c.campaignId);
       
-      // TOTAL API gives cumulative penetration over the period (more accurate)
-      // DB max gives highest daily penetration (smaller, less accurate but always available)
-      const audiencePenetration = totalPenetrationData?.penetration && totalPenetrationData.penetration > 0
-        ? totalPenetrationData.penetration
-        : (c.audiencePenetrationMax > 0 ? c.audiencePenetrationMax : null);
-      const prevAudiencePenetration = prevTotalPenetrationData?.penetration && prevTotalPenetrationData.penetration > 0
-        ? prevTotalPenetrationData.penetration
-        : (prev && prev.audiencePenetrationMax > 0 ? prev.audiencePenetrationMax : null);
+      // Use TOTAL API penetration directly - same field used in Advanced Metrics display
+      const audiencePenetration = totalPenetrationData?.penetration ?? null;
+      const prevAudiencePenetration = prevTotalPenetrationData?.penetration ?? null;
       const audiencePenetrationChange = audiencePenetration !== null && prevAudiencePenetration !== null && prevAudiencePenetration > 0
         ? pctChange(audiencePenetration, prevAudiencePenetration)
         : null;
-      
-      // Debug: Log penetration values to verify
-      if (c.impressions > 1000) {
-        console.log(`[Audit] Campaign ${c.campaignId}: Using penetration=${audiencePenetration} (TOTAL API=${totalPenetrationData?.penetration}, DB=${c.audiencePenetrationMax})`);
-      }
       
       // Frequency: impressions / unique reach
       // Use cumulative reach from ALL granularity API (more accurate than summed daily)
