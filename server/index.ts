@@ -6443,15 +6443,18 @@ app.get('/api/test/audience-count/:accountId/:campaignId', requireAuth, requireA
     
     console.log(`[Test] Fetching audience count for campaign ${campaignId}...`);
     
-    // Fetch campaign using search query (LinkedIn API expects this format)
+    // Fetch all campaigns and filter by ID (LinkedIn API doesn't support direct ID lookup)
     const campaignResponse = await linkedinApiRequestWithToken(
       session.accessToken!,
       `/adAccounts/${accountId}/adCampaigns`,
       {},
-      `q=search&search=(id:(values:List(${campaignId})))`
+      'q=search&search=(status:(values:List(ACTIVE,PAUSED,ARCHIVED,CANCELED,DRAFT)))'
     );
     
-    const campaign = campaignResponse.elements?.[0];
+    // Find the specific campaign by ID
+    const campaign = (campaignResponse.elements || []).find(
+      (c: any) => String(c.id) === String(campaignId)
+    );
     
     if (!campaign || !campaign.targetingCriteria) {
       return res.json({
@@ -6537,15 +6540,18 @@ app.post('/api/test/snapshot/:accountId/:campaignId', requireAuth, requireAccoun
     
     console.log(`[Test] Creating snapshot for campaign ${campaignId}...`);
     
-    // Fetch campaign using search query (LinkedIn API expects this format)
+    // Fetch all campaigns and filter by ID (LinkedIn API doesn't support direct ID lookup)
     const campaignResponse = await linkedinApiRequestWithToken(
       session.accessToken!,
       `/adAccounts/${accountId}/adCampaigns`,
       {},
-      `q=search&search=(id:(values:List(${campaignId})))`
+      'q=search&search=(status:(values:List(ACTIVE,PAUSED,ARCHIVED,CANCELED,DRAFT)))'
     );
     
-    const campaign = campaignResponse.elements?.[0];
+    // Find the specific campaign by ID
+    const campaign = (campaignResponse.elements || []).find(
+      (c: any) => String(c.id) === String(campaignId)
+    );
     
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' });
