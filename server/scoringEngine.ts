@@ -50,6 +50,11 @@ export interface TrackingData {
   previousBidStrategy?: string;
   audienceExpansion?: boolean;
   linkedInAudienceNetwork?: boolean; // LAN enabled flag
+  // 48-hour cooling-off timestamps (in milliseconds since epoch)
+  lastBidChange?: number;
+  lastBudgetChange?: number;
+  lastTargetingChange?: number;
+  lastCreativeChange?: number;
 }
 
 export interface AdMetrics {
@@ -422,15 +427,15 @@ export function scoreCpc(
   let absoluteScore = 0;
   let trendScore = 0;
   
-  if (clicks < 10 || currentCpc === 0) {
-    // FALSE-POSITIVE PROTECTION: Award 0 points when we can't properly score
+  if (clicks < 20 || currentCpc === 0) {
+    // FALSE-POSITIVE PROTECTION: Award 0 points when we can't properly score (spec requires ≥20 clicks)
     breakdown.push({
       category: 'cost',
       metric: 'CPC',
       maxPoints: 20,
       earnedPoints: 0, // No points when ineligible
       value: 'N/A',
-      threshold: 'Needs ≥10 clicks for scoring'
+      threshold: 'Needs ≥20 clicks for scoring'
     });
     return { score: 0, breakdown };
   }
@@ -1087,6 +1092,17 @@ export function diagnoseAd(
 
 // ============ CAUSATION ENGINE ============
 
+// 48-hour cooling-off period (in milliseconds)
+const COOLING_OFF_MS = 48 * 60 * 60 * 1000;
+
+// Helper to check if change is at least 48 hours old
+function isChangeOldEnough(changeTimestamp: number | undefined): boolean {
+  if (!changeTimestamp) return true; // No change recorded means no cooling-off needed
+  const now = Date.now();
+  const changeAge = now - changeTimestamp;
+  return changeAge >= COOLING_OFF_MS;
+}
+
 export function analyzeCausation(
   current: CampaignMetrics,
   previous: CampaignMetrics | undefined,
@@ -1100,6 +1116,16 @@ export function analyzeCausation(
     return insights;
   }
   
+  // 48-HOUR COOLING-OFF SAFEGUARD: Don't produce insights for changes less than 48 hours old
+  const mostRecentChange = Math.max(
+    tracking.lastBidChange || 0,
+    tracking.lastBudgetChange || 0,
+    tracking.lastTargetingChange || 0,
+    tracking.lastCreativeChange || 0
+  );
+  
+  const changeOldEnough = isChangeOldEnough(mostRecentChange);
+  
   const currentCtr = current.impressions > 0 ? (current.clicks / current.impressions) * 100 : 0;
   const previousCtr = previous.impressions > 0 ? (previous.clicks / previous.impressions) * 100 : 0;
   const ctrChange = previousCtr > 0 ? ((currentCtr - previousCtr) / previousCtr) * 100 : 0;
@@ -1108,8 +1134,8 @@ export function analyzeCausation(
   const previousCpm = previous.impressions > 0 ? (previous.spend / previous.impressions) * 1000 : 0;
   const cpmChange = previousCpm > 0 ? ((currentCpm - previousCpm) / previousCpm) * 100 : 0;
   
-  const currentDwell = current.avgDwellTime || 0;
-  const previousDwell = previous.avgDwellTime || 0;
+  const currentDwell = current.dwellTimeSeconds || 0;
+  const previousDwell = previous.dwellTimeSeconds || 0;
   const dwellChange = previousDwell > 0 ? ((currentDwell - previousDwell) / previousDwell) * 100 : 0;
   
   // ============ LAYER 1: CREATIVE CAUSATION ============
@@ -1206,7 +1232,9 @@ export function analyzeCausation(
   }
   
   // ============ LAYER 2: BIDDING CAUSATION ============
+  // 48-HOUR COOLING-OFF: Only analyze bidding changes if changes are at least 48 hours old
   
+  if (changeOldEnough) {
   // Suggested bid movement (THE MOST IMPORTANT EXTERNAL SIGNAL)
   // Per spec: ↑>20% = Auction pressure high, ↑10-20% = Moderate, ↓>10% = Cheaper, ↓>20% = Major drop
   if (tracking.suggestedBidMin && tracking.previousSuggestedBidMin) {
@@ -1329,9 +1357,12 @@ export function analyzeCausation(
       recommendation: 'Review bid strategy or wait for market conditions to normalize'
     });
   }
+  } // End of Layer 2 changeOldEnough guard
   
   // ============ LAYER 3: TARGETING CAUSATION ============
+  // 48-HOUR COOLING-OFF: Only analyze targeting changes if changes are at least 48 hours old
   
+  if (changeOldEnough) {
   // Audience size change (Shrank >20% → CPM↑, CTR↓ | Expanded → CPM↓, CTR more volatile)
   if (tracking.audienceSize && tracking.previousAudienceSize) {
     const sizeChange = ((tracking.audienceSize - tracking.previousAudienceSize) / tracking.previousAudienceSize) * 100;
@@ -1415,6 +1446,7 @@ export function analyzeCausation(
       recommendation: 'Consider disabling LAN if CTR quality is critical'
     });
   }
+  } // End of Layer 3 changeOldEnough guard
   
   // Sort by severity
   const severityOrder = { primary: 0, secondary: 1, info: 2 };
