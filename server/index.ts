@@ -1040,15 +1040,20 @@ function encodeTargetingCriteriaForApi(targetingCriteria: any): string {
     // Format: (include:(and:List((or:(facet:List(values))),(...))))
     const andList = targetingCriteria.include.and.map((orGroup: any) => {
       const orEntries = Object.entries(orGroup.or || {}).map(([facet, values]: [string, any]) => {
-        // Don't URL encode here - let the values stay as-is
         const valuesList = (values as string[]).join(',');
         return `${facet}:List(${valuesList})`;
       }).join(',');
       return `(or:(${orEntries}))`;
     }).join(',');
     
-    const encoded = `(include:(and:List(${andList})))`;
-    console.log('[TargetingEncode] Encoded criteria:', encoded.substring(0, 200) + '...');
+    // Build the raw criteria string
+    const rawCriteria = `(include:(and:List(${andList})))`;
+    
+    // URL-encode the entire string for the query parameter
+    // LinkedIn's Rest.li API requires URL-encoded special characters
+    const encoded = encodeURIComponent(rawCriteria);
+    console.log('[TargetingEncode] Raw criteria length:', rawCriteria.length);
+    console.log('[TargetingEncode] Encoded criteria (first 300 chars):', encoded.substring(0, 300));
     return encoded;
   } catch (err) {
     console.error('Error encoding targeting criteria:', err);
