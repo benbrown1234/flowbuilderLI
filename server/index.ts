@@ -3136,6 +3136,19 @@ async function computeAndSaveScoring100(
   const prevStart = new Date(currentStart);
   prevStart.setDate(prevStart.getDate() - 28);
   
+  // Week boundaries for WoW calculations
+  const currentWeekStart = new Date(now);
+  currentWeekStart.setDate(currentWeekStart.getDate() - 7);
+  const previousWeekStart = new Date(currentWeekStart);
+  previousWeekStart.setDate(previousWeekStart.getDate() - 7);
+  
+  // Weekly metrics for WoW
+  type WeekData = { impressions: number; clicks: number; spend: number; dwellTimeSum: number; dwellTimeCount: number; days: Set<string> };
+  const currentWeekByCampaign = new Map<string, WeekData>();
+  const previousWeekByCampaign = new Map<string, WeekData>();
+  
+  const initWeekData = (): WeekData => ({ impressions: 0, clicks: 0, spend: 0, dwellTimeSum: 0, dwellTimeCount: 0, days: new Set() });
+  
   // Aggregate campaign metrics
   const campaignData = new Map<string, AggregatedCampaignData>();
   const accountTotals = {
@@ -3203,6 +3216,38 @@ async function computeAndSaveScoring100(
       if (m.frequency) c.prevFrequency = Number(m.frequency);
       if (prevPenetration) c.prevPenetration = Number(prevPenetration);
       if (prevReach) c.prevReach = Number(prevReach);
+    }
+    
+    // Collect weekly data for WoW calculations
+    const dateStr = date.toISOString().split('T')[0];
+    const dwellTimeVal = Number(m.average_dwell_time ?? m.averageDwellTime ?? 0);
+    
+    if (date >= currentWeekStart) {
+      if (!currentWeekByCampaign.has(campaignId)) {
+        currentWeekByCampaign.set(campaignId, initWeekData());
+      }
+      const week = currentWeekByCampaign.get(campaignId)!;
+      week.impressions += Number(m.impressions) || 0;
+      week.clicks += Number(m.clicks) || 0;
+      week.spend += Number(m.spend) || 0;
+      if (dwellTimeVal > 0) {
+        week.dwellTimeSum += dwellTimeVal * (Number(m.clicks) || 1);
+        week.dwellTimeCount += (Number(m.clicks) || 1);
+      }
+      week.days.add(dateStr);
+    } else if (date >= previousWeekStart && date < currentWeekStart) {
+      if (!previousWeekByCampaign.has(campaignId)) {
+        previousWeekByCampaign.set(campaignId, initWeekData());
+      }
+      const week = previousWeekByCampaign.get(campaignId)!;
+      week.impressions += Number(m.impressions) || 0;
+      week.clicks += Number(m.clicks) || 0;
+      week.spend += Number(m.spend) || 0;
+      if (dwellTimeVal > 0) {
+        week.dwellTimeSum += dwellTimeVal * (Number(m.clicks) || 1);
+        week.dwellTimeCount += (Number(m.clicks) || 1);
+      }
+      week.days.add(dateStr);
     }
   }
   
@@ -3383,7 +3428,29 @@ async function computeAndSaveScoring100(
       console.log(`[Scoring100] Campaign ${campaignId} seniority: ${currentDMPct.toFixed(1)}% DM (prev: ${previousDMPct?.toFixed(1) ?? 'N/A'}%, shift: ${shift >= 0 ? '+' : ''}${shift.toFixed(1)}%)`);
     }
     
-    // Score the campaign with correct 7 parameters
+    // Get weekly data for WoW calculations
+    const currWeekData = currentWeekByCampaign.get(campaignId);
+    const prevWeekData = previousWeekByCampaign.get(campaignId);
+    
+    const currentWeekMetrics: import('./scoringEngine').WeeklyMetrics | undefined = currWeekData ? {
+      impressions: currWeekData.impressions,
+      clicks: currWeekData.clicks,
+      spend: currWeekData.spend,
+      dwellTimeSum: currWeekData.dwellTimeSum,
+      dwellTimeCount: currWeekData.dwellTimeCount,
+      days: currWeekData.days.size
+    } : undefined;
+    
+    const previousWeekMetrics: import('./scoringEngine').WeeklyMetrics | undefined = prevWeekData ? {
+      impressions: prevWeekData.impressions,
+      clicks: prevWeekData.clicks,
+      spend: prevWeekData.spend,
+      dwellTimeSum: prevWeekData.dwellTimeSum,
+      dwellTimeCount: prevWeekData.dwellTimeCount,
+      days: prevWeekData.days.size
+    } : undefined;
+    
+    // Score the campaign with weekly data for WoW
     const result = scoreCampaign(
       currentMetrics,
       previousMetrics,
@@ -3391,7 +3458,9 @@ async function computeAndSaveScoring100(
       accountTotals.cpm,
       accountTotals.cpa,
       seniorityData,
-      campaignAgeDays
+      campaignAgeDays,
+      currentWeekMetrics,
+      previousWeekMetrics
     );
     
     // Analyze causation with correct 5 parameters

@@ -31,6 +31,15 @@ export interface CampaignMetrics {
   audiencePenetration?: number;
 }
 
+export interface WeeklyMetrics {
+  impressions: number;
+  clicks: number;
+  spend: number;
+  dwellTimeSum?: number;
+  dwellTimeCount?: number;
+  days: number; // Number of active days in week
+}
+
 export interface SeniorityData {
   currentDecisionMakerPct: number;
   previousDecisionMakerPct: number;
@@ -78,6 +87,7 @@ export interface ScoreBreakdown {
   value: string;
   threshold?: string;
   trend?: string;
+  wowValue?: string; // Week-over-Week change
 }
 
 export interface CausationInsight {
@@ -735,7 +745,9 @@ export function scoreCampaign(
   accountAvgCpm: number,
   accountAvgCpa: number,
   seniorityData: SeniorityData | undefined,
-  campaignAgeDays: number
+  campaignAgeDays: number,
+  currentWeek?: WeeklyMetrics,
+  previousWeek?: WeeklyMetrics
 ): CampaignScore {
   // Check eligibility
   const eligibility = checkCampaignEligibility(current, campaignAgeDays);
@@ -765,7 +777,7 @@ export function scoreCampaign(
   const issues: string[] = [];
   const positiveSignals: string[] = [];
   
-  // Calculate metrics
+  // Calculate MoM metrics (4-week on 4-week)
   const currentCtr = current.impressions > 0 ? (current.clicks / current.impressions) * 100 : 0;
   const previousCtr = previous && previous.impressions > 0 ? (previous.clicks / previous.impressions) * 100 : undefined;
   
@@ -777,6 +789,40 @@ export function scoreCampaign(
   
   const currentCpa = current.conversions > 0 ? current.spend / current.conversions : 0;
   const previousCpa = previous && previous.conversions > 0 ? previous.spend / previous.conversions : undefined;
+  
+  // Calculate WoW metrics (week on week) - helper function
+  const calcWoWChange = (currVal: number, prevVal: number): string | undefined => {
+    if (prevVal <= 0) return undefined;
+    const change = ((currVal - prevVal) / prevVal) * 100;
+    return `${change >= 0 ? '+' : ''}${change.toFixed(0)}% WoW`;
+  };
+  
+  // WoW calculations
+  let wowCtrChange: string | undefined;
+  let wowDwellChange: string | undefined;
+  let wowCpcChange: string | undefined;
+  let wowCpmChange: string | undefined;
+  
+  if (currentWeek && previousWeek && currentWeek.days >= 3 && previousWeek.days >= 3) {
+    const wowCtrCurr = currentWeek.impressions > 0 ? (currentWeek.clicks / currentWeek.impressions) * 100 : 0;
+    const wowCtrPrev = previousWeek.impressions > 0 ? (previousWeek.clicks / previousWeek.impressions) * 100 : 0;
+    wowCtrChange = calcWoWChange(wowCtrCurr, wowCtrPrev);
+    
+    const wowCpcCurr = currentWeek.clicks > 0 ? currentWeek.spend / currentWeek.clicks : 0;
+    const wowCpcPrev = previousWeek.clicks > 0 ? previousWeek.spend / previousWeek.clicks : 0;
+    wowCpcChange = calcWoWChange(wowCpcCurr, wowCpcPrev);
+    
+    const wowCpmCurr = currentWeek.impressions > 0 ? (currentWeek.spend / currentWeek.impressions) * 1000 : 0;
+    const wowCpmPrev = previousWeek.impressions > 0 ? (previousWeek.spend / previousWeek.impressions) * 1000 : 0;
+    wowCpmChange = calcWoWChange(wowCpmCurr, wowCpmPrev);
+    
+    // Dwell WoW
+    const wowDwellCurr = currentWeek.dwellTimeCount && currentWeek.dwellTimeCount > 0 
+      ? (currentWeek.dwellTimeSum || 0) / currentWeek.dwellTimeCount : 0;
+    const wowDwellPrev = previousWeek.dwellTimeCount && previousWeek.dwellTimeCount > 0 
+      ? (previousWeek.dwellTimeSum || 0) / previousWeek.dwellTimeCount : 0;
+    wowDwellChange = calcWoWChange(wowDwellCurr, wowDwellPrev);
+  }
   
   // ============ ENGAGEMENT (45 pts) ============
   
@@ -825,6 +871,19 @@ export function scoreCampaign(
   allBreakdown.push(...seniorityResult.breakdown);
   
   const audienceScore = penetrationResult.score + seniorityResult.score;
+  
+  // Add WoW values to trend breakdown items
+  for (const item of allBreakdown) {
+    if (item.metric === 'Dwell Time (Trend)' && wowDwellChange) {
+      item.wowValue = wowDwellChange;
+    } else if (item.metric === 'CTR (Trend)' && wowCtrChange) {
+      item.wowValue = wowCtrChange;
+    } else if (item.metric === 'CPC (Trend)' && wowCpcChange) {
+      item.wowValue = wowCpcChange;
+    } else if (item.metric === 'CPM (Trend)' && wowCpmChange) {
+      item.wowValue = wowCpmChange;
+    }
+  }
   
   // ============ TOTAL & STATUS ============
   

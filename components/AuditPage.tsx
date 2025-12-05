@@ -133,6 +133,7 @@ interface CampaignItem {
     value: string;
     threshold?: string;
     trend?: string;
+    wowValue?: string;
   }>;
   causationInsights?: Array<{
     layer: string;
@@ -997,14 +998,19 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
                 </div>
                 <div className="space-y-1">
                   {campaign.scoreBreakdown.filter(b => b.category === 'engagement').map((item, idx) => (
-                    <div key={idx} className="flex justify-between text-xs py-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className={item.earnedPoints > 0 ? 'text-slate-700' : 'text-slate-400'}>{item.metric}</span>
-                        <span className="text-slate-400">{item.value}</span>
+                    <div key={idx} className="py-0.5">
+                      <div className="flex justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className={item.earnedPoints > 0 ? 'text-slate-700' : 'text-slate-400'}>{item.metric}</span>
+                          <span className="text-slate-400">{item.value}</span>
+                        </div>
+                        <span className={item.earnedPoints > 0 ? 'text-blue-600 font-medium' : 'text-slate-400'}>
+                          {item.earnedPoints}/{item.maxPoints}
+                        </span>
                       </div>
-                      <span className={item.earnedPoints > 0 ? 'text-blue-600 font-medium' : 'text-slate-400'}>
-                        {item.earnedPoints}/{item.maxPoints}
-                      </span>
+                      {item.wowValue && (
+                        <div className="text-[10px] text-slate-400 ml-0 mt-0.5">{item.wowValue}</div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1020,14 +1026,19 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
                 </div>
                 <div className="space-y-1">
                   {campaign.scoreBreakdown.filter(b => b.category === 'cost').map((item, idx) => (
-                    <div key={idx} className="flex justify-between text-xs py-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className={item.earnedPoints > 0 ? 'text-slate-700' : 'text-slate-400'}>{item.metric}</span>
-                        <span className="text-slate-400">{item.value}</span>
+                    <div key={idx} className="py-0.5">
+                      <div className="flex justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className={item.earnedPoints > 0 ? 'text-slate-700' : 'text-slate-400'}>{item.metric}</span>
+                          <span className="text-slate-400">{item.value}</span>
+                        </div>
+                        <span className={item.earnedPoints > 0 ? 'text-green-600 font-medium' : 'text-slate-400'}>
+                          {item.earnedPoints}/{item.maxPoints}
+                        </span>
                       </div>
-                      <span className={item.earnedPoints > 0 ? 'text-green-600 font-medium' : 'text-slate-400'}>
-                        {item.earnedPoints}/{item.maxPoints}
-                      </span>
+                      {item.wowValue && (
+                        <div className="text-[10px] text-slate-400 ml-0 mt-0.5">{item.wowValue}</div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1043,14 +1054,19 @@ function CampaignDetailSidebar({ campaign, accountId, onClose }: {
                 </div>
                 <div className="space-y-1">
                   {campaign.scoreBreakdown.filter(b => b.category === 'audience').map((item, idx) => (
-                    <div key={idx} className="flex justify-between text-xs py-0.5">
-                      <div className="flex items-center gap-2">
-                        <span className={item.earnedPoints > 0 ? 'text-slate-700' : 'text-slate-400'}>{item.metric}</span>
-                        <span className="text-slate-400">{item.value}</span>
+                    <div key={idx} className="py-0.5">
+                      <div className="flex justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className={item.earnedPoints > 0 ? 'text-slate-700' : 'text-slate-400'}>{item.metric}</span>
+                          <span className="text-slate-400">{item.value}</span>
+                        </div>
+                        <span className={item.earnedPoints > 0 ? 'text-purple-600 font-medium' : 'text-slate-400'}>
+                          {item.earnedPoints}/{item.maxPoints}
+                        </span>
                       </div>
-                      <span className={item.earnedPoints > 0 ? 'text-purple-600 font-medium' : 'text-slate-400'}>
-                        {item.earnedPoints}/{item.maxPoints}
-                      </span>
+                      {item.wowValue && (
+                        <div className="text-[10px] text-slate-400 ml-0 mt-0.5">{item.wowValue}</div>
+                      )}
                     </div>
                   ))}
                 </div>
