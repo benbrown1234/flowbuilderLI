@@ -1,0 +1,175 @@
+Load all ads in the campaign.
+
+For each ad, retrieve:
+ad_ctr
+ad_dwell
+ad_cpc
+ad_cpm
+ad_impressions
+ad_clicks
+ad_age_days
+ad_spend
+ad_status
+
+Compute campaign averages:
+campaign_ctr
+campaign_dwell
+campaign_cpc
+campaign_cpm
+campaign_impressions_total
+
+Compute impression share:
+ad_share = ad_impressions divided by campaign_impressions_total
+
+STEP 1 — VOLUME CHECK
+
+If ad_impressions is less than 1000:
+mark ad as low_volume
+classify ad as not_evaluable
+skip all scoring and continue to next ad
+
+STEP 2 — DETERMINE AD AGE STATE
+
+If ad_age_days is less than or equal to 13:
+age_state = learning
+
+Else if ad_age_days is between 14 and 59:
+age_state = stable
+
+Else if ad_age_days is 60 or more:
+age_state = fatigue_risk
+
+STEP 3 — RELATIVE PERFORMANCE DELTAS
+
+ctr_delta = (ad_ctr minus campaign_ctr) divided by campaign_ctr
+dwell_delta = (ad_dwell minus campaign_dwell) divided by campaign_dwell
+cpc_delta = (campaign_cpc minus ad_cpc) divided by campaign_cpc
+
+STEP 4 — PERFORMANCE CLASSIFICATION
+
+If age_state is learning:
+contribution = learning
+recommendation = allow more time
+continue to next ad
+
+Else evaluate CTR:
+If ctr_delta is 0.10 or higher:
+ctr_status = strong
+Else if ctr_delta is -0.15 or lower:
+ctr_status = weak
+Else:
+ctr_status = neutral
+
+Evaluate dwell:
+If dwell_delta is 0.10 or higher:
+dwell_status = strong
+Else if dwell_delta is -0.10 or lower:
+dwell_status = weak
+Else:
+dwell_status = neutral
+
+Evaluate CPC:
+If cpc_delta is 0.10 or higher:
+cpc_status = efficient
+Else if cpc_delta is -0.15 or lower:
+cpc_status = inefficient
+Else:
+cpc_status = neutral
+
+STEP 5 — IMPRESSION DISTRIBUTION ANALYSIS
+
+If ad_share is 0.70 or higher:
+distribution_flag = over_served
+Else if ad_share is less than 0.10:
+distribution_flag = under_served
+Else:
+distribution_flag = normal
+
+STEP 6 — FATIGUE CHECK
+
+If age_state equals fatigue_risk:
+If ctr_status equals weak OR dwell_status equals weak:
+fatigue_flag = fatigued
+Else:
+fatigue_flag = ageing_but_ok
+Else:
+fatigue_flag = not_fatigued
+
+STEP 7 — FINAL CONTRIBUTION CLASSIFICATION
+
+If ctr_status equals strong AND dwell_status equals strong AND cpc_status is not inefficient:
+contribution = high_contributor
+
+Else if ctr_status equals weak OR dwell_status equals weak OR cpc_status equals inefficient:
+contribution = weak_contributor
+
+Else:
+contribution = neutral_contributor
+
+STEP 8 — CONFLICT RESOLUTION LOGIC
+
+If ctr_status equals weak AND dwell_status equals strong:
+conflict_reason = senior_audience_or_message_depth
+recommendation = strong message but CTA weak
+
+If ctr_status equals strong AND dwell_status equals weak:
+conflict_reason = curiosity_clicks
+recommendation = improve post_click experience
+
+If ad_share is 0.70 or higher AND contribution equals weak_contributor:
+conflict_reason = algorithm_over_serving_weak_ad
+recommendation = pause_or_replace
+
+If ad_share is 0.70 or higher AND contribution equals high_contributor:
+conflict_reason = top_ad_over_served
+recommendation = create_variants
+
+If age_state equals learning:
+conflict_reason = learning_phase_uncertain
+recommendation = allow more time
+
+STEP 9 — FINAL RECOMMENDATION LOGIC
+
+If contribution equals high_contributor:
+recommendation = scale_or_duplicate
+
+If contribution equals neutral_contributor:
+recommendation = keep_running
+
+If contribution equals weak_contributor:
+If fatigue_flag equals fatigued:
+recommendation = refresh_or_replace_creative
+Else if distribution_flag equals over_served:
+recommendation = reduce_impression_share_or_pause
+Else:
+recommendation = pause_or_optimize
+
+If ad is low_volume:
+recommendation = insufficient_data
+
+If ad_status equals paused:
+recommendation = no_action_ad_paused
+
+STEP 10 — OUTPUT
+
+For each ad, output:
+ad_id
+ad_status
+age_state
+impression_share
+ctr_status
+dwell_status
+cpc_status
+contribution
+fatigue_flag
+distribution_flag
+conflict_reason
+final_recommendation
+
+Return ranked list:
+first high contributors
+second neutral contributors
+third weak contributors
+fourth low volume ads
+
+End

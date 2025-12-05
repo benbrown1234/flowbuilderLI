@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import OpenAI from 'openai';
 import logger from './logger.js';
 import { pool } from './database.js';
+import { scoreAllAdsInCampaign, computeCampaignAverages, AdInput, AdScoringResult } from './adScoringEngine.js';
 import { 
   initDatabase, 
   getSnapshot, 
@@ -6691,6 +6692,181 @@ app.get('/api/audit/drilldown/seniority-campaigns/:accountId', requireAuth, requ
   } catch (err: any) {
     console.error('Seniority campaigns error:', err.message);
     res.status(500).json({ error: 'Failed to get campaigns with seniority data' });
+  }
+});
+
+// Get scored ads for a specific campaign using the 10-step algorithm
+app.get('/api/audit/campaign-ads/:accountId/:campaignId', requireAuth, requireAccountAccess, async (req, res) => {
+  const { accountId, campaignId } = req.params;
+  const session = (req as any).session as Session;
+  
+  try {
+    // Fetch creative analytics from database for this campaign
+    const client = await pool.connect();
+    try {
+      // Get creative daily metrics for the last 28 days
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 28);
+      
+      const creativesResult = await client.query(`
+        SELECT 
+          creative_id,
+          campaign_id,
+          creative_name,
+          SUM(impressions) as impressions,
+          SUM(clicks) as clicks,
+          SUM(spend) as spend,
+          SUM(conversions) as conversions,
+          AVG(NULLIF(average_dwell_time, 0)) as avg_dwell_time,
+          MAX(metric_date) as last_metric_date,
+          MIN(metric_date) as first_metric_date
+        FROM analytics_creative_daily
+        WHERE account_id = $1 
+          AND campaign_id = $2
+          AND metric_date >= $3
+          AND metric_date <= $4
+        GROUP BY creative_id, campaign_id, creative_name
+      `, [accountId, campaignId, startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0]]);
+      
+      if (creativesResult.rows.length === 0) {
+        // No data in database, try to fetch from live API
+        const accessToken = session?.accessToken;
+        if (!accessToken) {
+          return res.json({ ads: [], campaignAverages: null, message: 'No ad data available' });
+        }
+        
+        // Fetch live creative analytics
+        const now = new Date();
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        
+        const encodedAccountUrn = encodeURIComponent(`urn:li:sponsoredAccount:${accountId}`);
+        const campaignUrn = `urn:li:sponsoredCampaign:${campaignId}`;
+        const encodedCampaignUrn = encodeURIComponent(campaignUrn);
+        
+        // Get creatives for this campaign
+        const creativesApiUrl = `https://api.linkedin.com/rest/adCreatives?q=search&search=(campaign:(values:List(${encodedCampaignUrn})))`;
+        
+        let creatives: any[] = [];
+        try {
+          const creativesResponse = await axios.get(creativesApiUrl, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'X-Restli-Protocol-Version': '2.0.0',
+              'LinkedIn-Version': '202501'
+            }
+          });
+          creatives = creativesResponse.data.elements || [];
+        } catch (err) {
+          console.error('Failed to fetch creatives:', err);
+        }
+        
+        if (creatives.length === 0) {
+          return res.json({ ads: [], campaignAverages: null, message: 'No ads found for this campaign' });
+        }
+        
+        // Get analytics for the creatives
+        const creativeIds = creatives.map(c => c.id).join(',');
+        const analyticsUrl = `https://api.linkedin.com/rest/adAnalytics?q=analytics&pivot=CREATIVE&dateRange=(start:(year:${thirtyDaysAgo.getFullYear()},month:${thirtyDaysAgo.getMonth() + 1},day:${thirtyDaysAgo.getDate()}),end:(year:${now.getFullYear()},month:${now.getMonth() + 1},day:${now.getDate()}))&timeGranularity=ALL&accounts=List(${encodedAccountUrn})&campaigns=List(${encodedCampaignUrn})&fields=impressions,clicks,costInLocalCurrency,externalWebsiteConversions,averageDwellTime,pivotValues`;
+        
+        let analyticsData: any[] = [];
+        try {
+          const analyticsResponse = await axios.get(analyticsUrl, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'X-Restli-Protocol-Version': '2.0.0',
+              'LinkedIn-Version': '202501'
+            }
+          });
+          analyticsData = analyticsResponse.data.elements || [];
+        } catch (err) {
+          console.error('Failed to fetch creative analytics:', err);
+        }
+        
+        // Map analytics to creatives
+        const analyticsMap = new Map<string, any>();
+        for (const elem of analyticsData) {
+          const creativeUrn = elem.pivotValues?.[0];
+          if (creativeUrn) {
+            const creativeId = creativeUrn.replace('urn:li:sponsoredCreative:', '');
+            analyticsMap.set(creativeId, elem);
+          }
+        }
+        
+        // Build ad inputs
+        const adInputs: AdInput[] = creatives.map(creative => {
+          const creativeId = creative.id?.replace('urn:li:sponsoredCreative:', '') || creative.id;
+          const analytics = analyticsMap.get(creativeId);
+          const impressions = analytics?.impressions || 0;
+          const clicks = analytics?.clicks || 0;
+          const spend = analytics?.costInLocalCurrency || 0;
+          const dwell = analytics?.averageDwellTime || null;
+          
+          // Calculate ad age from creation date
+          const createdAt = creative.createdAt || Date.now();
+          const adAgeDays = Math.floor((Date.now() - createdAt) / (1000 * 60 * 60 * 24));
+          
+          return {
+            adId: creativeId,
+            adName: creative.name || `Ad ${creativeId}`,
+            adCtr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+            adDwell: dwell,
+            adCpc: clicks > 0 ? spend / clicks : null,
+            adCpm: impressions > 0 ? (spend / impressions) * 1000 : null,
+            adImpressions: impressions,
+            adClicks: clicks,
+            adAgeDays,
+            adSpend: spend,
+            adStatus: creative.intendedStatus || 'ACTIVE',
+          };
+        });
+        
+        // Compute campaign averages and score ads
+        const campaignAverages = computeCampaignAverages(adInputs);
+        const scoredAds = scoreAllAdsInCampaign(adInputs, campaignAverages);
+        
+        return res.json({ ads: scoredAds, campaignAverages });
+      }
+      
+      // Map database results to AdInput format
+      const adInputs: AdInput[] = creativesResult.rows.map(row => {
+        const impressions = parseInt(row.impressions) || 0;
+        const clicks = parseInt(row.clicks) || 0;
+        const spend = parseFloat(row.spend) || 0;
+        const dwell = row.avg_dwell_time ? parseFloat(row.avg_dwell_time) : null;
+        
+        // Calculate ad age from first metric date
+        const firstMetricDate = row.first_metric_date ? new Date(row.first_metric_date) : new Date();
+        const adAgeDays = Math.floor((Date.now() - firstMetricDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        return {
+          adId: row.creative_id,
+          adName: row.creative_name || `Ad ${row.creative_id}`,
+          adCtr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+          adDwell: dwell,
+          adCpc: clicks > 0 ? spend / clicks : null,
+          adCpm: impressions > 0 ? (spend / impressions) * 1000 : null,
+          adImpressions: impressions,
+          adClicks: clicks,
+          adAgeDays,
+          adSpend: spend,
+          adStatus: 'ACTIVE', // Default to ACTIVE from database
+        };
+      });
+      
+      // Compute campaign averages and score ads
+      const campaignAverages = computeCampaignAverages(adInputs);
+      const scoredAds = scoreAllAdsInCampaign(adInputs, campaignAverages);
+      
+      res.json({ ads: scoredAds, campaignAverages });
+      
+    } finally {
+      client.release();
+    }
+  } catch (err: any) {
+    console.error('Campaign ads scoring error:', err.message);
+    res.status(500).json({ error: 'Failed to score campaign ads' });
   }
 });
 
