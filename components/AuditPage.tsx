@@ -207,6 +207,49 @@ interface AuditData {
   syncFrequency: 'daily' | 'weekly';
 }
 
+type AgeState = 'learning' | 'stable' | 'fatigue_risk';
+type PerformanceStatus = 'strong' | 'weak' | 'neutral';
+type CpcStatus = 'efficient' | 'inefficient' | 'neutral';
+type DistributionFlag = 'over_served' | 'under_served' | 'normal';
+type FatigueFlag = 'fatigued' | 'ageing_but_ok' | 'not_fatigued';
+type Contribution = 'high_contributor' | 'neutral_contributor' | 'weak_contributor' | 'learning' | 'not_evaluable';
+
+interface ScoredAd {
+  adId: string;
+  adName: string;
+  adStatus: string;
+  ageState: AgeState | null;
+  impressionShare: number;
+  ctrDelta: number | null;
+  dwellDelta: number | null;
+  cpcDelta: number | null;
+  ctrStatus: PerformanceStatus | null;
+  dwellStatus: PerformanceStatus | null;
+  cpcStatus: CpcStatus | null;
+  contribution: Contribution;
+  fatigueFlag: FatigueFlag;
+  distributionFlag: DistributionFlag;
+  conflictReason: string | null;
+  recommendation: string;
+  lowVolume: boolean;
+  adCtr: number;
+  adDwell: number | null;
+  adCpc: number | null;
+  adCpm: number | null;
+  adImpressions: number;
+  adClicks: number;
+  adAgeDays: number;
+  adSpend: number;
+}
+
+interface CampaignAverages {
+  campaignCtr: number;
+  campaignDwell: number | null;
+  campaignCpc: number | null;
+  campaignCpm: number | null;
+  campaignImpressionsTotal: number;
+}
+
 function formatNumber(num: number): string {
   if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
   if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
@@ -377,7 +420,7 @@ function CausationPanel({ insights }: { insights?: CampaignItem['causationInsigh
   );
 }
 
-function CampaignCard({ campaign, accountId, showIssues, onClick }: { campaign: CampaignItem; accountId: string; showIssues: boolean; onClick?: () => void }) {
+function CampaignCard({ campaign, accountId, showIssues, onClick, onSeeAds, isAdsSelected }: { campaign: CampaignItem; accountId: string; showIssues: boolean; onClick?: () => void; onSeeAds?: () => void; isAdsSelected?: boolean }) {
   const linkedInUrl = getLinkedInCampaignUrl(accountId, campaign.id);
   
   const getBorderColor = () => {
@@ -498,6 +541,24 @@ function CampaignCard({ campaign, accountId, showIssues, onClick }: { campaign: 
       
       {/* Causation Insights */}
       {showIssues && <CausationPanel insights={campaign.causationInsights} />}
+      
+      {/* See Ads Button */}
+      {onSeeAds && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onSeeAds();
+          }}
+          className={`mt-3 w-full py-2 px-3 text-sm font-medium rounded-lg border transition-all flex items-center justify-center gap-2 ${
+            isAdsSelected 
+              ? 'bg-blue-600 text-white border-blue-600' 
+              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+          }`}
+        >
+          <MousePointer className="w-4 h-4" />
+          {isAdsSelected ? 'Viewing Ads' : 'See Ads'}
+        </button>
+      )}
     </div>
   );
 }
@@ -570,6 +631,165 @@ function AdCard({ ad, accountId, showIssues, onClick }: { ad: AdItem; accountId:
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function ScoredAdCard({ ad, accountId, campaignId }: { ad: ScoredAd; accountId: string; campaignId: string }) {
+  const linkedInUrl = getLinkedInAdUrl(accountId, campaignId, ad.adId);
+  
+  const getContributionBadge = () => {
+    switch (ad.contribution) {
+      case 'high_contributor':
+        return <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium"><CheckCircle2 className="w-3 h-3" /> High Contributor</span>;
+      case 'neutral_contributor':
+        return <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium">Neutral</span>;
+      case 'weak_contributor':
+        return <span className="inline-flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium"><XCircle className="w-3 h-3" /> Weak Contributor</span>;
+      case 'learning':
+        return <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium"><Clock className="w-3 h-3" /> Learning</span>;
+      default:
+        return <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-500 rounded-full text-xs font-medium"><Info className="w-3 h-3" /> Low Volume</span>;
+    }
+  };
+  
+  const getStatusPill = (status: PerformanceStatus | CpcStatus | null, type: 'ctr' | 'dwell' | 'cpc') => {
+    if (status === null) return <span className="text-xs text-gray-400">-</span>;
+    
+    const isGood = status === 'strong' || status === 'efficient';
+    const isBad = status === 'weak' || status === 'inefficient';
+    
+    if (isGood) return <span className="text-xs font-medium text-green-600">{status}</span>;
+    if (isBad) return <span className="text-xs font-medium text-red-600">{status}</span>;
+    return <span className="text-xs text-gray-500">{status}</span>;
+  };
+  
+  const formatDelta = (delta: number | null) => {
+    if (delta === null) return '-';
+    const pct = (delta * 100).toFixed(0);
+    return delta >= 0 ? `+${pct}%` : `${pct}%`;
+  };
+  
+  const getRecommendationText = (rec: string) => {
+    const map: Record<string, string> = {
+      'scale_or_duplicate': 'Scale or duplicate this ad - it\'s a top performer',
+      'keep_running': 'Keep running - performance is on track',
+      'pause_or_optimize': 'Consider pausing or optimizing creative',
+      'refresh_or_replace_creative': 'Refresh or replace creative - showing fatigue',
+      'reduce_impression_share_or_pause': 'Reduce impression share or pause',
+      'allow_more_time': 'Allow more time to gather data',
+      'insufficient_data': 'Insufficient data to evaluate',
+      'no_action_ad_paused': 'Ad is paused - no action needed',
+      'strong_message_but_cta_weak': 'Strong message but weak CTA - improve call-to-action',
+      'improve_post_click_experience': 'Improve landing page experience',
+      'pause_or_replace': 'Pause or replace - underperforming',
+      'create_variants': 'Create variants to spread impression load',
+    };
+    return map[rec] || rec.replace(/_/g, ' ');
+  };
+  
+  const getConflictReasonText = (reason: string) => {
+    const map: Record<string, string> = {
+      'senior_audience_or_message_depth': 'Low CTR but high dwell - audience reads carefully before acting',
+      'curiosity_clicks': 'High CTR but low dwell - clicks aren\'t converting to engagement',
+      'algorithm_over_serving_weak_ad': 'LinkedIn is over-serving a weak ad - manual intervention needed',
+      'top_ad_over_served': 'Top ad is monopolizing impressions - diversify to reduce risk',
+    };
+    return map[reason] || reason.replace(/_/g, ' ');
+  };
+  
+  const getAgeStateBadge = () => {
+    if (!ad.ageState) return null;
+    
+    switch (ad.ageState) {
+      case 'learning':
+        return <span className="text-xs px-2 py-0.5 bg-blue-50 text-blue-600 rounded">Learning ({ad.adAgeDays}d)</span>;
+      case 'stable':
+        return <span className="text-xs px-2 py-0.5 bg-green-50 text-green-600 rounded">Stable ({ad.adAgeDays}d)</span>;
+      case 'fatigue_risk':
+        return <span className="text-xs px-2 py-0.5 bg-amber-50 text-amber-600 rounded">Fatigue Risk ({ad.adAgeDays}d)</span>;
+    }
+  };
+  
+  const getBorderColor = () => {
+    if (ad.contribution === 'high_contributor') return 'border-green-200';
+    if (ad.contribution === 'weak_contributor') return 'border-red-200';
+    if (ad.contribution === 'learning') return 'border-blue-200';
+    return 'border-gray-200';
+  };
+  
+  return (
+    <div className={`bg-white rounded-lg border ${getBorderColor()} p-4`}>
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex-1 min-w-0">
+          <a 
+            href={linkedInUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-medium text-gray-900 hover:text-blue-600 flex items-center gap-1 group"
+          >
+            <span className="truncate">{ad.adName}</span>
+            <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 flex-shrink-0" />
+          </a>
+          <div className="flex items-center gap-2 mt-1">
+            {getAgeStateBadge()}
+            {ad.adStatus === 'PAUSED' && (
+              <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-500 rounded">Paused</span>
+            )}
+          </div>
+        </div>
+        {getContributionBadge()}
+      </div>
+      
+      <div className="grid grid-cols-4 gap-2 text-center mb-3">
+        <div>
+          <p className="text-sm font-semibold text-gray-900">{formatCtr(ad.adCtr)}</p>
+          <p className="text-xs text-gray-500">CTR</p>
+          {getStatusPill(ad.ctrStatus, 'ctr')}
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-gray-900">{ad.adDwell ? `${ad.adDwell.toFixed(1)}s` : '-'}</p>
+          <p className="text-xs text-gray-500">Dwell</p>
+          {getStatusPill(ad.dwellStatus, 'dwell')}
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-gray-900">{ad.adCpc ? `$${ad.adCpc.toFixed(2)}` : '-'}</p>
+          <p className="text-xs text-gray-500">CPC</p>
+          {getStatusPill(ad.cpcStatus, 'cpc')}
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-gray-900">{(ad.impressionShare * 100).toFixed(0)}%</p>
+          <p className="text-xs text-gray-500">Share</p>
+          {ad.distributionFlag !== 'normal' && (
+            <span className={`text-xs font-medium ${ad.distributionFlag === 'over_served' ? 'text-amber-600' : 'text-gray-500'}`}>
+              {ad.distributionFlag === 'over_served' ? 'Over-served' : 'Under-served'}
+            </span>
+          )}
+        </div>
+      </div>
+      
+      <div className="text-xs text-gray-500 mb-2">
+        {formatNumber(ad.adImpressions)} impressions · {formatNumber(ad.adClicks)} clicks · ${ad.adSpend.toFixed(2)} spend
+      </div>
+      
+      {ad.fatigueFlag === 'fatigued' && (
+        <div className="mb-2 px-2 py-1 bg-amber-50 border border-amber-100 rounded text-xs text-amber-700 flex items-center gap-1">
+          <AlertTriangle className="w-3 h-3" /> Creative fatigue detected
+        </div>
+      )}
+      
+      {ad.conflictReason && (
+        <div className="mb-2 px-2 py-1 bg-purple-50 border border-purple-100 rounded text-xs text-purple-700">
+          <span className="font-medium">Insight:</span> {getConflictReasonText(ad.conflictReason)}
+        </div>
+      )}
+      
+      <div className="pt-2 border-t border-gray-100">
+        <div className="flex items-center gap-2">
+          <Zap className="w-3 h-3 text-blue-500" />
+          <span className="text-xs text-gray-700">{getRecommendationText(ad.recommendation)}</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1415,6 +1635,14 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
   const [selectedCampaign, setSelectedCampaign] = useState<CampaignItem | null>(null);
   const [selectedAd, setSelectedAd] = useState<AdItem | null>(null);
   const [activeTab, setActiveTab] = useState<StatusTab>('needs_attention');
+  
+  const [selectedAdsCampaignId, setSelectedAdsCampaignId] = useState<string | null>(null);
+  const [selectedAdsCampaignName, setSelectedAdsCampaignName] = useState<string | null>(null);
+  const [scoredAds, setScoredAds] = useState<ScoredAd[]>([]);
+  const [campaignAverages, setCampaignAverages] = useState<CampaignAverages | null>(null);
+  const [adsLoading, setAdsLoading] = useState(false);
+  const [adsError, setAdsError] = useState<string | null>(null);
+  const [adsCache, setAdsCache] = useState<Record<string, { ads: ScoredAd[]; averages: CampaignAverages | null }>>({});
 
   const checkAuditStatus = useCallback(async () => {
     if (!accountId) return;
@@ -1509,6 +1737,44 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
       console.error('Failed to refresh:', err);
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  const handleSeeAds = async (campaignId: string, campaignName: string) => {
+    if (selectedAdsCampaignId === campaignId) {
+      setSelectedAdsCampaignId(null);
+      setSelectedAdsCampaignName(null);
+      setScoredAds([]);
+      setCampaignAverages(null);
+      return;
+    }
+    
+    setSelectedAdsCampaignId(campaignId);
+    setSelectedAdsCampaignName(campaignName);
+    setAdsError(null);
+    
+    if (adsCache[campaignId]) {
+      setScoredAds(adsCache[campaignId].ads);
+      setCampaignAverages(adsCache[campaignId].averages);
+      return;
+    }
+    
+    setAdsLoading(true);
+    try {
+      const response = await api.get(`/audit/campaign-ads/${accountId}/${campaignId}`);
+      const { ads, campaignAverages: avg } = response.data;
+      setScoredAds(ads || []);
+      setCampaignAverages(avg || null);
+      setAdsCache(prev => ({
+        ...prev,
+        [campaignId]: { ads: ads || [], averages: avg || null }
+      }));
+    } catch (err: any) {
+      console.error('Failed to fetch campaign ads:', err);
+      setAdsError('Failed to load ads for this campaign');
+      setScoredAds([]);
+    } finally {
+      setAdsLoading(false);
     }
   };
 
@@ -1758,7 +2024,9 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
                   campaign={campaign} 
                   accountId={accountId} 
                   showIssues={activeTab !== 'performing_well'} 
-                  onClick={() => setSelectedCampaign(campaign)} 
+                  onClick={() => setSelectedCampaign(campaign)}
+                  onSeeAds={() => handleSeeAds(campaign.id, campaign.name)}
+                  isAdsSelected={selectedAdsCampaignId === campaign.id}
                 />
               ))}
             </div>
@@ -1770,41 +2038,93 @@ export default function AuditPage({ accountId, accountName, isLiveData }: AuditP
           )}
         </div>
 
-        {/* Ads Column */}
-        <div className={`rounded-lg p-4 border ${
-          activeTab === 'needs_attention' ? 'bg-red-50 border-red-100' :
-          activeTab === 'mild_issues' ? 'bg-amber-50 border-amber-100' :
-          'bg-green-50 border-green-100'
-        }`}>
+        {/* Ads Column - Shows scored ads when a campaign is selected */}
+        <div className="rounded-lg p-4 border bg-white border-gray-200">
           <div className="mb-4">
             <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
               <MousePointer className="w-5 h-5 text-gray-600" />
               Ads
-              <span className="text-sm font-normal text-gray-500">
-                ({currentAds.length})
-              </span>
+              {selectedAdsCampaignId && (
+                <span className="text-sm font-normal text-gray-500">
+                  ({scoredAds.length})
+                </span>
+              )}
             </h3>
-            {activeTab === 'mild_issues' && currentAds.length > 0 && (
-              <p className="text-xs text-gray-500 mt-1 ml-7">Insufficient data for scoring</p>
+            {selectedAdsCampaignName && (
+              <div className="flex items-center justify-between mt-1">
+                <p className="text-xs text-blue-600 ml-7">
+                  Viewing ads for: <span className="font-medium">{selectedAdsCampaignName}</span>
+                </p>
+                <button 
+                  onClick={() => {
+                    setSelectedAdsCampaignId(null);
+                    setSelectedAdsCampaignName(null);
+                    setScoredAds([]);
+                    setCampaignAverages(null);
+                  }}
+                  className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Clear
+                </button>
+              </div>
             )}
           </div>
           
-          {currentAds.length > 0 ? (
-            <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
-              {currentAds.map(ad => (
-                <AdCard 
-                  key={ad.id} 
-                  ad={ad} 
-                  accountId={accountId} 
-                  showIssues={activeTab !== 'performing_well'} 
-                  onClick={() => setSelectedAd(ad)} 
-                />
-              ))}
+          {adsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
             </div>
+          ) : adsError ? (
+            <div className="text-center py-8 text-red-500">
+              <AlertTriangle className="w-10 h-10 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">{adsError}</p>
+            </div>
+          ) : selectedAdsCampaignId ? (
+            scoredAds.length > 0 ? (
+              <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
+                {campaignAverages && (
+                  <div className="bg-gray-50 rounded-lg p-3 mb-3 text-xs">
+                    <p className="font-medium text-gray-700 mb-2">Campaign Averages</p>
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                      <div>
+                        <p className="font-semibold">{formatCtr(campaignAverages.campaignCtr)}</p>
+                        <p className="text-gray-500">CTR</p>
+                      </div>
+                      <div>
+                        <p className="font-semibold">{campaignAverages.campaignDwell ? `${campaignAverages.campaignDwell.toFixed(1)}s` : '-'}</p>
+                        <p className="text-gray-500">Dwell</p>
+                      </div>
+                      <div>
+                        <p className="font-semibold">{campaignAverages.campaignCpc ? `$${campaignAverages.campaignCpc.toFixed(2)}` : '-'}</p>
+                        <p className="text-gray-500">CPC</p>
+                      </div>
+                      <div>
+                        <p className="font-semibold">{formatNumber(campaignAverages.campaignImpressionsTotal)}</p>
+                        <p className="text-gray-500">Impr</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {scoredAds.map(ad => (
+                  <ScoredAdCard 
+                    key={ad.adId} 
+                    ad={ad} 
+                    accountId={accountId}
+                    campaignId={selectedAdsCampaignId}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-8 text-gray-500">
+                <MousePointer className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No ads found for this campaign</p>
+              </div>
+            )
           ) : (
-            <div className="text-center py-8 text-gray-500">
-              <MousePointer className="w-10 h-10 mx-auto mb-2 opacity-30" />
-              <p className="text-sm">{getEmptyMessage(activeTab, 'ads')}</p>
+            <div className="text-center py-12 text-gray-400">
+              <MousePointer className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="text-sm font-medium text-gray-600 mb-1">Select a campaign to view ads</p>
+              <p className="text-xs">Click "See Ads" on any campaign card</p>
             </div>
           )}
         </div>
