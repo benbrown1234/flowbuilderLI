@@ -3354,7 +3354,7 @@ async function computeAndSaveScoring100(
   console.log(`[Scoring100] Account totals: ${accountTotals.totalImpressions} imps, ${accountTotals.totalClicks} clicks, $${accountTotals.totalSpend.toFixed(2)} spend`);
   
   for (const [campaignId, campaign] of campaignData) {
-    console.log(`[Scoring100] Campaign ${campaignId}: ${campaign.impressions} imps, ${campaign.activeDays} days, ${campaign.clicks} clicks`);
+    console.log(`[Scoring100] Campaign ${campaignId}: ${campaign.impressions} imps, ${campaign.activeDays} days, ${campaign.clicks} clicks, penetration raw=${campaign.penetration}, pct=${campaign.penetration !== null ? (campaign.penetration * 100).toFixed(1) : 'N/A'}%`);
     
     // Skip campaigns with insufficient data
     if (campaign.impressions < 2500 || campaign.activeDays < 4) {
@@ -3364,6 +3364,7 @@ async function computeAndSaveScoring100(
     
     // Build proper CampaignMetrics for current period (matching scoringEngine interface)
     // Use nullish coalescing (??) to preserve zero values but treat null as undefined
+    // Note: LinkedIn API returns audiencePenetration as decimal (0.25 = 25%), but scoring expects percentage (25)
     const currentMetrics: import('./scoringEngine').CampaignMetrics = {
       impressions: campaign.impressions,
       clicks: campaign.clicks,
@@ -3373,10 +3374,12 @@ async function computeAndSaveScoring100(
       reach: campaign.reach > 0 ? campaign.reach : undefined,
       dwellTimeSeconds: campaign.dwellTime ?? undefined,
       audienceSize: campaign.audienceSize > 0 ? campaign.audienceSize : undefined,
-      audiencePenetration: campaign.penetration ?? undefined
+      audiencePenetration: campaign.penetration !== null && campaign.penetration !== undefined 
+        ? campaign.penetration * 100 : undefined
     };
     
     // Build previous period metrics (if available)
+    // Note: LinkedIn API returns audiencePenetration as decimal (0.25 = 25%), but scoring expects percentage (25)
     const previousMetrics: import('./scoringEngine').CampaignMetrics | undefined = 
       campaign.prevImpressions > 0 ? {
         impressions: campaign.prevImpressions,
@@ -3387,7 +3390,8 @@ async function computeAndSaveScoring100(
         reach: campaign.prevReach > 0 ? campaign.prevReach : undefined,
         dwellTimeSeconds: campaign.prevDwellTime ?? undefined,
         audienceSize: campaign.audienceSize > 0 ? campaign.audienceSize : undefined,
-        audiencePenetration: campaign.prevPenetration ?? undefined
+        audiencePenetration: campaign.prevPenetration !== null && campaign.prevPenetration !== undefined 
+          ? campaign.prevPenetration * 100 : undefined
       } : undefined;
     
     // Calculate campaign age in days
