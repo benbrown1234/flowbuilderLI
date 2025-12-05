@@ -3726,26 +3726,41 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
           
           snapshotsCreated++;
           
-          // Detect targeting changes (compare with previous snapshot)
+          // Detect targeting changes (compare hash with previous snapshot)
           if (campaign.targetingCriteria) {
-            const currentTargeting = JSON.stringify(campaign.targetingCriteria);
-            const previousTargeting = await getLatestTargeting(accountId, campaignId);
+            const { computeTargetingHash } = await import('./database.js');
+            const currentHash = computeTargetingHash(campaign.targetingCriteria);
+            const previousHash = await getLatestTargeting(accountId, campaignId);
             
-            if (previousTargeting && previousTargeting !== currentTargeting) {
-              // Parse and compare to find what changed
+            if (previousHash && previousHash !== currentHash) {
+              // Targeting has changed - save the change record
               try {
                 await saveTargetingChange({
                   accountId,
                   campaignId,
-                  changeDate: new Date(),
-                  changeType: 'TARGETING_UPDATE',
-                  previousValue: previousTargeting,
-                  newValue: currentTargeting,
-                  summary: 'Targeting criteria updated'
+                  changeType: 'modified',
+                  facetType: 'targeting_criteria',
+                  targetingHashBefore: previousHash,
+                  targetingHashAfter: currentHash
                 });
                 console.log(`[Tracking] Targeting change detected for campaign ${campaignId}`);
               } catch (parseErr) {
                 console.warn(`[Tracking] Failed to save targeting change: ${parseErr}`);
+              }
+            } else if (!previousHash && currentHash) {
+              // First time seeing this campaign - store initial targeting hash as baseline
+              try {
+                await saveTargetingChange({
+                  accountId,
+                  campaignId,
+                  changeType: 'added',
+                  facetType: 'targeting_criteria',
+                  targetingHashBefore: null,
+                  targetingHashAfter: currentHash
+                });
+                console.log(`[Tracking] Initial targeting baseline captured for campaign ${campaignId}`);
+              } catch (parseErr) {
+                console.warn(`[Tracking] Failed to save initial targeting baseline: ${parseErr}`);
               }
             }
           }

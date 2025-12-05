@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { createHash } from 'crypto';
 
 const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
@@ -2691,6 +2692,56 @@ export async function getTrackingDataSummary(accountId: string, campaignId: stri
     oldestSnapshot: settingsResult.rows[0]?.oldest || null,
     latestSnapshot: settingsResult.rows[0]?.latest || null
   };
+}
+
+// Get the latest targeting hash for a campaign (for change detection)
+export async function getLatestTargeting(accountId: string, campaignId: string): Promise<string | null> {
+  const accId = String(accountId);
+  const campId = String(campaignId);
+  
+  // Get the most recent targeting hash from targeting_changes if any exists
+  const result = await pool.query(
+    `SELECT targeting_hash_after FROM targeting_changes 
+     WHERE account_id = $1 AND campaign_id = $2 
+     ORDER BY detected_at DESC LIMIT 1`,
+    [accId, campId]
+  );
+  
+  if (result.rows.length > 0 && result.rows[0].targeting_hash_after) {
+    return result.rows[0].targeting_hash_after;
+  }
+  
+  return null;
+}
+
+// Compute a hash of targeting criteria for comparison
+export function computeTargetingHash(targetingCriteria: any): string {
+  if (!targetingCriteria) return '';
+  return createHash('sha256').update(JSON.stringify(targetingCriteria)).digest('hex');
+}
+
+// Simplified save creative lifecycle that delegates to upsert
+export async function saveCreativeLifecycle(data: {
+  accountId: string;
+  creativeId: string;
+  campaignId?: string;
+  status?: string;
+  createdAt?: Date;
+  content?: string | null;
+}): Promise<void> {
+  const contentHash = data.content ? 
+    createHash('md5').update(data.content).digest('hex') : 
+    null;
+  
+  await upsertCreativeLifecycle({
+    accountId: data.accountId,
+    creativeId: data.creativeId,
+    campaignId: data.campaignId,
+    currentStatus: data.status,
+    firstActiveDate: data.status === 'ACTIVE' ? data.createdAt : null,
+    lastActiveDate: data.status === 'ACTIVE' ? new Date() : null,
+    contentHash
+  });
 }
 
 export default pool;

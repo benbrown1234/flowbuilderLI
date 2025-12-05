@@ -47,6 +47,21 @@ The application is built with a React 19 frontend using TypeScript and Vite, com
     *   **LAN/Expansion Monitoring**: Campaigns with LinkedIn Audience Network or Audience Expansion enabled get daily syncs instead of weekly.
     *   **Weekly Sync**: Default sync frequency is weekly; campaigns with LAN/Expansion get daily syncs.
     *   **Manual Refresh**: "Refresh" button to pull latest data on-demand.
+*   **Tracking Layer (for Causation Engine)**:
+    *   **Daily Settings Snapshots**: Captures bid, budget, audience size, and suggested bid data for each active campaign during audit sync.
+    *   **Database Tables**:
+        - `campaign_settings_history`: Daily snapshots of campaign settings (bid value, bid strategy, budget, audience expansion, LAN, suggested bid ranges, audience size estimates)
+        - `targeting_changes`: Versioned diffs of targeting criteria changes with timestamps
+        - `creative_lifecycle`: Tracks creative status changes and first active dates
+    *   **LinkedIn API Integration**:
+        - `/audienceCounts` API for real-time audience size estimates (total and active members)
+        - `/adBudgetPricing` API for suggested bid ranges (min, max, default) and bid limits
+    *   **Change Detection**: Compares current targeting criteria with previous snapshot to detect and log changes
+    *   **Test Endpoints**:
+        - `GET /api/test/audience-count/:accountId/:campaignId`: Test audience count and budget pricing API
+        - `GET /api/test/tracking/:accountId/:campaignId`: View tracking data summary for a campaign
+        - `POST /api/test/snapshot/:accountId/:campaignId`: Manually create a settings snapshot
+    *   **Future Use**: Data accumulated by tracking layer will power the 3-layer Causation Engine (Creative fatigue, Bidding changes, Targeting shifts) to diagnose performance changes
 *   **Drilldown (Performance Analysis)**:
     *   **Audit Prerequisite**: Drilldown requires audit to be enabled first. Data collection begins when audit is activated.
     *   **Navigation Dropdown**: Switch between Hourly, Job Titles, and Companies views using the dropdown in the main menu.
