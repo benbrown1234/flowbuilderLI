@@ -3654,6 +3654,136 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
     // NOTE: Drilldown data (hourly, job titles, companies) is now synced separately
     // via the Drilldown page sync buttons, not as part of the main audit refresh
     
+    // =====================================
+    // TRACKING LAYER: Capture daily settings snapshots
+    // =====================================
+    console.log('[Tracking] Capturing settings snapshots for tracking layer...');
+    try {
+      const { saveCampaignSettingsSnapshot, saveCreativeLifecycle, saveTargetingChange, getLatestTargeting } = await import('./database.js');
+      const activeCampaigns = campaigns.filter((c: any) => c.status === 'ACTIVE');
+      
+      let snapshotsCreated = 0;
+      for (const campaign of activeCampaigns) {
+        const campaignId = extractId(campaign.id);
+        
+        try {
+          // Extract bid value
+          let bidValue: number | null = null;
+          if (campaign.unitCost?.amount) {
+            bidValue = parseFloat(campaign.unitCost.amount) / 100;
+          }
+          
+          // Extract budgets
+          let dailyBudget: number | null = null;
+          let lifetimeBudget: number | null = null;
+          if (campaign.dailyBudget?.amount) {
+            dailyBudget = parseFloat(campaign.dailyBudget.amount) / 100;
+          }
+          if (campaign.totalBudget?.amount) {
+            lifetimeBudget = parseFloat(campaign.totalBudget.amount) / 100;
+          }
+          
+          // Fetch audience count (with rate limiting)
+          await delay(300);
+          const audienceResult = await fetchAudienceCount(accessToken, campaign.targetingCriteria);
+          
+          // Fetch budget pricing
+          await delay(300);
+          const pricingResult = await fetchBudgetPricing(accessToken, accountId, {
+            id: campaignId,
+            costType: campaign.costType,
+            type: campaign.type,
+            format: campaign.format,
+            objectiveType: campaign.objectiveType,
+            optimizationTargetType: campaign.optimizationTargetType,
+            targetingCriteria: campaign.targetingCriteria
+          });
+          
+          // Save the snapshot
+          await saveCampaignSettingsSnapshot({
+            accountId,
+            campaignId,
+            snapshotDate: new Date(),
+            bidValue,
+            bidStrategy: campaign.optimizationTargetType || null,
+            costType: campaign.costType || null,
+            optimizationTarget: campaign.optimizationTargetType || null,
+            dailyBudget,
+            lifetimeBudget,
+            audienceExpansionEnabled: campaign.audienceExpansionEnabled || false,
+            linkedinAudienceNetwork: campaign.offSiteDeliveryEnabled || false,
+            suggestedBidMin: pricingResult.suggestedBidMin || null,
+            suggestedBidMax: pricingResult.suggestedBidMax || null,
+            suggestedBidDefault: pricingResult.suggestedBidDefault || null,
+            bidFloor: pricingResult.bidFloor || null,
+            bidCeiling: pricingResult.bidCeiling || null,
+            audienceSizeTotal: audienceResult.total || null,
+            audienceSizeActive: audienceResult.active || null,
+            campaignStatus: campaign.status,
+            objectiveType: campaign.objectiveType,
+            currency: pricingResult.currency || 'USD'
+          });
+          
+          snapshotsCreated++;
+          
+          // Detect targeting changes (compare with previous snapshot)
+          if (campaign.targetingCriteria) {
+            const currentTargeting = JSON.stringify(campaign.targetingCriteria);
+            const previousTargeting = await getLatestTargeting(accountId, campaignId);
+            
+            if (previousTargeting && previousTargeting !== currentTargeting) {
+              // Parse and compare to find what changed
+              try {
+                await saveTargetingChange({
+                  accountId,
+                  campaignId,
+                  changeDate: new Date(),
+                  changeType: 'TARGETING_UPDATE',
+                  previousValue: previousTargeting,
+                  newValue: currentTargeting,
+                  summary: 'Targeting criteria updated'
+                });
+                console.log(`[Tracking] Targeting change detected for campaign ${campaignId}`);
+              } catch (parseErr) {
+                console.warn(`[Tracking] Failed to save targeting change: ${parseErr}`);
+              }
+            }
+          }
+          
+        } catch (campaignErr: any) {
+          console.warn(`[Tracking] Failed to snapshot campaign ${campaignId}: ${campaignErr.message}`);
+        }
+      }
+      
+      // Track creative lifecycles
+      let creativesTracked = 0;
+      for (const creative of creatives) {
+        try {
+          const creativeId = extractId(creative.id);
+          const campaignId = extractId(creative.campaign);
+          const status = creative.intendedStatus || creative.status;
+          
+          await saveCreativeLifecycle({
+            accountId,
+            creativeId,
+            campaignId,
+            status,
+            createdAt: creative.createdAt ? new Date(creative.createdAt) : new Date(),
+            content: creative.content ? JSON.stringify(creative.content) : null
+          });
+          
+          creativesTracked++;
+        } catch (crErr: any) {
+          console.warn(`[Tracking] Failed to track creative: ${crErr.message}`);
+        }
+      }
+      
+      console.log(`[Tracking] Created ${snapshotsCreated} settings snapshots, tracked ${creativesTracked} creatives`);
+    } catch (trackingErr: any) {
+      // Don't fail the whole sync if tracking layer has issues
+      console.warn(`[Tracking] Tracking layer error (non-fatal): ${trackingErr.message}`);
+    }
+    
     // Compute and save scoring status for Structure view caching
     console.log('Computing and saving scoring status...');
     await computeAndSaveScoringStatus(accountId, campaignMetrics, creativeMetrics);
