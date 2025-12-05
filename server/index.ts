@@ -5665,27 +5665,31 @@ app.get('/api/audit/data/:accountId', requireAuth, requireAccountAccess, async (
       const hasMaximizeDelivery = liveSettings.hasMaximizeDelivery || false;
       
       // Calculate new metrics from aggregated analytics data
-      // Audience Penetration: Use TOTAL granularity values (cumulative over the period)
-      // This matches what LinkedIn Campaign Manager shows
-      // Fallback: If TOTAL API failed, use the MAX daily penetration from database
-      // c.campaignId is already normalized to numeric ID via extractId
+      // Audience Penetration: Prefer TOTAL API (cumulative), fallback to DB MAX (daily max)
       const totalPenetrationData = currentPeriodPenetration.get(c.campaignId);
       const prevTotalPenetrationData = prevPeriodPenetration.get(c.campaignId);
       
-      // Use TOTAL API value if available, otherwise fallback to daily MAX from aggregation
-      const audiencePenetration = totalPenetrationData?.penetration ?? 
-        (c.audiencePenetrationMax > 0 ? c.audiencePenetrationMax : null);
-      const prevAudiencePenetration = prevTotalPenetrationData?.penetration ?? 
-        (prev && prev.audiencePenetrationMax > 0 ? prev.audiencePenetrationMax : null);
+      // TOTAL API gives cumulative penetration over the period (more accurate)
+      // DB max gives highest daily penetration (smaller, less accurate but always available)
+      const audiencePenetration = totalPenetrationData?.penetration && totalPenetrationData.penetration > 0
+        ? totalPenetrationData.penetration
+        : (c.audiencePenetrationMax > 0 ? c.audiencePenetrationMax : null);
+      const prevAudiencePenetration = prevTotalPenetrationData?.penetration && prevTotalPenetrationData.penetration > 0
+        ? prevTotalPenetrationData.penetration
+        : (prev && prev.audiencePenetrationMax > 0 ? prev.audiencePenetrationMax : null);
       const audiencePenetrationChange = audiencePenetration !== null && prevAudiencePenetration !== null && prevAudiencePenetration > 0
         ? pctChange(audiencePenetration, prevAudiencePenetration)
         : null;
       
+      // Debug: Log penetration values to verify
+      if (c.impressions > 1000) {
+        console.log(`[Audit] Campaign ${c.campaignId}: Using penetration=${audiencePenetration} (TOTAL API=${totalPenetrationData?.penetration}, DB=${c.audiencePenetrationMax})`);
+      }
+      
       // Frequency: impressions / unique reach
-      // IMPORTANT: Use cumulative reach from ALL granularity API (not summed daily values)
-      // Summing daily reach double-counts users who saw ads on multiple days
-      const cumulativeReach = totalPenetrationData?.reach;
-      const prevCumulativeReach = prevTotalPenetrationData?.reach;
+      // Use cumulative reach from ALL granularity API (more accurate than summed daily)
+      const cumulativeReach = totalPenetrationData?.reach || (c.approximateMemberReach > 0 ? c.approximateMemberReach : null);
+      const prevCumulativeReach = prevTotalPenetrationData?.reach || (prev && prev.approximateMemberReach > 0 ? prev.approximateMemberReach : null);
       
       // Log when cumulative reach is missing (helps track ALL API coverage)
       if (!cumulativeReach && c.impressions > 1000) {
