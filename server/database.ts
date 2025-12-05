@@ -180,6 +180,21 @@ export async function initDatabase() {
       ALTER TABLE analytics_creative_daily ADD COLUMN IF NOT EXISTS scoring_breakdown JSONB DEFAULT '[]';
       ALTER TABLE analytics_creative_daily ADD COLUMN IF NOT EXISTS scoring_positive_signals JSONB DEFAULT '[]';
       ALTER TABLE analytics_creative_daily ADD COLUMN IF NOT EXISTS scoring_metadata JSONB DEFAULT '{}';
+      
+      -- 100-point scoring system columns for campaigns
+      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS scoring_status VARCHAR(50);
+      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS scoring_total INTEGER DEFAULT NULL;
+      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS scoring_engagement INTEGER DEFAULT NULL;
+      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS scoring_cost INTEGER DEFAULT NULL;
+      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS scoring_audience INTEGER DEFAULT NULL;
+      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS scoring_breakdown JSONB DEFAULT '[]';
+      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS scoring_issues JSONB DEFAULT '[]';
+      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS scoring_positive_signals JSONB DEFAULT '[]';
+      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS causation_data JSONB DEFAULT '[]';
+      
+      -- Ad diagnostics columns for creatives
+      ALTER TABLE analytics_creative_daily ADD COLUMN IF NOT EXISTS ad_diagnostic_flag VARCHAR(50);
+      ALTER TABLE analytics_creative_daily ADD COLUMN IF NOT EXISTS ad_diagnostic_data JSONB DEFAULT '{}';
 
       CREATE INDEX IF NOT EXISTS idx_audit_accounts_account ON audit_accounts(account_id);
       
@@ -1359,6 +1374,92 @@ export async function updateCampaignScoring(
   );
 }
 
+// Update campaign with 100-point scoring system
+export async function updateCampaignScoring100(
+  accountId: string,
+  campaignId: string,
+  scoringData: {
+    status: string;
+    totalScore: number;
+    engagementScore: number;
+    costScore: number;
+    audienceScore: number;
+    breakdown: any[];
+    issues: string[];
+    positiveSignals: string[];
+    causation: any[];
+  }
+) {
+  await pool.query(
+    `UPDATE analytics_campaign_daily 
+     SET scoring_status = $1, 
+         scoring_total = $2,
+         scoring_engagement = $3,
+         scoring_cost = $4,
+         scoring_audience = $5,
+         scoring_breakdown = $6,
+         scoring_issues = $7, 
+         scoring_positive_signals = $8,
+         causation_data = $9
+     WHERE account_id = $10 AND campaign_id = $11 
+     AND metric_date = (
+       SELECT MAX(metric_date) FROM analytics_campaign_daily 
+       WHERE account_id = $10 AND campaign_id = $11
+     )`,
+    [
+      scoringData.status,
+      scoringData.totalScore,
+      scoringData.engagementScore,
+      scoringData.costScore,
+      scoringData.audienceScore,
+      JSON.stringify(scoringData.breakdown),
+      JSON.stringify(scoringData.issues),
+      JSON.stringify(scoringData.positiveSignals),
+      JSON.stringify(scoringData.causation),
+      accountId,
+      campaignId
+    ]
+  );
+}
+
+// Update creative/ad with diagnostic data
+export async function updateCreativeDiagnostic(
+  accountId: string,
+  creativeId: string,
+  diagnosticData: {
+    flag: string;
+    flagColor: string;
+    ctr: number;
+    ctrVsCampaign: number;
+    dwellTime: number | null;
+    dwellVsCampaign: number | null;
+    cpc: number;
+    cpcVsCampaign: number;
+    impressionShare: number;
+    adAgeDays: number;
+    ageLabel: string;
+    issues: string[];
+    strengths: string[];
+  }
+) {
+  await pool.query(
+    `UPDATE analytics_creative_daily 
+     SET ad_diagnostic_flag = $1,
+         ad_diagnostic_data = $2
+     WHERE account_id = $3 AND creative_id = $4 
+     AND metric_date = (
+       SELECT MAX(metric_date) FROM analytics_creative_daily 
+       WHERE account_id = $3 AND creative_id = $4
+     )`,
+    [
+      diagnosticData.flag,
+      JSON.stringify(diagnosticData),
+      accountId,
+      creativeId
+    ]
+  );
+}
+
 // Update scoring status for creatives
 export async function updateCreativeScoring(
   accountId: string,
@@ -1385,21 +1486,26 @@ export async function updateCreativeScoring(
 // Get precomputed scoring data for structure view
 export async function getStructureScoringData(accountId: string) {
   const [campaigns, creatives] = await Promise.all([
-    // Get latest scoring per campaign from analytics_campaign_daily
+    // Get latest scoring per campaign from analytics_campaign_daily (with 100-point data)
     pool.query(
       `SELECT DISTINCT ON (campaign_id) 
-              campaign_id, scoring_status, 
+              campaign_id, scoring_status,
+              scoring_total, scoring_engagement, scoring_cost, scoring_audience,
+              COALESCE(scoring_breakdown, '[]'::jsonb) as scoring_breakdown,
               COALESCE(scoring_issues, '[]'::jsonb) as scoring_issues, 
-              COALESCE(scoring_positive_signals, '[]'::jsonb) as scoring_positive_signals 
+              COALESCE(scoring_positive_signals, '[]'::jsonb) as scoring_positive_signals,
+              COALESCE(causation_data, '[]'::jsonb) as causation_data
        FROM analytics_campaign_daily 
        WHERE account_id = $1 AND scoring_status IS NOT NULL
        ORDER BY campaign_id, metric_date DESC`,
       [accountId]
     ),
-    // Get latest scoring per creative from analytics_creative_daily
+    // Get latest scoring per creative from analytics_creative_daily (with diagnostic data)
     pool.query(
       `SELECT DISTINCT ON (creative_id) 
               creative_id, campaign_id, scoring_status, 
+              ad_diagnostic_flag,
+              COALESCE(ad_diagnostic_data, '{}'::jsonb) as ad_diagnostic_data,
               COALESCE(scoring_issues, '[]'::jsonb) as scoring_issues,
               COALESCE(scoring_breakdown, '[]'::jsonb) as scoring_breakdown,
               COALESCE(scoring_positive_signals, '[]'::jsonb) as scoring_positive_signals,
@@ -2054,6 +2160,127 @@ export async function getSeniorityDataForScoring(
   }
   
   return { currentPeriod, previousPeriod };
+}
+
+// Simple seniority data for 100-point scoring (returns latest data for all campaigns)
+export async function getSeniorityDataSimple(accountId: string): Promise<Array<{
+  campaign_id: string;
+  seniority: string;
+  impressions: number;
+  clicks: number;
+  ctr: number;
+}>> {
+  const result = await pool.query(
+    `SELECT DISTINCT ON (campaign_id, seniority_name) 
+            campaign_id, seniority_name as seniority, impressions, clicks,
+            CASE WHEN impressions > 0 THEN (clicks::numeric / impressions) * 100 ELSE 0 END as ctr
+     FROM analytics_seniorities
+     WHERE account_id = $1 AND campaign_id IS NOT NULL
+     ORDER BY campaign_id, seniority_name, sync_date DESC`,
+    [String(accountId)]
+  );
+  return result.rows;
+}
+
+// Get campaign tracking data for causation analysis
+export async function getCampaignTrackingData(accountId: string): Promise<Map<string, any>> {
+  const trackingMap = new Map<string, any>();
+  
+  // Get latest and previous snapshots for each campaign
+  const result = await pool.query(
+    `WITH ranked AS (
+       SELECT *,
+              ROW_NUMBER() OVER (PARTITION BY campaign_id ORDER BY snapshot_date DESC) as rn
+       FROM campaign_settings_history
+       WHERE account_id = $1
+     )
+     SELECT r1.campaign_id,
+            r1.bid_value as current_bid,
+            r1.suggested_bid_min,
+            r1.suggested_bid_max,
+            r1.audience_size_total as audience_size_current,
+            r1.snapshot_date as current_date,
+            r2.bid_value as prev_bid,
+            r2.audience_size_total as audience_size_prev,
+            r2.snapshot_date as prev_date
+     FROM ranked r1
+     LEFT JOIN ranked r2 ON r1.campaign_id = r2.campaign_id AND r2.rn = 2
+     WHERE r1.rn = 1`,
+    [String(accountId)]
+  );
+  
+  for (const row of result.rows) {
+    trackingMap.set(row.campaign_id, {
+      currentBid: row.current_bid ? Number(row.current_bid) : null,
+      prevBid: row.prev_bid ? Number(row.prev_bid) : null,
+      suggestedBidMin: row.suggested_bid_min ? Number(row.suggested_bid_min) : null,
+      suggestedBidMax: row.suggested_bid_max ? Number(row.suggested_bid_max) : null,
+      audienceSizeCurrent: row.audience_size_current ? Number(row.audience_size_current) : null,
+      audienceSizePrev: row.audience_size_prev ? Number(row.audience_size_prev) : null,
+      lastChangeDate: row.current_date ? new Date(row.current_date) : null
+    });
+  }
+  
+  // Get targeting changes
+  const targetingResult = await pool.query(
+    `SELECT DISTINCT ON (campaign_id) campaign_id, targeting_hash, prev_targeting_hash, changed_at
+     FROM targeting_changes
+     WHERE account_id = $1
+     ORDER BY campaign_id, changed_at DESC`,
+    [String(accountId)]
+  );
+  
+  for (const row of targetingResult.rows) {
+    const existing = trackingMap.get(row.campaign_id) || {};
+    trackingMap.set(row.campaign_id, {
+      ...existing,
+      targetingHash: row.targeting_hash,
+      prevTargetingHash: row.prev_targeting_hash,
+      targetingChangeDate: row.changed_at ? new Date(row.changed_at) : null
+    });
+  }
+  
+  return trackingMap;
+}
+
+// Get creative lifecycle data (first active dates)
+export async function getCreativeLifecycleData(accountId: string): Promise<Map<string, any>> {
+  const lifecycleMap = new Map<string, any>();
+  
+  const result = await pool.query(
+    `SELECT DISTINCT ON (creative_id) creative_id, first_active_at, current_status
+     FROM creative_lifecycle
+     WHERE account_id = $1
+     ORDER BY creative_id, recorded_at DESC`,
+    [String(accountId)]
+  );
+  
+  for (const row of result.rows) {
+    lifecycleMap.set(row.creative_id, {
+      first_active_date: row.first_active_at,
+      current_status: row.current_status
+    });
+  }
+  
+  // Also check analytics_creative_daily for first appearance as fallback
+  const fallbackResult = await pool.query(
+    `SELECT creative_id, MIN(metric_date) as first_date
+     FROM analytics_creative_daily
+     WHERE account_id = $1
+     GROUP BY creative_id`,
+    [String(accountId)]
+  );
+  
+  for (const row of fallbackResult.rows) {
+    if (!lifecycleMap.has(row.creative_id)) {
+      lifecycleMap.set(row.creative_id, {
+        first_active_date: row.first_date,
+        current_status: 'ACTIVE'
+      });
+    }
+  }
+  
+  return lifecycleMap;
 }
 
 // Save company analytics (one row per company per campaign per period)

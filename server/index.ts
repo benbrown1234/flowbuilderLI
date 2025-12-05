@@ -57,6 +57,8 @@ import {
   getLatestMetricsDate,
   updateCampaignScoring,
   updateCreativeScoring,
+  updateCampaignScoring100,
+  updateCreativeDiagnostic,
   getStructureScoringData,
   getDbSession,
   createDbSession,
@@ -77,10 +79,24 @@ import {
   hasSeniorityData,
   getCampaignsWithSeniorityData,
   getSeniorityDataForScoring,
+  getSeniorityDataSimple,
+  getCampaignTrackingData,
+  getCreativeLifecycleData,
   updateDrilldownSyncStatus,
   getDrilldownSyncStatus
 } from './database.js';
 import { runAuditRules, calculateAccountScore } from './auditRules.js';
+import {
+  scoreCampaign,
+  diagnoseAd,
+  analyzeCausation,
+  getAdAgeBucket,
+  type CampaignMetrics,
+  type SeniorityData,
+  type TrackingData,
+  type AdMetrics,
+  type AdDiagnostic
+} from './scoringEngine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -3122,6 +3138,254 @@ async function computeAndSaveScoringStatus(accountId: string, campaignMetrics: a
   console.log(`Saved scoring for ${currentPeriodCampaigns.size} campaigns and ${currentPeriodAds.size} ads`);
 }
 
+// New 100-point scoring system with causation engine
+async function computeAndSaveScoring100(
+  accountId: string,
+  campaignMetrics: any[],
+  creativeMetrics: any[],
+  trackingData: Map<string, any>,
+  creativeLifecycle: Map<string, any>
+) {
+  console.log(`\n[Scoring100] Starting 100-point scoring for account ${accountId}`);
+  
+  // Group metrics by period (current = last 28 days, prev = 28 days before that)
+  const now = new Date();
+  const currentStart = new Date(now);
+  currentStart.setDate(currentStart.getDate() - 28);
+  const prevStart = new Date(currentStart);
+  prevStart.setDate(prevStart.getDate() - 28);
+  
+  // Aggregate campaign metrics
+  const campaignData = new Map<string, CampaignMetrics>();
+  const accountTotals = {
+    ctr: 0, cpc: 0, cpm: 0, cpa: 0,
+    totalImpressions: 0, totalClicks: 0, totalSpend: 0, totalConversions: 0
+  };
+  
+  for (const m of campaignMetrics) {
+    const date = new Date(m.metric_date);
+    const campaignId = m.campaign_id;
+    
+    if (!campaignData.has(campaignId)) {
+      campaignData.set(campaignId, {
+        campaignId,
+        campaignName: m.campaign_name || '',
+        status: m.campaign_status || 'ACTIVE',
+        impressions: 0, clicks: 0, spend: 0, conversions: 0,
+        prevImpressions: 0, prevClicks: 0, prevSpend: 0, prevConversions: 0,
+        ctr: 0, prevCtr: 0,
+        cpc: 0, prevCpc: 0,
+        cpm: 0, prevCpm: 0,
+        cpa: 0, prevCpa: 0,
+        dwellTime: null, prevDwellTime: null,
+        frequency: null, prevFrequency: null,
+        penetration: null, prevPenetration: null,
+        reach: 0, prevReach: 0,
+        audienceSize: 0,
+        dailyBudget: m.daily_budget || 0,
+        budgetUtilization: 0,
+        hasLan: m.has_lan || false,
+        hasExpansion: m.has_expansion || false,
+        activeDays: 0,
+        firstActiveDate: null
+      });
+    }
+    
+    const c = campaignData.get(campaignId)!;
+    
+    if (date >= currentStart) {
+      c.impressions += Number(m.impressions) || 0;
+      c.clicks += Number(m.clicks) || 0;
+      c.spend += Number(m.spend) || 0;
+      c.conversions += Number(m.conversions) || 0;
+      if (m.average_dwell_time) c.dwellTime = Number(m.average_dwell_time);
+      if (m.frequency) c.frequency = Number(m.frequency);
+      if (m.audience_penetration) c.penetration = Number(m.audience_penetration);
+      if (m.approximate_member_reach) c.reach = Number(m.approximate_member_reach);
+      c.activeDays++;
+      if (!c.firstActiveDate || date < c.firstActiveDate) c.firstActiveDate = date;
+    } else if (date >= prevStart) {
+      c.prevImpressions += Number(m.impressions) || 0;
+      c.prevClicks += Number(m.clicks) || 0;
+      c.prevSpend += Number(m.spend) || 0;
+      c.prevConversions += Number(m.conversions) || 0;
+      if (m.average_dwell_time) c.prevDwellTime = Number(m.average_dwell_time);
+      if (m.frequency) c.prevFrequency = Number(m.frequency);
+      if (m.audience_penetration) c.prevPenetration = Number(m.audience_penetration);
+      if (m.approximate_member_reach) c.prevReach = Number(m.approximate_member_reach);
+    }
+  }
+  
+  // Calculate derived metrics
+  for (const c of campaignData.values()) {
+    c.ctr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0;
+    c.prevCtr = c.prevImpressions > 0 ? (c.prevClicks / c.prevImpressions) * 100 : 0;
+    c.cpc = c.clicks > 0 ? c.spend / c.clicks : 0;
+    c.prevCpc = c.prevClicks > 0 ? c.prevSpend / c.prevClicks : 0;
+    c.cpm = c.impressions > 0 ? (c.spend / c.impressions) * 1000 : 0;
+    c.prevCpm = c.prevImpressions > 0 ? (c.prevSpend / c.prevImpressions) * 1000 : 0;
+    c.cpa = c.conversions > 0 ? c.spend / c.conversions : 0;
+    c.prevCpa = c.prevConversions > 0 ? c.prevSpend / c.prevConversions : 0;
+    c.budgetUtilization = c.dailyBudget > 0 && c.activeDays > 0 
+      ? ((c.spend / c.activeDays) / c.dailyBudget) * 100 : 0;
+    
+    // Accumulate for account averages
+    accountTotals.totalImpressions += c.impressions;
+    accountTotals.totalClicks += c.clicks;
+    accountTotals.totalSpend += c.spend;
+    accountTotals.totalConversions += c.conversions;
+  }
+  
+  // Calculate account averages
+  accountTotals.ctr = accountTotals.totalImpressions > 0 
+    ? (accountTotals.totalClicks / accountTotals.totalImpressions) * 100 : 0;
+  accountTotals.cpc = accountTotals.totalClicks > 0 
+    ? accountTotals.totalSpend / accountTotals.totalClicks : 0;
+  accountTotals.cpm = accountTotals.totalImpressions > 0 
+    ? (accountTotals.totalSpend / accountTotals.totalImpressions) * 1000 : 0;
+  accountTotals.cpa = accountTotals.totalConversions > 0 
+    ? accountTotals.totalSpend / accountTotals.totalConversions : 0;
+  
+  // Get seniority data from database
+  const seniorityDataResult = await getSeniorityDataSimple(accountId);
+  const seniorityMap = new Map<string, SeniorityData[]>();
+  for (const s of seniorityDataResult) {
+    if (!seniorityMap.has(s.campaign_id)) {
+      seniorityMap.set(s.campaign_id, []);
+    }
+    seniorityMap.get(s.campaign_id)!.push({
+      seniority: s.seniority,
+      impressions: Number(s.impressions) || 0,
+      clicks: Number(s.clicks) || 0,
+      ctr: Number(s.ctr) || 0
+    });
+  }
+  
+  // Score each campaign
+  let scoredCount = 0;
+  for (const [campaignId, campaign] of campaignData) {
+    // Skip campaigns with insufficient data
+    if (campaign.impressions < 2500 || campaign.activeDays < 4) {
+      console.log(`[Scoring100] Skipping ${campaignId}: insufficient data (${campaign.impressions} imps, ${campaign.activeDays} days)`);
+      continue;
+    }
+    
+    // Get tracking data for causation
+    const tracking: TrackingData = trackingData.get(campaignId) || {
+      currentBid: null,
+      prevBid: null,
+      suggestedBidMin: null,
+      suggestedBidMax: null,
+      audienceSizeCurrent: null,
+      audienceSizePrev: null,
+      targetingHash: null,
+      prevTargetingHash: null,
+      lastChangeDate: null
+    };
+    
+    // Get seniority data
+    const seniority = seniorityMap.get(campaignId) || [];
+    
+    // Score the campaign
+    const result = scoreCampaign(campaign, accountTotals, seniority, tracking);
+    
+    // Analyze causation
+    const causation = analyzeCausation(campaign, tracking, null);
+    
+    // Save to database
+    await updateCampaignScoring100(accountId, campaignId, {
+      status: result.status,
+      totalScore: result.totalScore,
+      engagementScore: result.engagementScore,
+      costScore: result.costScore,
+      audienceScore: result.audienceScore,
+      breakdown: result.breakdown,
+      issues: result.issues,
+      positiveSignals: result.positiveSignals,
+      causation
+    });
+    
+    scoredCount++;
+  }
+  
+  // Score ads within each campaign
+  const adData = new Map<string, AdMetrics>();
+  const campaignAdStats = new Map<string, { totalImpressions: number, avgCtr: number, avgDwell: number, avgCpc: number }>();
+  
+  // First pass: aggregate ad metrics
+  for (const m of creativeMetrics) {
+    const date = new Date(m.metric_date);
+    if (date < currentStart) continue;
+    
+    const adId = m.creative_id;
+    const campaignId = m.campaign_id;
+    
+    if (!adData.has(adId)) {
+      const lifecycle = creativeLifecycle.get(adId);
+      const firstActiveDate = lifecycle?.first_active_date ? new Date(lifecycle.first_active_date) : null;
+      const ageDays = firstActiveDate ? Math.floor((now.getTime() - firstActiveDate.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+      
+      adData.set(adId, {
+        adId,
+        campaignId,
+        impressions: 0,
+        clicks: 0,
+        spend: 0,
+        conversions: 0,
+        ctr: 0,
+        dwellTime: null,
+        cpc: 0,
+        ageDays,
+        status: m.creative_status || 'ACTIVE'
+      });
+    }
+    
+    const a = adData.get(adId)!;
+    a.impressions += Number(m.impressions) || 0;
+    a.clicks += Number(m.clicks) || 0;
+    a.spend += Number(m.spend) || 0;
+    a.conversions += Number(m.conversions) || 0;
+    if (m.average_dwell_time) a.dwellTime = Number(m.average_dwell_time);
+    
+    // Track campaign totals for comparison
+    if (!campaignAdStats.has(campaignId)) {
+      campaignAdStats.set(campaignId, { totalImpressions: 0, avgCtr: 0, avgDwell: 0, avgCpc: 0 });
+    }
+    const stats = campaignAdStats.get(campaignId)!;
+    stats.totalImpressions += Number(m.impressions) || 0;
+  }
+  
+  // Calculate campaign-level averages for ad comparison
+  for (const [campaignId, stats] of campaignAdStats) {
+    const adsInCampaign = Array.from(adData.values()).filter(a => a.campaignId === campaignId);
+    if (adsInCampaign.length > 0) {
+      const totalClicks = adsInCampaign.reduce((sum, a) => sum + a.clicks, 0);
+      const totalSpend = adsInCampaign.reduce((sum, a) => sum + a.spend, 0);
+      const dwellAds = adsInCampaign.filter(a => a.dwellTime !== null);
+      stats.avgCtr = stats.totalImpressions > 0 ? (totalClicks / stats.totalImpressions) * 100 : 0;
+      stats.avgCpc = totalClicks > 0 ? totalSpend / totalClicks : 0;
+      stats.avgDwell = dwellAds.length > 0 ? dwellAds.reduce((sum, a) => sum + (a.dwellTime || 0), 0) / dwellAds.length : 0;
+    }
+  }
+  
+  // Calculate ad-level derived metrics and diagnose
+  let adScoredCount = 0;
+  for (const [adId, ad] of adData) {
+    ad.ctr = ad.impressions > 0 ? (ad.clicks / ad.impressions) * 100 : 0;
+    ad.cpc = ad.clicks > 0 ? ad.spend / ad.clicks : 0;
+    
+    const stats = campaignAdStats.get(ad.campaignId);
+    if (!stats || ad.impressions < 100) continue;
+    
+    const diagnostic = diagnoseAd(ad, stats.avgCtr, stats.avgDwell, stats.avgCpc, stats.totalImpressions);
+    
+    await updateCreativeDiagnostic(accountId, adId, diagnostic);
+    adScoredCount++;
+  }
+  
+  console.log(`[Scoring100] Completed: ${scoredCount} campaigns, ${adScoredCount} ads scored with 100-point system`);
+}
+
 // Staggered sync function - processes API calls with delays
 async function runAuditSync(sessionId: string, accountId: string, accountName: string) {
   console.log(`\n=== Starting audit sync for account ${accountId} (${accountName}) ===`);
@@ -3387,9 +3651,21 @@ async function runAuditSync(sessionId: string, accountId: string, accountName: s
     // NOTE: Drilldown data (hourly, job titles, companies) is now synced separately
     // via the Drilldown page sync buttons, not as part of the main audit refresh
     
-    // Compute and save scoring status for Structure view caching
+    // Compute and save scoring status for Structure view caching (legacy point-based system)
     console.log('Computing and saving scoring status...');
     await computeAndSaveScoringStatus(accountId, campaignMetrics, creativeMetrics);
+    
+    // Also compute 100-point scoring with causation analysis
+    try {
+      console.log('Computing 100-point scoring with causation engine...');
+      const [trackingData, creativeLifecycle] = await Promise.all([
+        getCampaignTrackingData(accountId),
+        getCreativeLifecycleData(accountId)
+      ]);
+      await computeAndSaveScoring100(accountId, campaignMetrics, creativeMetrics, trackingData, creativeLifecycle);
+    } catch (scoringErr: any) {
+      console.warn('100-point scoring failed (non-fatal):', scoringErr.message);
+    }
     
     await updateAuditAccountSyncStatus(accountId, 'completed');
     console.log(`=== Audit sync completed for account ${accountId} ===\n`);
@@ -3813,9 +4089,21 @@ async function runAuditSyncWithToken(accessToken: string, accountId: string, acc
       console.warn(`[Tracking] Tracking layer error (non-fatal): ${trackingErr.message}`);
     }
     
-    // Compute and save scoring status for Structure view caching
+    // Compute and save scoring status for Structure view caching (legacy point-based system)
     console.log('Computing and saving scoring status...');
     await computeAndSaveScoringStatus(accountId, campaignMetrics, creativeMetrics);
+    
+    // Also compute 100-point scoring with causation analysis
+    try {
+      console.log('Computing 100-point scoring with causation engine...');
+      const [trackingData, creativeLifecycle] = await Promise.all([
+        getCampaignTrackingData(accountId),
+        getCreativeLifecycleData(accountId)
+      ]);
+      await computeAndSaveScoring100(accountId, campaignMetrics, creativeMetrics, trackingData, creativeLifecycle);
+    } catch (scoringErr: any) {
+      console.warn('100-point scoring failed (non-fatal):', scoringErr.message);
+    }
     
     await updateAuditAccountSyncStatus(accountId, 'completed');
     console.log(`=== Audit sync completed for account ${accountId} ===\n`);
