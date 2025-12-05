@@ -2248,16 +2248,16 @@ export async function getCreativeLifecycleData(accountId: string): Promise<Map<s
   const lifecycleMap = new Map<string, any>();
   
   const result = await pool.query(
-    `SELECT DISTINCT ON (creative_id) creative_id, first_active_at, current_status
+    `SELECT DISTINCT ON (creative_id) creative_id, first_active_date, current_status
      FROM creative_lifecycle
      WHERE account_id = $1
-     ORDER BY creative_id, recorded_at DESC`,
+     ORDER BY creative_id, updated_at DESC`,
     [String(accountId)]
   );
   
   for (const row of result.rows) {
     lifecycleMap.set(row.creative_id, {
-      first_active_date: row.first_active_at,
+      first_active_date: row.first_active_date,
       current_status: row.current_status
     });
   }
