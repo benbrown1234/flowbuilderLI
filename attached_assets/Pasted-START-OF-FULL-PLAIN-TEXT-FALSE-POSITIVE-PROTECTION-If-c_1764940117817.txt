@@ -1,0 +1,126 @@
+START OF FULL PLAIN TEXT
+
+FALSE POSITIVE PROTECTION
+
+If campaign_active_days_last_7 < 4 then return “insufficient data”
+If impressions_last_7 < 1000 then return “insufficient data”
+
+CTR_trend_eligible = impressions_last_7 >= 2500
+DWELL_trend_eligible = clicks_last_7 >= 20
+CPC_trend_eligible = clicks_last_7 >= 20
+SENIORITY_eligible = impressions_last_7 >= 1000
+PENETRATION_eligible = impressions_last_7 >= 1000
+
+ENGAGEMENT QUALITY (45 points)
+
+DWELL TIME (20 points)
+
+Absolute dwell scoring (max 12)
+If dwell >= 15.0 then dwell_abs = 12
+Else if dwell >= 13.0 then dwell_abs = 11
+Else if dwell >= 10.0 then dwell_abs = 9
+Else if dwell >= 7.0 then dwell_abs = 7
+Else if dwell >= 5.0 then dwell_abs = 5
+Else if dwell >= 4.0 then dwell_abs = 3
+Else if dwell >= 3.0 then dwell_abs = 1
+Else dwell_abs = 0
+
+Relative dwell scoring (max 8, only if eligible)
+If DWELL_trend_eligible is false then dwell_trend = 0
+Else if dwell_change >= 0.20 then dwell_trend = 8
+Else if dwell_change >= 0.10 then dwell_trend = 6
+Else if dwell_change >= 0.00 then dwell_trend = 4
+Else if dwell_change >= -0.10 then dwell_trend = 2
+Else if dwell_change >= -0.20 then dwell_trend = 1
+Else dwell_trend = 0
+
+dwell_total = dwell_abs + dwell_trend
+
+CTR (15 points)
+
+Absolute CTR scoring (max 10)
+If CTR >= 0.0100 then ctr_abs = 10
+Else if CTR >= 0.0070 then ctr_abs = 8
+Else if CTR >= 0.0050 then ctr_abs = 6
+Else if CTR >= 0.0040 then ctr_abs = 4
+Else if CTR >= 0.0030 then ctr_abs = 2
+Else ctr_abs = 0
+
+Relative CTR scoring (max 5)
+If CTR_trend_eligible is false then ctr_trend = 0
+Else if ctr_change >= 0.20 then ctr_trend = 5
+Else if ctr_change >= 0.10 then ctr_trend = 4
+Else if ctr_change >= 0.00 then ctr_trend = 3
+Else if ctr_change >= -0.10 then ctr_trend = 1
+Else if ctr_change >= -0.20 then ctr_trend = 0
+Else ctr_trend = -1
+
+ctr_total = ctr_abs + ctr_trend
+
+FREQUENCY (10 points)
+
+If frequency >= 2.0 and frequency <= 4.0 then freq_score = 10
+Else if frequency >= 1.5 and frequency < 2.0 then freq_score = 7
+Else if frequency < 1.5 then freq_score = 3
+Else if frequency > 4.0 and frequency <= 6.0 then freq_score = 4
+Else if frequency > 6.0 and frequency <= 7.0 then freq_score = 2
+Else freq_score = 0
+
+engagement_total = dwell_total + ctr_total + freq_score
+
+COST EFFICIENCY (35 points)
+
+CPC (20 points)
+If CPC_trend_eligible is false then cpc_score = 0
+Else:
+cpc_delta = (baseline_cpc - CPC) / baseline_cpc
+If cpc_delta >= 0.40 then cpc_score = 20
+Else if cpc_delta >= 0.20 then cpc_score = 16
+Else if cpc_delta >= 0.00 then cpc_score = 12
+Else if cpc_delta >= -0.20 then cpc_score = 6
+Else if cpc_delta >= -0.40 then cpc_score = 3
+Else cpc_score = 0
+
+CPM (10 points)
+If is_under_delivered is true then cpm_score = 0
+Else:
+If cpm_change <= -0.20 then cpm_score = 10
+Else if cpm_change <= -0.10 then cpm_score = 7
+Else if cpm_change <= 0.05 then cpm_score = 5
+Else if cpm_change <= 0.20 then cpm_score = 2
+Else cpm_score = 0
+
+CPA (5 points)
+If conversions_last_7 < 3 then cpa_score = 0
+Else:
+cpa_delta = (baseline_cpa - CPA) / baseline_cpa
+If cpa_delta >= 0.30 then cpa_score = 5
+Else if cpa_delta >= 0.00 then cpa_score = 4
+Else if cpa_delta >= -0.20 then cpa_score = 2
+Else cpa_score = 0
+
+cost_total = cpc_score + cpm_score + cpa_score
+
+AUDIENCE QUALITY (20 points)
+
+Penetration (10 points)
+If NOT PENETRATION_eligible then pen_score = 0
+Else if penetration >= 0.10 and penetration <= 0.30 then pen_score = 10
+Else if penetration > 0.30 and penetration <= 0.45 then pen_score = 7
+Else if penetration > 0.45 and penetration <= 0.60 then pen_score = 4
+Else if penetration > 0.60 then pen_score = 1
+Else pen_score = 2
+
+Seniority (10 points)
+If NOT SENIORITY_eligible then seniority_score = 0
+Else if seniority_shift >= 0.10 then seniority_score = 10
+Else if seniority_shift >= 0.05 then seniority_score = 7
+Else if seniority_shift >= 0.00 then seniority_score = 5
+Else seniority_score = 0
+
+audience_total = pen_score + seniority_score
+
+FINAL SCORE
+
+campaign_score = engagement_total + cost_total + audience_total
+Return campaign_score

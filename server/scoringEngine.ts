@@ -220,19 +220,21 @@ export function scoreDwellTime(
     return { score: 0, breakdown };
   }
   
-  // Absolute Quality (12 pts)
+  // Absolute Quality (12 pts) - per spec
   if (currentDwell >= 15.0) {
     absoluteScore = 12;
   } else if (currentDwell >= 13.0) {
-    absoluteScore = 10;
+    absoluteScore = 11;
   } else if (currentDwell >= 10.0) {
-    absoluteScore = 8;
+    absoluteScore = 9;
   } else if (currentDwell >= 7.0) {
-    absoluteScore = 6;
+    absoluteScore = 7;
+  } else if (currentDwell >= 5.0) {
+    absoluteScore = 5;
   } else if (currentDwell >= 4.0) {
-    absoluteScore = 4;
-  } else if (currentDwell >= 2.0) {
-    absoluteScore = 2;
+    absoluteScore = 3;
+  } else if (currentDwell >= 3.0) {
+    absoluteScore = 1;
   } else {
     absoluteScore = 0;
   }
@@ -243,10 +245,10 @@ export function scoreDwellTime(
     maxPoints: 12,
     earnedPoints: absoluteScore,
     value: `${currentDwell.toFixed(1)}s`,
-    threshold: absoluteScore >= 10 ? '≥13s (excellent)' : absoluteScore >= 6 ? '≥7s (good)' : '< 7s'
+    threshold: absoluteScore >= 11 ? '≥13s (excellent)' : absoluteScore >= 7 ? '≥7s (good)' : '< 7s'
   });
   
-  // Trend (8 pts) - requires sufficient clicks
+  // Trend (8 pts) - requires sufficient clicks - per spec
   if (previousDwell !== undefined && previousDwell > 0 && canScoreDwellTrend(clicks)) {
     const change = ((currentDwell - previousDwell) / previousDwell) * 100;
     
@@ -255,9 +257,9 @@ export function scoreDwellTime(
     } else if (change >= 10) {
       trendScore = 6;
     } else if (change >= 0) {
-      trendScore = 5;
+      trendScore = 4;
     } else if (change >= -10) {
-      trendScore = 3;
+      trendScore = 2;
     } else if (change >= -20) {
       trendScore = 1;
     } else {
@@ -323,7 +325,7 @@ export function scoreCtr(
     threshold: absoluteScore >= 8 ? '≥0.7% (excellent)' : absoluteScore >= 4 ? '≥0.4% (good)' : '< 0.4%'
   });
   
-  // Trend (5 pts)
+  // Trend (5 pts) - per spec
   if (previousCtr !== undefined && previousCtr > 0 && canScoreCtrTrend(impressions)) {
     const change = ((currentCtr - previousCtr) / previousCtr) * 100;
     
@@ -332,9 +334,9 @@ export function scoreCtr(
     } else if (change >= 10) {
       trendScore = 4;
     } else if (change >= 0) {
-      trendScore = 4;
+      trendScore = 3;
     } else if (change >= -10) {
-      trendScore = 2;
+      trendScore = 1;
     } else if (change >= -20) {
       trendScore = 0;
     } else {
@@ -416,221 +418,162 @@ export function scoreFrequency(
 }
 
 // ============ CPC SCORING (20 pts) ============
+// Per spec: Uses baseline_cpc (previous period CPC) for comparison
+// cpc_delta = (baseline_cpc - CPC) / baseline_cpc
+// ≥40% → 20, ≥20% → 16, ≥0% → 12, ≥-20% → 6, ≥-40% → 3, else 0
 
 export function scoreCpc(
   currentCpc: number,
   previousCpc: number | undefined,
-  accountAvgCpc: number,
+  _accountAvgCpc: number, // Keep param for backward compat but don't use
   clicks: number
 ): { score: number; breakdown: ScoreBreakdown[] } {
   const breakdown: ScoreBreakdown[] = [];
-  let absoluteScore = 0;
-  let trendScore = 0;
   
   if (clicks < 20 || currentCpc === 0) {
-    // FALSE-POSITIVE PROTECTION: Award 0 points when we can't properly score (spec requires ≥20 clicks)
     breakdown.push({
       category: 'cost',
       metric: 'CPC',
       maxPoints: 20,
-      earnedPoints: 0, // No points when ineligible
+      earnedPoints: 0,
       value: 'N/A',
       threshold: 'Needs ≥20 clicks for scoring'
     });
     return { score: 0, breakdown };
   }
   
-  // Absolute vs Account Average (12 pts)
-  if (accountAvgCpc > 0) {
-    const vsAvg = ((currentCpc - accountAvgCpc) / accountAvgCpc) * 100;
-    
-    if (vsAvg <= -25) {
-      absoluteScore = 12; // Way below average
-    } else if (vsAvg <= -15) {
-      absoluteScore = 10;
-    } else if (vsAvg <= -5) {
-      absoluteScore = 8;
-    } else if (vsAvg <= 5) {
-      absoluteScore = 6; // At average
-    } else if (vsAvg <= 15) {
-      absoluteScore = 4;
-    } else if (vsAvg <= 30) {
-      absoluteScore = 2;
-    } else {
-      absoluteScore = 0; // Way above average
-    }
-    
+  // Use baseline (previous period CPC) for comparison
+  if (previousCpc === undefined || previousCpc <= 0) {
     breakdown.push({
       category: 'cost',
-      metric: 'CPC vs Account',
-      maxPoints: 12,
-      earnedPoints: absoluteScore,
-      value: `$${currentCpc.toFixed(2)} vs $${accountAvgCpc.toFixed(2)}`,
-      threshold: absoluteScore >= 8 ? '< avg (efficient)' : absoluteScore <= 2 ? '> avg (costly)' : 'at avg'
-    });
-  } else {
-    // FALSE-POSITIVE PROTECTION: Award 0 points when we can't properly score
-    absoluteScore = 0;
-    breakdown.push({
-      category: 'cost',
-      metric: 'CPC vs Account',
-      maxPoints: 12,
-      earnedPoints: 0, // No points when ineligible
+      metric: 'CPC',
+      maxPoints: 20,
+      earnedPoints: 0,
       value: `$${currentCpc.toFixed(2)}`,
-      threshold: 'No account average for scoring'
+      threshold: 'No baseline (previous period) for scoring'
     });
+    return { score: 0, breakdown };
   }
   
-  // Trend (8 pts)
-  if (previousCpc !== undefined && previousCpc > 0) {
-    const change = ((currentCpc - previousCpc) / previousCpc) * 100;
-    
-    if (change <= -20) {
-      trendScore = 8; // CPC decreased significantly
-    } else if (change <= -10) {
-      trendScore = 6;
-    } else if (change <= 0) {
-      trendScore = 5;
-    } else if (change <= 10) {
-      trendScore = 3;
-    } else if (change <= 25) {
-      trendScore = 1;
-    } else {
-      trendScore = 0; // CPC increased significantly
-    }
-    
-    breakdown.push({
-      category: 'cost',
-      metric: 'CPC (Trend)',
-      maxPoints: 8,
-      earnedPoints: trendScore,
-      value: `${change >= 0 ? '+' : ''}${change.toFixed(0)}%`,
-      trend: change <= 0 ? 'improving' : 'worsening'
-    });
+  // cpc_delta = (baseline_cpc - CPC) / baseline_cpc
+  const cpcDelta = (previousCpc - currentCpc) / previousCpc;
+  let score = 0;
+  
+  if (cpcDelta >= 0.40) {
+    score = 20;
+  } else if (cpcDelta >= 0.20) {
+    score = 16;
+  } else if (cpcDelta >= 0.00) {
+    score = 12;
+  } else if (cpcDelta >= -0.20) {
+    score = 6;
+  } else if (cpcDelta >= -0.40) {
+    score = 3;
   } else {
-    // FALSE-POSITIVE PROTECTION: Award 0 points when we can't properly score
-    trendScore = 0;
-    breakdown.push({
-      category: 'cost',
-      metric: 'CPC (Trend)',
-      maxPoints: 8,
-      earnedPoints: 0, // No points when ineligible
-      value: 'N/A',
-      threshold: 'No previous data for scoring'
-    });
+    score = 0;
   }
   
-  return { score: absoluteScore + trendScore, breakdown };
+  breakdown.push({
+    category: 'cost',
+    metric: 'CPC',
+    maxPoints: 20,
+    earnedPoints: score,
+    value: `$${currentCpc.toFixed(2)} vs $${previousCpc.toFixed(2)}`,
+    trend: cpcDelta >= 0 ? 'improving' : 'worsening',
+    threshold: cpcDelta >= 0 ? `${(cpcDelta * 100).toFixed(0)}% below baseline` : `${(-cpcDelta * 100).toFixed(0)}% above baseline`
+  });
+  
+  return { score, breakdown };
 }
 
 // ============ CPM SCORING (10 pts) ============
+// Per spec: Uses cpm_change (trend only, no absolute comparison)
+// ≤-20% → 10, ≤-10% → 7, ≤5% → 5, ≤20% → 2, else 0
 
 export function scoreCpm(
   currentCpm: number,
   previousCpm: number | undefined,
-  accountAvgCpm: number,
-  impressions: number
+  _accountAvgCpm: number, // Keep param for backward compat but don't use
+  impressions: number,
+  isUnderDelivered: boolean = false
 ): { score: number; breakdown: ScoreBreakdown[] } {
   const breakdown: ScoreBreakdown[] = [];
-  let absoluteScore = 0;
-  let trendScore = 0;
   
   if (impressions < 1000 || currentCpm === 0) {
-    // FALSE-POSITIVE PROTECTION: Award 0 points when we can't properly score
     breakdown.push({
       category: 'cost',
       metric: 'CPM',
       maxPoints: 10,
-      earnedPoints: 0, // No points when ineligible
+      earnedPoints: 0,
       value: 'N/A',
       threshold: 'Needs ≥1,000 impressions for scoring'
     });
     return { score: 0, breakdown };
   }
   
-  // Absolute vs Account Average (6 pts)
-  if (accountAvgCpm > 0) {
-    const vsAvg = ((currentCpm - accountAvgCpm) / accountAvgCpm) * 100;
-    
-    if (vsAvg <= -20) {
-      absoluteScore = 6;
-    } else if (vsAvg <= -10) {
-      absoluteScore = 5;
-    } else if (vsAvg <= 10) {
-      absoluteScore = 4;
-    } else if (vsAvg <= 25) {
-      absoluteScore = 2;
-    } else {
-      absoluteScore = 0;
-    }
-    
+  // Per spec: If is_under_delivered is true, score = 0
+  if (isUnderDelivered) {
     breakdown.push({
       category: 'cost',
-      metric: 'CPM vs Account',
-      maxPoints: 6,
-      earnedPoints: absoluteScore,
-      value: `$${currentCpm.toFixed(2)} vs $${accountAvgCpm.toFixed(2)}`,
-      threshold: absoluteScore >= 4 ? '≤ avg' : '> avg'
-    });
-  } else {
-    // FALSE-POSITIVE PROTECTION: Award 0 points when we can't properly score
-    absoluteScore = 0;
-    breakdown.push({
-      category: 'cost',
-      metric: 'CPM vs Account',
-      maxPoints: 6,
-      earnedPoints: 0, // No points when ineligible
+      metric: 'CPM',
+      maxPoints: 10,
+      earnedPoints: 0,
       value: `$${currentCpm.toFixed(2)}`,
-      threshold: 'No account average for scoring'
+      threshold: 'Under-delivered (no CPM score)'
     });
+    return { score: 0, breakdown };
   }
   
-  // Trend (4 pts)
-  if (previousCpm !== undefined && previousCpm > 0) {
-    const change = ((currentCpm - previousCpm) / previousCpm) * 100;
-    
-    if (change <= -15) {
-      trendScore = 4;
-    } else if (change <= -5) {
-      trendScore = 3;
-    } else if (change <= 10) {
-      trendScore = 2;
-    } else if (change <= 25) {
-      trendScore = 1;
-    } else {
-      trendScore = 0;
-    }
-    
+  // Use cpm_change (trend-based scoring)
+  if (previousCpm === undefined || previousCpm <= 0) {
     breakdown.push({
       category: 'cost',
-      metric: 'CPM (Trend)',
-      maxPoints: 4,
-      earnedPoints: trendScore,
-      value: `${change >= 0 ? '+' : ''}${change.toFixed(0)}%`,
-      trend: change <= 0 ? 'improving' : 'worsening'
+      metric: 'CPM',
+      maxPoints: 10,
+      earnedPoints: 0,
+      value: `$${currentCpm.toFixed(2)}`,
+      threshold: 'No baseline (previous period) for scoring'
     });
+    return { score: 0, breakdown };
+  }
+  
+  const cpmChange = ((currentCpm - previousCpm) / previousCpm) * 100;
+  let score = 0;
+  
+  if (cpmChange <= -20) {
+    score = 10;
+  } else if (cpmChange <= -10) {
+    score = 7;
+  } else if (cpmChange <= 5) {
+    score = 5;
+  } else if (cpmChange <= 20) {
+    score = 2;
   } else {
-    // FALSE-POSITIVE PROTECTION: Award 0 points when we can't properly score
-    trendScore = 0;
-    breakdown.push({
-      category: 'cost',
-      metric: 'CPM (Trend)',
-      maxPoints: 4,
-      earnedPoints: 0, // No points when ineligible
-      value: 'N/A',
-      threshold: 'No previous data for scoring'
-    });
+    score = 0;
   }
   
-  return { score: absoluteScore + trendScore, breakdown };
+  breakdown.push({
+    category: 'cost',
+    metric: 'CPM',
+    maxPoints: 10,
+    earnedPoints: score,
+    value: `$${currentCpm.toFixed(2)} (${cpmChange >= 0 ? '+' : ''}${cpmChange.toFixed(0)}%)`,
+    trend: cpmChange <= 0 ? 'improving' : 'worsening',
+    threshold: cpmChange <= 0 ? 'Decreasing CPM' : 'Increasing CPM'
+  });
+  
+  return { score, breakdown };
 }
 
 // ============ CPA SCORING (5 pts) ============
+// Per spec: Uses baseline_cpa (previous period CPA) for comparison
+// cpa_delta = (baseline_cpa - CPA) / baseline_cpa
+// ≥30% → 5, ≥0% → 4, ≥-20% → 2, else 0
 
 export function scoreCpa(
   currentCpa: number,
   previousCpa: number | undefined,
-  accountAvgCpa: number,
+  _accountAvgCpa: number, // Keep param for backward compat but don't use
   conversions: number
 ): { score: number; breakdown: ScoreBreakdown[] } {
   const breakdown: ScoreBreakdown[] = [];
@@ -647,70 +590,42 @@ export function scoreCpa(
     return { score: 0, breakdown };
   }
   
-  let score = 0;
-  
-  // Compare vs account average
-  if (accountAvgCpa > 0) {
-    const vsAvg = ((currentCpa - accountAvgCpa) / accountAvgCpa) * 100;
-    
-    if (vsAvg <= -25) {
-      score = 5;
-    } else if (vsAvg <= -15) {
-      score = 4;
-    } else if (vsAvg <= 0) {
-      score = 3;
-    } else if (vsAvg <= 15) {
-      score = 2;
-    } else if (vsAvg <= 30) {
-      score = 1;
-    } else {
-      score = 0;
-    }
-    
-    breakdown.push({
-      category: 'cost',
-      metric: 'CPA vs Account',
-      maxPoints: 5,
-      earnedPoints: score,
-      value: `$${currentCpa.toFixed(2)} vs $${accountAvgCpa.toFixed(2)}`,
-      threshold: score >= 3 ? '≤ avg' : '> avg'
-    });
-  } else if (previousCpa !== undefined && previousCpa > 0) {
-    // Fall back to trend if no account average
-    const change = ((currentCpa - previousCpa) / previousCpa) * 100;
-    
-    if (change <= -20) {
-      score = 5;
-    } else if (change <= -10) {
-      score = 4;
-    } else if (change <= 0) {
-      score = 3;
-    } else if (change <= 20) {
-      score = 2;
-    } else {
-      score = 0;
-    }
-    
-    breakdown.push({
-      category: 'cost',
-      metric: 'CPA (Trend)',
-      maxPoints: 5,
-      earnedPoints: score,
-      value: `$${currentCpa.toFixed(2)} (${change >= 0 ? '+' : ''}${change.toFixed(0)}%)`,
-      trend: change <= 0 ? 'improving' : 'worsening'
-    });
-  } else {
-    // FALSE-POSITIVE PROTECTION: Award 0 points when we can't properly score
-    score = 0;
+  // Use baseline (previous period CPA) for comparison
+  if (previousCpa === undefined || previousCpa <= 0) {
     breakdown.push({
       category: 'cost',
       metric: 'CPA',
       maxPoints: 5,
-      earnedPoints: 0, // No points when ineligible
+      earnedPoints: 0,
       value: `$${currentCpa.toFixed(2)}`,
-      threshold: 'No comparison data for scoring'
+      threshold: 'No baseline (previous period) for scoring'
     });
+    return { score: 0, breakdown };
   }
+  
+  // cpa_delta = (baseline_cpa - CPA) / baseline_cpa
+  const cpaDelta = (previousCpa - currentCpa) / previousCpa;
+  let score = 0;
+  
+  if (cpaDelta >= 0.30) {
+    score = 5;
+  } else if (cpaDelta >= 0.00) {
+    score = 4;
+  } else if (cpaDelta >= -0.20) {
+    score = 2;
+  } else {
+    score = 0;
+  }
+  
+  breakdown.push({
+    category: 'cost',
+    metric: 'CPA',
+    maxPoints: 5,
+    earnedPoints: score,
+    value: `$${currentCpa.toFixed(2)} vs $${previousCpa.toFixed(2)}`,
+    trend: cpaDelta >= 0 ? 'improving' : 'worsening',
+    threshold: cpaDelta >= 0 ? `${(cpaDelta * 100).toFixed(0)}% below baseline` : `${(-cpaDelta * 100).toFixed(0)}% above baseline`
+  });
   
   return { score, breakdown };
 }
@@ -784,6 +699,7 @@ export function scoreSeniority(
     return { score: 0, breakdown };
   }
   
+  // Per spec: seniority_shift thresholds - ≥10%→10, ≥5%→7, ≥0%→5, else 0
   const shift = seniorityData.currentDecisionMakerPct - seniorityData.previousDecisionMakerPct;
   let score = 0;
   
@@ -791,8 +707,8 @@ export function scoreSeniority(
     score = 10; // Strong shift toward decision-makers
   } else if (shift >= 5) {
     score = 7;
-  } else if (shift >= -5) {
-    score = 5; // Stable
+  } else if (shift >= 0) {
+    score = 5; // Stable or improving
   } else {
     score = 0; // Shift downward
   }

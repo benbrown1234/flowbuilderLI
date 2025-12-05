@@ -3122,7 +3122,9 @@ async function computeAndSaveScoring100(
   trackingData: Map<string, any>,
   creativeLifecycle: Map<string, any>
 ) {
-  console.log(`\n[Scoring100] Starting 100-point scoring for account ${accountId}`);
+  console.log(`\n[Scoring100] ========================================`);
+  console.log(`[Scoring100] Starting 100-point scoring for account ${accountId}`);
+  console.log(`[Scoring100] Input: ${campaignMetrics.length} campaign metrics, ${creativeMetrics.length} creative metrics`);
   
   // Group metrics by period (current = last 28 days, prev = 28 days before that)
   const now = new Date();
@@ -3139,14 +3141,15 @@ async function computeAndSaveScoring100(
   };
   
   for (const m of campaignMetrics) {
-    const date = new Date(m.metric_date);
-    const campaignId = m.campaign_id;
+    // Handle both API format (metricDate) and database format (metric_date)
+    const date = new Date(m.metric_date || m.metricDate);
+    const campaignId = m.campaign_id || m.campaignId;
     
     if (!campaignData.has(campaignId)) {
       campaignData.set(campaignId, {
         campaignId,
-        campaignName: m.campaign_name || '',
-        status: m.campaign_status || 'ACTIVE',
+        campaignName: m.campaign_name || m.campaignName || '',
+        status: m.campaign_status || m.campaignStatus || 'ACTIVE',
         impressions: 0, clicks: 0, spend: 0, conversions: 0,
         prevImpressions: 0, prevClicks: 0, prevSpend: 0, prevConversions: 0,
         ctr: 0, prevCtr: 0,
@@ -3174,10 +3177,14 @@ async function computeAndSaveScoring100(
       c.clicks += Number(m.clicks) || 0;
       c.spend += Number(m.spend) || 0;
       c.conversions += Number(m.conversions) || 0;
-      if (m.average_dwell_time) c.dwellTime = Number(m.average_dwell_time);
+      // Handle both API format (camelCase) and database format (snake_case)
+      const dwellTime = m.average_dwell_time ?? m.averageDwellTime;
+      const penetration = m.audience_penetration ?? m.audiencePenetration;
+      const reach = m.approximate_member_reach ?? m.approximateMemberReach;
+      if (dwellTime) c.dwellTime = Number(dwellTime);
       if (m.frequency) c.frequency = Number(m.frequency);
-      if (m.audience_penetration) c.penetration = Number(m.audience_penetration);
-      if (m.approximate_member_reach) c.reach = Number(m.approximate_member_reach);
+      if (penetration) c.penetration = Number(penetration);
+      if (reach) c.reach = Number(reach);
       c.activeDays++;
       if (!c.firstActiveDate || date < c.firstActiveDate) c.firstActiveDate = date;
     } else if (date >= prevStart) {
@@ -3185,10 +3192,14 @@ async function computeAndSaveScoring100(
       c.prevClicks += Number(m.clicks) || 0;
       c.prevSpend += Number(m.spend) || 0;
       c.prevConversions += Number(m.conversions) || 0;
-      if (m.average_dwell_time) c.prevDwellTime = Number(m.average_dwell_time);
+      // Handle both API format (camelCase) and database format (snake_case)
+      const prevDwellTime = m.average_dwell_time ?? m.averageDwellTime;
+      const prevPenetration = m.audience_penetration ?? m.audiencePenetration;
+      const prevReach = m.approximate_member_reach ?? m.approximateMemberReach;
+      if (prevDwellTime) c.prevDwellTime = Number(prevDwellTime);
       if (m.frequency) c.prevFrequency = Number(m.frequency);
-      if (m.audience_penetration) c.prevPenetration = Number(m.audience_penetration);
-      if (m.approximate_member_reach) c.prevReach = Number(m.approximate_member_reach);
+      if (prevPenetration) c.prevPenetration = Number(prevPenetration);
+      if (prevReach) c.prevReach = Number(prevReach);
     }
   }
   
@@ -3239,7 +3250,13 @@ async function computeAndSaveScoring100(
   
   // Score each campaign
   let scoredCount = 0;
+  console.log(`[Scoring100] Aggregated ${campaignData.size} campaigns from ${campaignMetrics.length} daily records`);
+  console.log(`[Scoring100] Current period: ${currentStart.toISOString()} to now`);
+  console.log(`[Scoring100] Account totals: ${accountTotals.totalImpressions} imps, ${accountTotals.totalClicks} clicks, $${accountTotals.totalSpend.toFixed(2)} spend`);
+  
   for (const [campaignId, campaign] of campaignData) {
+    console.log(`[Scoring100] Campaign ${campaignId}: ${campaign.impressions} imps, ${campaign.activeDays} days, ${campaign.clicks} clicks`);
+    
     // Skip campaigns with insufficient data
     if (campaign.impressions < 2500 || campaign.activeDays < 4) {
       console.log(`[Scoring100] Skipping ${campaignId}: insufficient data (${campaign.impressions} imps, ${campaign.activeDays} days)`);
@@ -3367,11 +3384,12 @@ async function computeAndSaveScoring100(
   
   // First pass: aggregate ad metrics
   for (const m of creativeMetrics) {
-    const date = new Date(m.metric_date);
+    // Handle both API format (metricDate) and database format (metric_date)
+    const date = new Date(m.metric_date || m.metricDate);
     if (date < currentStart) continue;
     
-    const adId = m.creative_id;
-    const campaignId = m.campaign_id;
+    const adId = m.creative_id || m.creativeId;
+    const campaignId = m.campaign_id || m.campaignId;
     
     if (!adData.has(adId)) {
       const lifecycle = creativeLifecycle.get(adId);
@@ -3389,7 +3407,7 @@ async function computeAndSaveScoring100(
         dwellTime: null,
         cpc: 0,
         ageDays,
-        status: m.creative_status || 'ACTIVE'
+        status: m.creative_status || m.creativeStatus || 'ACTIVE'
       });
     }
     
@@ -3398,7 +3416,9 @@ async function computeAndSaveScoring100(
     a.clicks += Number(m.clicks) || 0;
     a.spend += Number(m.spend) || 0;
     a.conversions += Number(m.conversions) || 0;
-    if (m.average_dwell_time) a.dwellTime = Number(m.average_dwell_time);
+    // Handle both API format (averageDwellTime) and database format (average_dwell_time)
+    const dwellTime = m.average_dwell_time ?? m.averageDwellTime;
+    if (dwellTime) a.dwellTime = Number(dwellTime);
     
     // Track campaign totals for comparison
     if (!campaignAdStats.has(campaignId)) {
