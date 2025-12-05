@@ -3623,14 +3623,26 @@ async function computeAndSaveScoring100(
     adScoredCount++;
   }
   
-  // After all ad scoring, rebuild causation summaries with actual ad diagnostics
+  // After all ad scoring, rebuild causation with actual ad diagnostics
   console.log(`[Scoring100] Updating causation summaries with ad diagnostics for ${campaignScoringData.size} campaigns...`);
   for (const [campaignId, data] of campaignScoringData) {
     const adDiagnostics = campaignAdDiagnostics.get(campaignId) || [];
     
+    // Re-run analyzeCausation with real ad diagnostics to get correct active ad count
+    const updatedCausation = analyzeCausation(
+      data.currentMetrics,
+      data.previousMetrics,
+      data.tracking,
+      adDiagnostics,
+      data.seniorityData
+    );
+    
+    // Update the in-memory reference to avoid any stale data issues
+    data.causation = updatedCausation;
+    
     // Build comprehensive causation summary with actual ad diagnostics
     const causationSummary = buildCausationSummary(
-      data.causation,
+      updatedCausation,
       adDiagnostics,
       data.currentMetrics,
       data.previousMetrics,
@@ -3649,7 +3661,7 @@ async function computeAndSaveScoring100(
       breakdown: data.result.breakdown,
       issues: data.result.issues,
       positiveSignals: data.result.positiveSignals,
-      causation: data.causation,
+      causation: updatedCausation,
       causationSummary
     });
   }
