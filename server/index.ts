@@ -1030,6 +1030,9 @@ async function linkedinApiRequestPaginated(sessionId: string, endpoint: string, 
 }
 
 // Helper function to encode targeting criteria for LinkedIn API
+// LinkedIn Rest.li 2.0 requires HYBRID encoding:
+// - URL-encode facet URNs and value URNs (the tokens)
+// - But leave structural characters unencoded: ( ) , : and keywords like "List"
 function encodeTargetingCriteriaForApi(targetingCriteria: any): string {
   if (!targetingCriteria?.include?.and) {
     return '';
@@ -1038,23 +1041,24 @@ function encodeTargetingCriteriaForApi(targetingCriteria: any): string {
   try {
     // Build the targeting criteria in LinkedIn's Rest.li format
     // Format: (include:(and:List((or:(facet:List(values))),(...))))
+    // URL-encode each URN token but keep structural chars as-is
     const andList = targetingCriteria.include.and.map((orGroup: any) => {
       const orEntries = Object.entries(orGroup.or || {}).map(([facet, values]: [string, any]) => {
-        const valuesList = (values as string[]).join(',');
-        return `${facet}:List(${valuesList})`;
+        // URL-encode the facet URN
+        const encodedFacet = encodeURIComponent(facet);
+        // URL-encode each value URN
+        const encodedValues = (values as string[]).map(v => encodeURIComponent(v)).join(',');
+        return `${encodedFacet}:List(${encodedValues})`;
       }).join(',');
       return `(or:(${orEntries}))`;
     }).join(',');
     
-    // Build the raw criteria string
-    const rawCriteria = `(include:(and:List(${andList})))`;
+    // Build the criteria with encoded tokens but literal structural chars
+    const encodedCriteria = `(include:(and:List(${andList})))`;
     
-    // URL-encode the entire string for the query parameter
-    // LinkedIn's Rest.li API requires URL-encoded special characters
-    const encoded = encodeURIComponent(rawCriteria);
-    console.log('[TargetingEncode] Raw criteria length:', rawCriteria.length);
-    console.log('[TargetingEncode] Encoded criteria (first 300 chars):', encoded.substring(0, 300));
-    return encoded;
+    console.log('[TargetingEncode] Criteria length:', encodedCriteria.length);
+    console.log('[TargetingEncode] First 300 chars:', encodedCriteria.substring(0, 300));
+    return encodedCriteria;
   } catch (err) {
     console.error('Error encoding targeting criteria:', err);
     return '';
