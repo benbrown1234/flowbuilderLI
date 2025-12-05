@@ -1,0 +1,270 @@
+Below is a pure plain-text pseudo-code version of the other diagnostic dependencies:
+	•	Campaign-level causation engine
+	•	Targeting/audience-shift logic (theoretical until history exists)
+	•	Bidding/auction-pressure logic (theoretical until history exists)
+	•	How creative/ad-level findings feed upward into campaign causation
+	•	Fallback logic when no history exists (“still collecting data”)
+	•	Notes for UX on how these integrate visually
+
+Everything is in plain text only, no code boxes, no formatting triggers.
+
+⸻
+
+START OF FULL PLAIN TEXT DOCUMENT
+
+CAMPAIGN LEVEL CAUSATION ENGINE — FULL PSEUDO CODE
+
+Begin
+
+The goal is to determine why campaign performance improved or declined.
+This engine looks at creative signals, audience signals, bidding signals, and delivery patterns.
+Some components rely on historical data we do not yet have.
+In these cases we use theoretical logic and output “data still being collected.”
+
+Inputs required:
+campaign_ctr
+campaign_dwell
+campaign_cpc
+campaign_cpm
+campaign_frequency
+campaign_penetration
+campaign_seniority_shift
+campaign_score_change
+ad_diagnostic_output (from ad-level engine)
+suggested_bid_current
+audience_size_current
+frequency_current
+
+Optional future inputs (not yet available):
+suggested_bid_previous
+audience_size_previous
+targeting_settings_previous
+bid_value_previous
+
+If these do not exist, logic should guess cause and output “insufficient historical data” when needed.
+
+⸻
+
+STEP 1 — CHECK FOR CREATIVE-LEVEL CAUSES
+
+Obtain from ad diagnostic system:
+number_of_fatigued_ads
+number_of_high_contributors
+number_of_weak_contributors
+highest_impression_share_ad
+percentage_impressions_weak_ads
+percentage_impressions_high_ads
+
+Detect creative fatigue:
+If number_of_fatigued_ads > 0 AND campaign_ctr decreased AND campaign_dwell decreased:
+primary_cause = creative_fatigue
+
+If one ad has impression_share >= 0.70 and is classified as weak_contributor:
+primary_cause = over_served_weak_creative
+
+If majority of impressions (over 50 percent) fall into weak_contributor ads:
+primary_cause = creative_mix_underperforming
+
+If majority of impressions fall into high_contributor ads but score still declining:
+cause = audience_or_bidding_related
+
+Mark creative insights as high confidence because we have full ad-level data.
+
+⸻
+
+STEP 2 — CHECK AUDIENCE AND TARGETING INFLUENCE
+
+We do not yet store historical audience or targeting changes.
+Use theoretical calculations based on current values.
+
+If campaign_penetration > 0.60:
+audience_state = saturation
+Else if campaign_penetration between 0.45 and 0.60:
+audience_state = nearing_saturation
+Else if campaign_penetration < 0.10:
+audience_state = underexposed
+Else:
+audience_state = healthy
+
+Interpretation:
+If penetration is saturation AND CTR is declining:
+primary_cause = audience_exhaustion
+
+If penetration nearing_saturation AND frequency above 4.0:
+cause = early_fatigue
+
+If penetration very low AND frequency low:
+cause = under_delivery_or_low_bids
+
+Seniority logic:
+If seniority_shift increased by 10 percent or more AND CTR decreased AND dwell increased:
+cause = senior_audience_behavior (normal B2B pattern)
+
+If seniority_shift decreased AND CTR increased AND dwell decreased:
+cause = lower_quality_traffic
+
+If no seniority data available:
+cause = seniority_unknown_data_still_collecting
+
+⸻
+
+STEP 3 — CHECK BIDDING AND AUCTION PRESSURE (THEORETICAL)
+
+Because we do not yet store historical bid values or suggested bid history, use:
+
+If suggested_bid_current is unusually high relative to typical account behavior:
+likely_auction_pressure = true
+
+If CPC increased AND CPM increased:
+likely_auction_pressure = true
+
+If CPC increased while CTR stayed stable:
+likely_auction_pressure = true
+
+If CPC increased AND CTR decreased AND no creative fatigue found:
+likely_auction_pressure = likely true
+
+If suggested_bid_previous does not exist:
+bidding_cause_confidence = low
+add message “still collecting bid history for deeper diagnosis”
+
+⸻
+
+STEP 4 — CHECK DELIVERY AND FREQUENCY CONDITIONS
+
+If campaign_frequency higher than 6:
+delivery_cause = high_frequency_fatigue
+
+If campaign_frequency between 4 and 6 AND penetration high:
+delivery_cause = advanced_fatigue
+
+If frequency low (less than 1.5) AND penetration low:
+delivery_cause = low_delivery
+
+If delivery_cause contradicts creative findings:
+prefer frequency-based cause if frequency high
+prefer creative cause if ads are fatigued
+
+⸻
+
+STEP 5 — COMBINED LOGIC FOR CONTRADICTIONS
+
+If CTR decreasing but dwell increasing:
+cause = seniority_shift_or_message_depth
+
+If CPM decreasing but CTR decreasing:
+cause = lower_quality_impressions_or_audience_expansion
+
+If CPC rising but CPM stable:
+cause = CTR_decline_primary
+
+If CPC rising and CPM rising and creative is stable:
+cause = auction_pressure
+
+If CPM rising and penetration rising:
+cause = audience_exhaustion
+
+If ad-level diagnostics show many strong ads but score still declines:
+cause = auction_or_targeting_related
+
+If theoretical audience_shift OR bid_shift detected but no history:
+cause = provisional
+note = “still collecting historical data to confirm”
+
+⸻
+
+STEP 6 — PRIORITY ORDER FOR FINAL CAUSE ASSIGNMENT
+
+If creative_fatigue detected:
+primary_cause = creative_fatigue
+
+Else if over_served_weak_creative detected:
+primary_cause = creative_distribution_issue
+
+Else if auction_pressure_likely:
+primary_cause = auction_pressure
+
+Else if audience_state = saturation:
+primary_cause = audience_exhaustion
+
+Else if seniority_shift explains the change:
+primary_cause = seniority_behavior
+
+Else if delivery low:
+primary_cause = low_delivery
+
+Else:
+primary_cause = unclear_still_collecting_data
+
+⸻
+
+STEP 7 — OUTPUT FOR UX
+
+The UX should present:
+primary_cause
+secondary_causes (if any)
+confidence_level (high, medium, low)
+notes about missing historical data
+ad-level contribution summary
+
+Example UX output:
+Primary cause: Creative fatigue from multiple ads aged over 60 days.
+Secondary cause: Audience nearing saturation at 55 percent penetration.
+Confidence: High.
+Note: Bid history not yet available, auction factors estimated only.
+
+If audience or bid data is not historical:
+Display “still collecting data” tag next to those sections.
+
+This helps users understand why certain explanations are theoretical.
+
+⸻
+
+STEP 8 — HOW CREATIVE DIAGNOSTICS TIE INTO CAMPAIGN VIEW
+
+In the campaign UI:
+A creative section should summarise:
+Number of fatigued ads
+Contribution distribution (percent of impressions from weak ads)
+List of dominant ads and their share
+Creative age health summary
+Recommendations based on creative mix
+
+If the ad system finds that a weak ad holds most impressions:
+The campaign screen should highlight:
+“This campaign is being held back by one over-served weak ad. Review ad-level panel.”
+
+If multiple strong ads exist but performance still struggling:
+UI should state:
+“The creative mix is strong. Performance issues likely due to audience or bidding conditions.”
+
+If learning ads exist:
+UI should state:
+“One or more ads are in the learning phase. Performance may stabilise soon.”
+
+⸻
+
+STEP 9 — WHAT TO SHOW WHEN WE DO NOT YET HAVE HISTORY
+
+Whenever targeting or bidding history is needed but missing:
+Set cause_confidence to low
+Add UX tag “Historical data still being collected”
+Fallback to theoretical rules
+
+Example:
+“Suggested bid appears high. This may indicate auction pressure, but we are still collecting historical bid data to confirm.”
+
+⸻
+
+STEP 10 — FINAL OUTPUT STRUCTURE
+
+Return:
+primary_cause
+secondary_cause
+creative_summary
+audience_summary
+bidding_summary
+delivery_summary
+conflict_resolution_if_any
+confidence_level
+notes_on_missing_history

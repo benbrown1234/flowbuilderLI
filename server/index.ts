@@ -91,12 +91,14 @@ import {
   scoreCampaign,
   diagnoseAd,
   analyzeCausation,
+  buildCausationSummary,
   getAdAgeBucket,
   type CampaignMetrics,
   type SeniorityData,
   type TrackingData,
   type AdMetrics,
-  type AdDiagnostic
+  type AdDiagnostic,
+  type CausationSummary
 } from './scoringEngine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -3353,6 +3355,20 @@ async function computeAndSaveScoring100(
   console.log(`[Scoring100] Current period: ${currentStart.toISOString()} to now`);
   console.log(`[Scoring100] Account totals: ${accountTotals.totalImpressions} imps, ${accountTotals.totalClicks} clicks, $${accountTotals.totalSpend.toFixed(2)} spend`);
   
+  // Store campaign scoring data for causation summary update after ad scoring
+  const campaignScoringData = new Map<string, {
+    result: ReturnType<typeof scoreCampaign>;
+    causation: ReturnType<typeof analyzeCausation>;
+    currentMetrics: import('./scoringEngine').CampaignMetrics;
+    previousMetrics: import('./scoringEngine').CampaignMetrics | undefined;
+    tracking: import('./scoringEngine').TrackingData;
+    seniorityData: import('./scoringEngine').SeniorityData | undefined;
+    trackingHistoryDays: number;
+  }>();
+  
+  // Map to collect ad diagnostics by campaign for causation summary
+  const campaignAdDiagnostics = new Map<string, import('./scoringEngine').AdDiagnostic[]>();
+  
   for (const [campaignId, campaign] of campaignData) {
     console.log(`[Scoring100] Campaign ${campaignId}: ${campaign.impressions} imps, ${campaign.activeDays} days, ${campaign.clicks} clicks, penetration raw=${campaign.penetration}, pct=${campaign.penetration !== null ? (campaign.penetration * 100).toFixed(1) : 'N/A'}%`);
     
@@ -3472,11 +3488,27 @@ async function computeAndSaveScoring100(
       currentMetrics,
       previousMetrics,
       tracking,
-      [], // adDiagnostics - will be populated later
+      [], // adDiagnostics - will be populated after ad scoring
       seniorityData
     );
     
-    // Save to database
+    // Get tracking history days for confidence calculation
+    const trackingHistoryDays = rawTracking?.currentDate && rawTracking?.prevDate 
+      ? Math.floor((new Date(rawTracking.currentDate).getTime() - new Date(rawTracking.prevDate).getTime()) / (1000 * 60 * 60 * 24))
+      : 0;
+    
+    // Store campaign data for causation summary update after ad scoring
+    campaignScoringData.set(campaignId, {
+      result,
+      causation,
+      currentMetrics,
+      previousMetrics,
+      tracking: tracking || {},
+      seniorityData,
+      trackingHistoryDays
+    });
+    
+    // Save initial campaign scoring (causation summary will be updated after ad scoring)
     await updateCampaignScoring100(accountId, campaignId, {
       status: result.status,
       totalScore: result.totalScore,
@@ -3486,7 +3518,8 @@ async function computeAndSaveScoring100(
       breakdown: result.breakdown,
       issues: result.issues,
       positiveSignals: result.positiveSignals,
-      causation
+      causation,
+      causationSummary: null // Will be updated after ad scoring
     });
     
     scoredCount++;
@@ -3580,8 +3613,45 @@ async function computeAndSaveScoring100(
     
     const diagnostic = diagnoseAd(adMetrics, stats.avgCtr, stats.avgDwell, stats.avgCpc, stats.totalImpressions, undefined);
     
+    // Collect diagnostic for causation summary
+    if (!campaignAdDiagnostics.has(ad.campaignId)) {
+      campaignAdDiagnostics.set(ad.campaignId, []);
+    }
+    campaignAdDiagnostics.get(ad.campaignId)!.push(diagnostic);
+    
     await updateCreativeDiagnostic(accountId, adId, diagnostic);
     adScoredCount++;
+  }
+  
+  // After all ad scoring, rebuild causation summaries with actual ad diagnostics
+  console.log(`[Scoring100] Updating causation summaries with ad diagnostics for ${campaignScoringData.size} campaigns...`);
+  for (const [campaignId, data] of campaignScoringData) {
+    const adDiagnostics = campaignAdDiagnostics.get(campaignId) || [];
+    
+    // Build comprehensive causation summary with actual ad diagnostics
+    const causationSummary = buildCausationSummary(
+      data.causation,
+      adDiagnostics,
+      data.currentMetrics,
+      data.previousMetrics,
+      data.tracking,
+      data.seniorityData,
+      data.trackingHistoryDays
+    );
+    
+    // Update campaign with causation summary (only update the summary field)
+    await updateCampaignScoring100(accountId, campaignId, {
+      status: data.result.status,
+      totalScore: data.result.totalScore,
+      engagementScore: data.result.engagementScore,
+      costScore: data.result.costScore,
+      audienceScore: data.result.audienceScore,
+      breakdown: data.result.breakdown,
+      issues: data.result.issues,
+      positiveSignals: data.result.positiveSignals,
+      causation: data.causation,
+      causationSummary
+    });
   }
   
   console.log(`[Scoring100] Completed: ${scoredCount} campaigns, ${adScoredCount} ads scored with 100-point system`);
@@ -6238,15 +6308,18 @@ app.get('/api/audit/data/:accountId', requireAuth, requireAccountAccess, async (
       audienceScore?: number;
       scoringBreakdown100?: any[];
       causationData?: any[];
+      causationSummary?: any;
       scoringStatus100?: string;
     }>();
     
     for (const c of scoringData.campaigns) {
       let breakdown = c.scoring_breakdown;
       let causation = c.causation_data;
+      let causationSummary = c.causation_summary;
       
       if (typeof breakdown === 'string') try { breakdown = JSON.parse(breakdown); } catch { breakdown = []; }
       if (typeof causation === 'string') try { causation = JSON.parse(causation); } catch { causation = []; }
+      if (typeof causationSummary === 'string') try { causationSummary = JSON.parse(causationSummary); } catch { causationSummary = null; }
       
       campaignScoringMap.set(c.campaign_id, {
         totalScore: c.scoring_total,
@@ -6255,6 +6328,7 @@ app.get('/api/audit/data/:accountId', requireAuth, requireAccountAccess, async (
         audienceScore: c.scoring_audience,
         scoringBreakdown100: Array.isArray(breakdown) ? breakdown : [],
         causationData: Array.isArray(causation) ? causation : [],
+        causationSummary: causationSummary || null,
         scoringStatus100: c.scoring_status
       });
     }
@@ -6430,7 +6504,8 @@ app.get('/api/audit/data/:accountId', requireAuth, requireAccountAccess, async (
           costScore: scoring100.costScore,
           audienceScore: scoring100.audienceScore,
           scoreBreakdown: scoring100.scoringBreakdown100,
-          causationInsights: scoring100.causationData
+          causationInsights: scoring100.causationData,
+          causationSummary: scoring100.causationSummary
         };
       }
       return campaign;
@@ -6503,6 +6578,7 @@ app.get('/api/audit/structure-summary/:accountId', requireAuth, requireAccountAc
       audienceScore?: number;
       scoringBreakdown?: any[];
       causationData?: any[];
+      causationSummary?: any;
     }> = {};
     const adsMap: Record<string, { scoringStatus: string; issues: string[]; scoringBreakdown: any[]; positiveSignals: string[]; scoringMetadata: any; campaignId: string }> = {};
     
@@ -6512,6 +6588,7 @@ app.get('/api/audit/structure-summary/:accountId', requireAuth, requireAccountAc
       let positiveSignals = c.scoring_positive_signals;
       let breakdown = c.scoring_breakdown;
       let causation = c.causation_data;
+      let causationSummary = c.causation_summary;
       
       if (typeof issues === 'string') {
         try { issues = JSON.parse(issues); } catch { issues = []; }
@@ -6525,6 +6602,9 @@ app.get('/api/audit/structure-summary/:accountId', requireAuth, requireAccountAc
       if (typeof causation === 'string') {
         try { causation = JSON.parse(causation); } catch { causation = []; }
       }
+      if (typeof causationSummary === 'string') {
+        try { causationSummary = JSON.parse(causationSummary); } catch { causationSummary = null; }
+      }
       
       campaignsMap[c.campaign_id] = {
         scoringStatus: c.scoring_status,
@@ -6535,7 +6615,8 @@ app.get('/api/audit/structure-summary/:accountId', requireAuth, requireAccountAc
         costScore: c.scoring_cost,
         audienceScore: c.scoring_audience,
         scoringBreakdown: Array.isArray(breakdown) ? breakdown : [],
-        causationData: Array.isArray(causation) ? causation : []
+        causationData: Array.isArray(causation) ? causation : [],
+        causationSummary: causationSummary || null
       };
     }
     

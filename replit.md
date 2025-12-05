@@ -19,7 +19,21 @@ The application features a React 19 frontend with TypeScript and Vite, communica
     *   **Opt-In System**: Account-level opt-in for weekly performance tracking.
     *   **3-Tier Dashboard**: Displays campaigns categorized into "Needs Attention," "Monitor Closely," and "Strong Performance."
     *   **100-Point Scoring System**: Campaigns are scored across Engagement Quality (45 pts), Cost Efficiency (35 pts), and Audience Quality (20 pts), with thresholds for classification (0-49: needs_attention, 50-69: monitor_closely, 70-100: strong_performance). Includes false positive protections with minimum impression/click/conversion thresholds.
-    *   **3-Layer Causation Engine**: Diagnoses performance changes by analyzing Creative Layer (ad age, CTR decay), Bidding Layer (bid movement, bid vs suggested), and Targeting Layer (audience size changes, penetration, criteria diffs).
+    *   **6-Level Causation Engine**: Enhanced diagnosis system with 6-level priority cascade:
+        1. **Creative Layer** (highest priority): Ad fatigue, over-served weak ads, creative mix health
+        2. **Auction Layer**: Bid pressure, suggested bid movement, bid strategy changes
+        3. **Audience Layer**: Audience size changes, penetration, exhaustion
+        4. **Seniority Layer**: Decision-maker percentage shifts, job title seniority changes
+        5. **Delivery Layer**: Frequency fatigue, low delivery issues
+        6. **Unclear** (fallback): When insufficient data for diagnosis
+        
+        Features enriched summary with:
+        - **Confidence levels** (high/medium/low) based on data availability
+        - **Confidence reasons** explaining data status
+        - **Headlines** and supporting factors for quick understanding
+        - **Contradiction resolution** (e.g., CTR↓ but Dwell↑ patterns)
+        - **Creative rollup summaries** with ad statistics
+        - **Actionable recommendations** per insight
     *   **Ad Diagnostic Flags**: Color-coded indicators for individual ad performance (Green, Grey, Red, Yellow, Blue, Purple).
     *   **10-Step Ad Scoring Engine**: On-demand relative scoring of ads within a campaign:
         1. Volume check (≥1000 impressions required)

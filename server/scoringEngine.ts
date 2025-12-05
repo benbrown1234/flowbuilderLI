@@ -91,11 +91,64 @@ export interface ScoreBreakdown {
 }
 
 export interface CausationInsight {
-  layer: 'creative' | 'bidding' | 'targeting';
+  layer: 'creative' | 'auction' | 'audience' | 'seniority' | 'delivery' | 'unclear';
   type: string;
   severity: 'primary' | 'secondary' | 'info';
   message: string;
   recommendation?: string;
+  confidence?: 'high' | 'medium' | 'low';
+  dataStatus?: 'complete' | 'partial' | 'collecting';
+}
+
+export interface CausationSummary {
+  // Frontend-compatible fields (matches AuditPage.tsx CampaignItem.causationSummary)
+  confidence: 'high' | 'medium' | 'low';
+  confidenceReason: string;
+  primaryCause: string;
+  primaryLayer: 'creative' | 'auction' | 'audience' | 'seniority' | 'delivery' | 'unclear';
+  headline: string;
+  supportingFactors: string[];
+  contradictionsResolved?: string[];
+  creativeSummary?: {
+    totalAds: number;
+    weakAds: number;
+    strongAds: number;
+    weakImpressionShare: number;
+    strongImpressionShare: number;
+  };
+  missingDataNotes: string[];
+  recommendations: string[];
+  
+  // Extended backend-only fields for detailed analysis
+  secondaryCauses: string[];
+  overallConfidence: 'high' | 'medium' | 'low';
+  detailedCreativeSummary: {
+    fatiguedAdsCount: number;
+    highContributorCount: number;
+    weakContributorCount: number;
+    pctImpressionsFromWeakAds: number;
+    pctImpressionsFromStrongAds: number;
+    healthStatus: 'strong' | 'mixed' | 'weak' | 'unknown';
+    message: string;
+  };
+  audienceSummary: {
+    penetrationState: 'saturation' | 'nearing_saturation' | 'healthy' | 'underexposed' | 'unknown';
+    frequencyState: 'high_fatigue' | 'advanced_fatigue' | 'healthy' | 'low_delivery' | 'unknown';
+    seniorityShift: number | null;
+    message: string;
+    dataStatus: 'complete' | 'partial' | 'collecting';
+  };
+  biddingSummary: {
+    auctionPressure: 'high' | 'moderate' | 'low' | 'opportunity' | 'unknown';
+    bidMovement: number | null;
+    message: string;
+    dataStatus: 'complete' | 'partial' | 'collecting';
+  };
+  deliverySummary: {
+    state: 'high_frequency_fatigue' | 'advanced_fatigue' | 'healthy' | 'low_delivery' | 'unknown';
+    message: string;
+  };
+  conflictResolution: string | null;
 }
 
 export interface CampaignScore {
@@ -117,6 +170,7 @@ export interface CampaignScore {
   issues: string[];
   positiveSignals: string[];
   causation: CausationInsight[];
+  causationSummary?: CausationSummary;
   
   eligible: boolean;
   ineligibleReason?: string;
@@ -1219,7 +1273,7 @@ export function analyzeCausation(
     if (bidChange > 20) {
       // High auction pressure - competitors bidding more aggressively
       insights.push({
-        layer: 'bidding',
+        layer: 'auction',
         type: 'auction_pressure_high',
         severity: cpmChange > 15 ? 'primary' : 'secondary',
         message: `High auction pressure: suggested bid up ${bidChange.toFixed(0)}% (competitors bidding more)`,
@@ -1231,7 +1285,7 @@ export function analyzeCausation(
       // Check correlated effects
       if (ctrChange < -10) {
         insights.push({
-          layer: 'bidding',
+          layer: 'auction',
           type: 'placement_quality_drop',
           severity: 'secondary',
           message: 'CTR declining with bid pressure - worse placements likely',
@@ -1241,7 +1295,7 @@ export function analyzeCausation(
     } else if (bidChange > 10) {
       // Moderate auction pressure
       insights.push({
-        layer: 'bidding',
+        layer: 'auction',
         type: 'auction_pressure_moderate',
         severity: 'info',
         message: `Moderate auction pressure: suggested bid up ${bidChange.toFixed(0)}%`,
@@ -1250,7 +1304,7 @@ export function analyzeCausation(
     } else if (bidChange < -20) {
       // Major drop in demand
       insights.push({
-        layer: 'bidding',
+        layer: 'auction',
         type: 'auction_opportunity_major',
         severity: 'info',
         message: `Major drop in auction demand: suggested bid down ${Math.abs(bidChange).toFixed(0)}%`,
@@ -1259,7 +1313,7 @@ export function analyzeCausation(
     } else if (bidChange < -10) {
       // Cheaper auction
       insights.push({
-        layer: 'bidding',
+        layer: 'auction',
         type: 'auction_opportunity',
         severity: 'info',
         message: `Auction becoming cheaper: suggested bid down ${Math.abs(bidChange).toFixed(0)}%`,
@@ -1272,7 +1326,7 @@ export function analyzeCausation(
   if (tracking.bidStrategy !== tracking.previousBidStrategy && tracking.previousBidStrategy) {
     if (tracking.bidStrategy === 'MAXIMIZE_DELIVERY' && tracking.previousBidStrategy === 'MANUAL') {
       insights.push({
-        layer: 'bidding',
+        layer: 'auction',
         type: 'strategy_to_max_delivery',
         severity: 'secondary',
         message: 'Switched from Manual to Maximize Delivery - expect CPM↑ and CPC↓',
@@ -1280,7 +1334,7 @@ export function analyzeCausation(
       });
     } else if (tracking.bidStrategy === 'MANUAL' && tracking.previousBidStrategy === 'MAXIMIZE_DELIVERY') {
       insights.push({
-        layer: 'bidding',
+        layer: 'auction',
         type: 'strategy_to_manual',
         severity: 'secondary',
         message: 'Switched from Maximize Delivery to Manual bidding - may see volatility',
@@ -1288,7 +1342,7 @@ export function analyzeCausation(
       });
     } else {
       insights.push({
-        layer: 'bidding',
+        layer: 'auction',
         type: 'strategy_change',
         severity: 'secondary',
         message: `Bidding strategy changed from ${tracking.previousBidStrategy} to ${tracking.bidStrategy}`,
@@ -1302,7 +1356,7 @@ export function analyzeCausation(
     const bidChange = ((tracking.bidValue - tracking.previousBidValue) / tracking.previousBidValue) * 100;
     if (bidChange > 15) {
       insights.push({
-        layer: 'bidding',
+        layer: 'auction',
         type: 'bid_increased',
         severity: 'secondary',
         message: `Manual bid increased ${bidChange.toFixed(0)}%`,
@@ -1310,7 +1364,7 @@ export function analyzeCausation(
       });
     } else if (bidChange < -15) {
       insights.push({
-        layer: 'bidding',
+        layer: 'auction',
         type: 'bid_decreased',
         severity: 'secondary',
         message: `Manual bid decreased ${Math.abs(bidChange).toFixed(0)}%`,
@@ -1326,7 +1380,7 @@ export function analyzeCausation(
   
   if (cpcChange > 15 && Math.abs(ctrChange) < 10) {
     insights.push({
-      layer: 'bidding',
+      layer: 'auction',
       type: 'cost_inflation',
       severity: 'secondary',
       message: `CPC up ${cpcChange.toFixed(0)}% with stable CTR - auction cost inflation`,
@@ -1345,7 +1399,7 @@ export function analyzeCausation(
     
     if (sizeChange < -20) {
       insights.push({
-        layer: 'targeting',
+        layer: 'audience',
         type: 'audience_shrink',
         severity: cpmChange > 15 || ctrChange < -10 ? 'primary' : 'secondary',
         message: `Audience shrank ${Math.abs(sizeChange).toFixed(0)}% - expect CPM↑, CTR↓`,
@@ -1353,7 +1407,7 @@ export function analyzeCausation(
       });
     } else if (sizeChange > 30) {
       insights.push({
-        layer: 'targeting',
+        layer: 'audience',
         type: 'audience_expand',
         severity: 'info',
         message: `Audience expanded ${sizeChange.toFixed(0)}%`,
@@ -1366,7 +1420,7 @@ export function analyzeCausation(
   if (current.audiencePenetration && current.audiencePenetration > 60) {
     const currentFreq = current.impressions > 0 && current.reach ? current.impressions / current.reach : 0;
     insights.push({
-      layer: 'targeting',
+      layer: 'audience',
       type: 'audience_exhaustion',
       severity: ctrChange < -10 ? 'primary' : 'secondary',
       message: `Audience penetration at ${current.audiencePenetration.toFixed(0)}%${currentFreq > 6 ? ` with high frequency (${currentFreq.toFixed(1)})` : ''} - exhaustion likely`,
@@ -1381,7 +1435,7 @@ export function analyzeCausation(
     if (shift >= 10) {
       // +10% seniors → CTR↓, dwell↑, CPC↑
       insights.push({
-        layer: 'targeting',
+        layer: 'audience',
         type: 'seniority_shift_up',
         severity: 'info',
         message: `Seniority shifted +${shift.toFixed(0)}% toward decision-makers`,
@@ -1392,7 +1446,7 @@ export function analyzeCausation(
     } else if (shift <= -10) {
       // -seniority → CTR↑, dwell↓
       insights.push({
-        layer: 'targeting',
+        layer: 'audience',
         type: 'seniority_shift_down',
         severity: ctrChange > 10 && dwellChange < -10 ? 'secondary' : 'info',
         message: `Seniority shifted ${shift.toFixed(0)}% away from decision-makers`,
@@ -1404,7 +1458,7 @@ export function analyzeCausation(
   // Audience expansion impact
   if (tracking.audienceExpansion && ctrChange < -15) {
     insights.push({
-      layer: 'targeting',
+      layer: 'audience',
       type: 'expansion_impact',
       severity: 'secondary',
       message: 'Audience Expansion enabled - reaching lower-intent users',
@@ -1415,7 +1469,7 @@ export function analyzeCausation(
   // LAN (LinkedIn Audience Network) impact check
   if (tracking.linkedInAudienceNetwork && ctrChange < -20) {
     insights.push({
-      layer: 'targeting',
+      layer: 'audience',
       type: 'lan_impact',
       severity: 'secondary',
       message: 'LinkedIn Audience Network enabled - off-platform delivery often has lower CTR',
@@ -1429,6 +1483,363 @@ export function analyzeCausation(
   insights.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
   
   return insights;
+}
+
+// ============ CAUSATION SUMMARY BUILDER ============
+
+export function buildCausationSummary(
+  insights: CausationInsight[],
+  adDiagnostics: AdDiagnostic[],
+  current: CampaignMetrics,
+  previous: CampaignMetrics | undefined,
+  tracking: TrackingData,
+  seniorityData: SeniorityData | undefined,
+  trackingHistoryDays: number = 0
+): CausationSummary {
+  const missingDataNotes: string[] = [];
+  
+  // ============ CREATIVE SUMMARY ============
+  const fatiguedAds = adDiagnostics.filter(ad => ad.flag === 'fatigue' || ad.ageLabel === 'Fatigue');
+  const highContributors = adDiagnostics.filter(ad => ad.tier === 1);
+  const weakContributors = adDiagnostics.filter(ad => ad.tier === 3);
+  const totalImpressions = adDiagnostics.reduce((sum, ad) => sum + (ad.impressionShare * 100), 0) || 100;
+  
+  const pctFromWeak = adDiagnostics
+    .filter(ad => ad.tier === 3)
+    .reduce((sum, ad) => sum + ad.impressionShare, 0) * 100;
+  const pctFromStrong = adDiagnostics
+    .filter(ad => ad.tier === 1)
+    .reduce((sum, ad) => sum + ad.impressionShare, 0) * 100;
+  
+  let creativeHealthStatus: 'strong' | 'mixed' | 'weak' | 'unknown' = 'unknown';
+  let creativeMessage = 'No ad diagnostic data available';
+  
+  if (adDiagnostics.length > 0) {
+    if (pctFromStrong >= 60) {
+      creativeHealthStatus = 'strong';
+      creativeMessage = `Creative mix is strong - ${pctFromStrong.toFixed(0)}% of impressions from high contributors`;
+    } else if (pctFromWeak >= 50) {
+      creativeHealthStatus = 'weak';
+      creativeMessage = `Creative mix is weak - ${pctFromWeak.toFixed(0)}% of impressions from underperforming ads`;
+    } else {
+      creativeHealthStatus = 'mixed';
+      creativeMessage = `Creative mix is balanced - consider optimizing weak performers`;
+    }
+    
+    if (fatiguedAds.length > 0) {
+      creativeMessage += `. ${fatiguedAds.length} ad(s) showing fatigue`;
+    }
+  }
+  
+  // ============ AUDIENCE SUMMARY ============
+  const penetration = current.audiencePenetration;
+  let penetrationState: 'saturation' | 'nearing_saturation' | 'healthy' | 'underexposed' | 'unknown' = 'unknown';
+  
+  if (penetration !== undefined) {
+    if (penetration > 60) penetrationState = 'saturation';
+    else if (penetration >= 45) penetrationState = 'nearing_saturation';
+    else if (penetration < 10) penetrationState = 'underexposed';
+    else penetrationState = 'healthy';
+  }
+  
+  const frequency = current.reach ? current.impressions / current.reach : null;
+  let frequencyState: 'high_fatigue' | 'advanced_fatigue' | 'healthy' | 'low_delivery' | 'unknown' = 'unknown';
+  
+  if (frequency !== null) {
+    if (frequency > 6) frequencyState = 'high_fatigue';
+    else if (frequency >= 4 && penetrationState !== 'healthy') frequencyState = 'advanced_fatigue';
+    else if (frequency < 1.5 && penetrationState === 'underexposed') frequencyState = 'low_delivery';
+    else frequencyState = 'healthy';
+  }
+  
+  const seniorityShift = seniorityData?.hasData 
+    ? seniorityData.currentDecisionMakerPct - seniorityData.previousDecisionMakerPct 
+    : null;
+  
+  let audienceMessage = '';
+  const audienceDataStatus: 'complete' | 'partial' | 'collecting' = 
+    (tracking.audienceSize && tracking.previousAudienceSize) ? 'complete' :
+    tracking.audienceSize ? 'partial' : 'collecting';
+  
+  if (penetrationState === 'saturation') {
+    audienceMessage = `Audience saturation at ${penetration?.toFixed(0)}% - exhaustion likely`;
+  } else if (penetrationState === 'nearing_saturation') {
+    audienceMessage = `Nearing saturation at ${penetration?.toFixed(0)}% penetration`;
+  } else if (penetrationState === 'underexposed') {
+    audienceMessage = `Low penetration at ${penetration?.toFixed(0)}% - consider increasing delivery`;
+  } else if (frequencyState === 'high_fatigue') {
+    audienceMessage = `High frequency fatigue (${frequency?.toFixed(1)}x avg)`;
+  } else {
+    audienceMessage = 'Audience health appears stable';
+  }
+  
+  if (audienceDataStatus === 'collecting') {
+    missingDataNotes.push('Still collecting audience size history for trend analysis');
+  }
+  
+  // ============ BIDDING SUMMARY ============
+  let auctionPressure: 'high' | 'moderate' | 'low' | 'opportunity' | 'unknown' = 'unknown';
+  let bidMovement: number | null = null;
+  let biddingMessage = '';
+  const biddingDataStatus: 'complete' | 'partial' | 'collecting' = 
+    (tracking.suggestedBidMin && tracking.previousSuggestedBidMin) ? 'complete' :
+    tracking.suggestedBidMin ? 'partial' : 'collecting';
+  
+  if (tracking.suggestedBidMin && tracking.previousSuggestedBidMin) {
+    bidMovement = ((tracking.suggestedBidMin - tracking.previousSuggestedBidMin) / tracking.previousSuggestedBidMin) * 100;
+    
+    if (bidMovement > 20) {
+      auctionPressure = 'high';
+      biddingMessage = `High auction pressure - suggested bid up ${bidMovement.toFixed(0)}%`;
+    } else if (bidMovement > 10) {
+      auctionPressure = 'moderate';
+      biddingMessage = `Moderate auction pressure - suggested bid up ${bidMovement.toFixed(0)}%`;
+    } else if (bidMovement < -20) {
+      auctionPressure = 'opportunity';
+      biddingMessage = `Major opportunity - suggested bid down ${Math.abs(bidMovement).toFixed(0)}%`;
+    } else if (bidMovement < -10) {
+      auctionPressure = 'opportunity';
+      biddingMessage = `Auction becoming cheaper - suggested bid down ${Math.abs(bidMovement).toFixed(0)}%`;
+    } else {
+      auctionPressure = 'low';
+      biddingMessage = 'Auction conditions stable';
+    }
+  } else if (trackingHistoryDays < 7) {
+    biddingMessage = `Still collecting bid history (${trackingHistoryDays} days) - need 7+ days for analysis`;
+    missingDataNotes.push('Bid history still being collected - estimates are provisional');
+  } else {
+    biddingMessage = 'No bid movement data available';
+  }
+  
+  // ============ DELIVERY SUMMARY ============
+  let deliveryState: 'high_frequency_fatigue' | 'advanced_fatigue' | 'healthy' | 'low_delivery' | 'unknown' = frequencyState === 'unknown' ? 'unknown' : frequencyState as any;
+  let deliveryMessage = '';
+  
+  if (frequencyState === 'high_fatigue') {
+    deliveryMessage = `Frequency at ${frequency?.toFixed(1)}x - recommend audience expansion or refresh`;
+  } else if (frequencyState === 'advanced_fatigue') {
+    deliveryMessage = `Frequency at ${frequency?.toFixed(1)}x with ${penetrationState} penetration - fatigue building`;
+  } else if (frequencyState === 'low_delivery') {
+    deliveryMessage = 'Low delivery - consider raising bids or expanding targeting';
+  } else {
+    deliveryMessage = 'Delivery patterns appear healthy';
+  }
+  
+  // ============ PRIORITY CASCADE FOR PRIMARY CAUSE ============
+  // 6-Level Priority: creative → auction → audience → seniority → delivery → unclear
+  
+  let primaryCause: string | null = null;
+  let primaryCauseLayer: 'creative' | 'auction' | 'audience' | 'seniority' | 'delivery' | 'unclear' | null = null;
+  const secondaryCauses: string[] = [];
+  
+  // Check creative fatigue first (highest priority - Level 1: Creative)
+  const creativeFatigueInsight = insights.find(i => i.type === 'creative_fatigue' || i.type === 'multiple_fatigued_creatives');
+  const overServedWeakInsight = insights.find(i => i.type === 'overserved_weak_contributor');
+  // Level 2: Auction
+  const auctionPressureInsight = insights.find(i => i.type === 'auction_pressure_high');
+  // Level 3: Audience
+  const audienceExhaustionInsight = insights.find(i => i.type === 'audience_exhaustion');
+  // Level 4: Seniority
+  const seniorityInsight = insights.find(i => i.type === 'seniority_shift_up' || i.type === 'seniority_shift_down');
+  // Level 5: Delivery
+  const lowDeliveryInsight = insights.find(i => i.type === 'low_impressions' || i.type === 'low_volume_creatives');
+  
+  // Priority Level 1: Creative
+  if (creativeFatigueInsight) {
+    primaryCause = creativeFatigueInsight.message;
+    primaryCauseLayer = 'creative';
+    creativeFatigueInsight.confidence = 'high';
+  } else if (overServedWeakInsight) {
+    primaryCause = overServedWeakInsight.message;
+    primaryCauseLayer = 'creative';
+    overServedWeakInsight.confidence = 'high';
+  } 
+  // Priority Level 2: Auction
+  else if (auctionPressureInsight && biddingDataStatus === 'complete') {
+    primaryCause = auctionPressureInsight.message;
+    primaryCauseLayer = 'auction';
+    auctionPressureInsight.confidence = 'high';
+  } 
+  // Priority Level 3: Audience
+  else if (audienceExhaustionInsight) {
+    primaryCause = audienceExhaustionInsight.message;
+    primaryCauseLayer = 'audience';
+    audienceExhaustionInsight.confidence = penetration !== undefined ? 'high' : 'medium';
+  } 
+  // Priority Level 4: Seniority
+  else if (seniorityInsight && seniorityData?.hasData) {
+    primaryCause = seniorityInsight.message;
+    primaryCauseLayer = 'seniority';
+    seniorityInsight.confidence = 'high';
+  } 
+  // Priority Level 5: Delivery
+  else if (lowDeliveryInsight) {
+    primaryCause = lowDeliveryInsight.message;
+    primaryCauseLayer = 'delivery';
+    lowDeliveryInsight.confidence = 'medium';
+  }
+  
+  // Collect secondary causes (non-primary insights with severity primary or secondary)
+  for (const insight of insights) {
+    if (insight.message !== primaryCause && (insight.severity === 'primary' || insight.severity === 'secondary')) {
+      secondaryCauses.push(insight.message);
+      if (secondaryCauses.length >= 3) break;
+    }
+  }
+  
+  // ============ CONTRADICTION RESOLUTION ============
+  let conflictResolution: string | null = null;
+  
+  const ctrChange = previous && previous.impressions > 0 && current.impressions > 0
+    ? (((current.clicks / current.impressions) - (previous.clicks / previous.impressions)) / (previous.clicks / previous.impressions)) * 100
+    : 0;
+  const dwellChange = previous?.dwellTimeSeconds && current.dwellTimeSeconds
+    ? ((current.dwellTimeSeconds - previous.dwellTimeSeconds) / previous.dwellTimeSeconds) * 100
+    : 0;
+  const cpmChange = previous && previous.impressions > 0 && current.impressions > 0
+    ? ((((current.spend / current.impressions) * 1000) - ((previous.spend / previous.impressions) * 1000)) / ((previous.spend / previous.impressions) * 1000)) * 100
+    : 0;
+  
+  // CTR↓ but Dwell↑ = seniority/depth
+  if (ctrChange < -10 && dwellChange > 10) {
+    conflictResolution = 'CTR declining but dwell time increasing - indicates senior audience or deep content consumption (normal B2B pattern)';
+  }
+  // CPM↓ but CTR↓ = lower quality impressions
+  else if (cpmChange < -10 && ctrChange < -10) {
+    conflictResolution = 'CPM and CTR both declining - likely lower quality impressions from audience expansion or LAN';
+  }
+  // Strong creatives but score declining = external factors
+  else if (creativeHealthStatus === 'strong' && insights.some(i => i.severity === 'primary' && i.layer !== 'creative')) {
+    conflictResolution = 'Creative mix is strong but performance declining - issue is likely auction pressure or audience saturation';
+  }
+  
+  // ============ OVERALL CONFIDENCE ============
+  let overallConfidence: 'high' | 'medium' | 'low' = 'medium';
+  
+  // High confidence if we have full creative data AND either bid or audience history
+  if (adDiagnostics.length > 0 && (biddingDataStatus === 'complete' || audienceDataStatus === 'complete')) {
+    overallConfidence = 'high';
+  }
+  // Low confidence if missing most historical data
+  else if (biddingDataStatus === 'collecting' && audienceDataStatus === 'collecting' && trackingHistoryDays < 7) {
+    overallConfidence = 'low';
+    if (!missingDataNotes.some(n => n.includes('still'))) {
+      missingDataNotes.push('Historical tracking data still being collected - diagnoses are provisional');
+    }
+  }
+  
+  // Priority Level 6: Unclear (fallback)
+  if (!primaryCause && overallConfidence === 'low') {
+    primaryCause = 'Insufficient data - still collecting historical metrics for diagnosis';
+    primaryCauseLayer = 'unclear';
+  } else if (!primaryCause) {
+    primaryCause = 'No clear performance issue detected';
+    primaryCauseLayer = 'unclear';
+  }
+  
+  // Add confidence to all insights based on data availability
+  for (const insight of insights) {
+    if (!insight.confidence) {
+      if (insight.layer === 'creative') {
+        insight.confidence = adDiagnostics.length > 0 ? 'high' : 'low';
+        insight.dataStatus = adDiagnostics.length > 0 ? 'complete' : 'collecting';
+      } else if (insight.layer === 'auction') {
+        insight.confidence = biddingDataStatus === 'complete' ? 'high' : biddingDataStatus === 'partial' ? 'medium' : 'low';
+        insight.dataStatus = biddingDataStatus;
+      } else if (insight.layer === 'audience') {
+        insight.confidence = audienceDataStatus === 'complete' ? 'high' : audienceDataStatus === 'partial' ? 'medium' : 'low';
+        insight.dataStatus = audienceDataStatus;
+      } else if (insight.layer === 'seniority') {
+        insight.confidence = seniorityData?.hasData ? 'high' : 'low';
+        insight.dataStatus = seniorityData?.hasData ? 'complete' : 'collecting';
+      } else if (insight.layer === 'delivery') {
+        insight.confidence = 'medium';
+        insight.dataStatus = 'complete';
+      }
+    }
+  }
+  
+  // Build confidence reason
+  const confidenceReasonParts: string[] = [];
+  if (adDiagnostics.length > 0) confidenceReasonParts.push(`${adDiagnostics.length} ads analyzed`);
+  if (biddingDataStatus === 'complete') confidenceReasonParts.push('bid history available');
+  else if (biddingDataStatus === 'partial') confidenceReasonParts.push('partial bid data');
+  if (audienceDataStatus === 'complete') confidenceReasonParts.push('audience data complete');
+  else if (audienceDataStatus === 'partial') confidenceReasonParts.push('partial audience data');
+  if (trackingHistoryDays >= 7) confidenceReasonParts.push(`${trackingHistoryDays} days history`);
+  const confidenceReason = confidenceReasonParts.length > 0 
+    ? confidenceReasonParts.join(', ')
+    : 'Limited historical data available';
+  
+  // Build headline from primary cause
+  const headline = primaryCause || 'Performance analysis in progress';
+  
+  // Build recommendations from insights
+  const recommendations = insights
+    .filter(i => i.recommendation)
+    .map(i => i.recommendation!)
+    .slice(0, 3);
+  
+  // Build supporting factors from secondary causes and messages
+  const supportingFactors = [
+    ...secondaryCauses.slice(0, 2),
+    creativeMessage !== 'No ad diagnostics available' ? creativeMessage : null,
+    audienceMessage !== 'No audience data available' ? audienceMessage : null
+  ].filter((f): f is string => f !== null && f.length > 0).slice(0, 4);
+  
+  // Build contradictions resolved array
+  const contradictionsResolved = conflictResolution ? [conflictResolution] : [];
+  
+  return {
+    // Frontend-compatible fields
+    confidence: overallConfidence,
+    confidenceReason,
+    primaryCause: primaryCause || 'No clear issue detected',
+    primaryLayer: primaryCauseLayer || 'unclear',
+    headline,
+    supportingFactors,
+    contradictionsResolved: contradictionsResolved.length > 0 ? contradictionsResolved : undefined,
+    creativeSummary: adDiagnostics.length > 0 ? {
+      totalAds: adDiagnostics.length,
+      weakAds: weakContributors.length,
+      strongAds: highContributors.length,
+      weakImpressionShare: pctFromWeak,
+      strongImpressionShare: pctFromStrong
+    } : undefined,
+    missingDataNotes,
+    recommendations,
+    
+    // Extended backend-only fields
+    secondaryCauses,
+    overallConfidence,
+    detailedCreativeSummary: {
+      fatiguedAdsCount: fatiguedAds.length,
+      highContributorCount: highContributors.length,
+      weakContributorCount: weakContributors.length,
+      pctImpressionsFromWeakAds: pctFromWeak,
+      pctImpressionsFromStrongAds: pctFromStrong,
+      healthStatus: creativeHealthStatus,
+      message: creativeMessage
+    },
+    audienceSummary: {
+      penetrationState,
+      frequencyState,
+      seniorityShift,
+      message: audienceMessage,
+      dataStatus: audienceDataStatus
+    },
+    biddingSummary: {
+      auctionPressure,
+      bidMovement,
+      message: biddingMessage,
+      dataStatus: biddingDataStatus
+    },
+    deliverySummary: {
+      state: deliveryState,
+      message: deliveryMessage
+    },
+    conflictResolution
+  };
 }
 
 // ============ NARRATIVE GENERATOR ============

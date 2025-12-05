@@ -142,6 +142,24 @@ interface CampaignItem {
     message: string;
     recommendation?: string;
   }>;
+  causationSummary?: {
+    confidence: 'high' | 'medium' | 'low';
+    confidenceReason: string;
+    primaryCause: string;
+    primaryLayer: 'creative' | 'auction' | 'audience' | 'seniority' | 'delivery' | 'unclear';
+    headline: string;
+    supportingFactors: string[];
+    contradictionsResolved?: string[];
+    creativeSummary?: {
+      totalAds: number;
+      weakAds: number;
+      strongAds: number;
+      weakImpressionShare: number;
+      strongImpressionShare: number;
+    };
+    missingDataNotes: string[];
+    recommendations: string[];
+  };
   narrative?: string;
 }
 
@@ -366,57 +384,130 @@ function ScoreBreakdownBars({
   );
 }
 
-function CausationPanel({ insights }: { insights?: CampaignItem['causationInsights'] }) {
-  if (!insights || insights.length === 0) return null;
+function CausationPanel({ 
+  insights, 
+  summary 
+}: { 
+  insights?: CampaignItem['causationInsights']; 
+  summary?: CampaignItem['causationSummary'];
+}) {
+  const hasInsights = insights && insights.length > 0;
+  const hasSummary = summary && summary.primaryCause;
   
-  const primaryCause = insights.find(i => i.severity === 'primary');
-  const secondaryCauses = insights.filter(i => i.severity === 'secondary').slice(0, 2);
+  if (!hasInsights && !hasSummary) return null;
   
-  const getSeverityIcon = (severity: string) => {
-    if (severity === 'primary') return <AlertTriangle className="w-4 h-4 text-red-500" />;
-    if (severity === 'secondary') return <Info className="w-4 h-4 text-amber-500" />;
-    return <Info className="w-4 h-4 text-blue-500" />;
+  const getConfidenceBadge = (confidence: 'high' | 'medium' | 'low') => {
+    const styles: Record<string, string> = {
+      high: 'bg-green-100 text-green-700 border-green-200',
+      medium: 'bg-amber-100 text-amber-700 border-amber-200',
+      low: 'bg-gray-100 text-gray-500 border-gray-200',
+    };
+    return styles[confidence] || styles.low;
   };
   
   const getLayerBadge = (layer: string) => {
     const colors: Record<string, string> = {
       creative: 'bg-purple-100 text-purple-700',
+      auction: 'bg-orange-100 text-orange-700',
+      audience: 'bg-cyan-100 text-cyan-700',
+      seniority: 'bg-indigo-100 text-indigo-700',
+      delivery: 'bg-pink-100 text-pink-700',
+      unclear: 'bg-gray-100 text-gray-600',
       bidding: 'bg-blue-100 text-blue-700',
       targeting: 'bg-green-100 text-green-700',
     };
     return colors[layer] || 'bg-gray-100 text-gray-700';
   };
   
+  const getLayerLabel = (layer: string) => {
+    const labels: Record<string, string> = {
+      creative: 'Creative',
+      auction: 'Auction',
+      audience: 'Audience',
+      seniority: 'Seniority',
+      delivery: 'Delivery',
+      unclear: 'Unclear',
+      bidding: 'Bidding',
+      targeting: 'Targeting',
+    };
+    return labels[layer] || layer;
+  };
+  
   return (
     <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
-      {primaryCause && (
-        <div className="flex items-start gap-2">
-          {getSeverityIcon('primary')}
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <span className={`text-xs px-1.5 py-0.5 rounded ${getLayerBadge(primaryCause.layer)}`}>
-                {primaryCause.layer}
-              </span>
-              <span className="text-xs font-medium text-red-700">Primary Cause</span>
+      {hasSummary && (
+        <>
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`text-xs px-1.5 py-0.5 rounded ${getLayerBadge(summary.primaryLayer)}`}>
+                  {getLayerLabel(summary.primaryLayer)}
+                </span>
+                <span className={`text-xs px-1.5 py-0.5 rounded border ${getConfidenceBadge(summary.confidence)}`}>
+                  {summary.confidence === 'high' ? '●' : summary.confidence === 'medium' ? '◐' : '○'} {summary.confidence} confidence
+                </span>
+              </div>
+              <p className="text-xs font-medium text-gray-800 mt-1">{summary.headline}</p>
+              {summary.creativeSummary && summary.creativeSummary.weakAds > 0 && (
+                <p className="text-xs text-purple-600 mt-0.5">
+                  {summary.creativeSummary.weakAds} of {summary.creativeSummary.totalAds} ads underperforming ({Math.round(summary.creativeSummary.weakImpressionShare)}% of impressions)
+                </p>
+              )}
             </div>
-            <p className="text-xs text-gray-700 mt-0.5">{primaryCause.message}</p>
-            {primaryCause.recommendation && (
-              <p className="text-xs text-gray-500 mt-0.5 italic">{primaryCause.recommendation}</p>
-            )}
           </div>
-        </div>
+          
+          {summary.supportingFactors && summary.supportingFactors.length > 0 && (
+            <div className="ml-6 space-y-1">
+              {summary.supportingFactors.slice(0, 2).map((factor, idx) => (
+                <div key={idx} className="flex items-center gap-1.5">
+                  <span className="w-1 h-1 bg-gray-400 rounded-full" />
+                  <p className="text-xs text-gray-600">{factor}</p>
+                </div>
+              ))}
+            </div>
+          )}
+          
+          {summary.missingDataNotes && summary.missingDataNotes.length > 0 && (
+            <div className="ml-6 mt-1">
+              <p className="text-xs text-amber-600 italic flex items-center gap-1">
+                <Clock className="w-3 h-3" />
+                {summary.missingDataNotes[0]}
+              </p>
+            </div>
+          )}
+        </>
       )}
-      {secondaryCauses.map((cause, idx) => (
-        <div key={idx} className="flex items-start gap-2">
-          {getSeverityIcon('secondary')}
-          <div className="flex-1">
-            <span className={`text-xs px-1.5 py-0.5 rounded ${getLayerBadge(cause.layer)}`}>
-              {cause.layer}
-            </span>
-            <p className="text-xs text-gray-600 mt-0.5">{cause.message}</p>
-          </div>
-        </div>
-      ))}
+      
+      {!hasSummary && hasInsights && (
+        <>
+          {insights.find(i => i.severity === 'primary') && (
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-500" />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs px-1.5 py-0.5 rounded ${getLayerBadge(insights.find(i => i.severity === 'primary')!.layer)}`}>
+                    {getLayerLabel(insights.find(i => i.severity === 'primary')!.layer)}
+                  </span>
+                  <span className="text-xs font-medium text-red-700">Primary Cause</span>
+                </div>
+                <p className="text-xs text-gray-700 mt-0.5">{insights.find(i => i.severity === 'primary')!.message}</p>
+              </div>
+            </div>
+          )}
+          {insights.filter(i => i.severity === 'secondary').slice(0, 2).map((cause, idx) => (
+            <div key={idx} className="flex items-start gap-2">
+              <Info className="w-4 h-4 text-amber-500" />
+              <div className="flex-1">
+                <span className={`text-xs px-1.5 py-0.5 rounded ${getLayerBadge(cause.layer)}`}>
+                  {getLayerLabel(cause.layer)}
+                </span>
+                <p className="text-xs text-gray-600 mt-0.5">{cause.message}</p>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }
@@ -541,7 +632,7 @@ function CampaignCard({ campaign, accountId, showIssues, onClick, onSeeAds, isAd
       )}
       
       {/* Causation Insights */}
-      {showIssues && <CausationPanel insights={campaign.causationInsights} />}
+      {showIssues && <CausationPanel insights={campaign.causationInsights} summary={campaign.causationSummary} />}
       
       {/* See Ads Button */}
       {onSeeAds && (

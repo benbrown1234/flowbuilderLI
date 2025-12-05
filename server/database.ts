@@ -191,6 +191,7 @@ export async function initDatabase() {
       ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS scoring_issues JSONB DEFAULT '[]';
       ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS scoring_positive_signals JSONB DEFAULT '[]';
       ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS causation_data JSONB DEFAULT '[]';
+      ALTER TABLE analytics_campaign_daily ADD COLUMN IF NOT EXISTS causation_summary JSONB DEFAULT NULL;
       
       -- Ad diagnostics columns for creatives
       ALTER TABLE analytics_creative_daily ADD COLUMN IF NOT EXISTS ad_diagnostic_flag VARCHAR(50);
@@ -1388,6 +1389,7 @@ export async function updateCampaignScoring100(
     issues: string[];
     positiveSignals: string[];
     causation: any[];
+    causationSummary?: any;
   }
 ) {
   await pool.query(
@@ -1400,11 +1402,12 @@ export async function updateCampaignScoring100(
          scoring_breakdown = $6,
          scoring_issues = $7, 
          scoring_positive_signals = $8,
-         causation_data = $9
-     WHERE account_id = $10 AND campaign_id = $11 
+         causation_data = $9,
+         causation_summary = $10
+     WHERE account_id = $11 AND campaign_id = $12 
      AND metric_date = (
        SELECT MAX(metric_date) FROM analytics_campaign_daily 
-       WHERE account_id = $10 AND campaign_id = $11
+       WHERE account_id = $11 AND campaign_id = $12
      )`,
     [
       scoringData.status,
@@ -1416,6 +1419,7 @@ export async function updateCampaignScoring100(
       JSON.stringify(scoringData.issues),
       JSON.stringify(scoringData.positiveSignals),
       JSON.stringify(scoringData.causation),
+      scoringData.causationSummary ? JSON.stringify(scoringData.causationSummary) : null,
       accountId,
       campaignId
     ]
@@ -1494,7 +1498,8 @@ export async function getStructureScoringData(accountId: string) {
               COALESCE(scoring_breakdown, '[]'::jsonb) as scoring_breakdown,
               COALESCE(scoring_issues, '[]'::jsonb) as scoring_issues, 
               COALESCE(scoring_positive_signals, '[]'::jsonb) as scoring_positive_signals,
-              COALESCE(causation_data, '[]'::jsonb) as causation_data
+              COALESCE(causation_data, '[]'::jsonb) as causation_data,
+              causation_summary
        FROM analytics_campaign_daily 
        WHERE account_id = $1 AND scoring_status IS NOT NULL
        ORDER BY campaign_id, metric_date DESC`,
