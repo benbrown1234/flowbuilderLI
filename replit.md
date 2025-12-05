@@ -21,6 +21,18 @@ The application features a React 19 frontend with TypeScript and Vite, communica
     *   **100-Point Scoring System**: Campaigns are scored across Engagement Quality (45 pts), Cost Efficiency (35 pts), and Audience Quality (20 pts), with thresholds for classification (0-49: needs_attention, 50-69: monitor_closely, 70-100: strong_performance). Includes false positive protections with minimum impression/click/conversion thresholds.
     *   **3-Layer Causation Engine**: Diagnoses performance changes by analyzing Creative Layer (ad age, CTR decay), Bidding Layer (bid movement, bid vs suggested), and Targeting Layer (audience size changes, penetration, criteria diffs).
     *   **Ad Diagnostic Flags**: Color-coded indicators for individual ad performance (Green, Grey, Red, Yellow, Blue, Purple).
+    *   **10-Step Ad Scoring Engine**: On-demand relative scoring of ads within a campaign:
+        1. Volume check (≥1000 impressions required)
+        2. Age state classification (learning ≤13d, stable 14-59d, fatigue_risk ≥60d)
+        3. Relative performance deltas vs campaign averages (CTR, dwell, CPC)
+        4. Performance status (strong/neutral/weak for CTR/dwell, efficient/neutral/inefficient for CPC)
+        5. Impression share distribution flags (over_served ≥70%, under_served <10%)
+        6. Fatigue detection (old ads with declining metrics)
+        7. Contribution tier assignment (high/neutral/weak/learning/low_volume)
+        8. Conflict resolution (curiosity clicks, senior audience patterns, algorithm over-serving)
+        9. Actionable recommendations with human-readable guidance
+        10. Ranked output by contribution tier then impressions
+    *   **"See Ads" Button**: Campaign cards include a button to load scored ads in the right panel.
     *   **Metrics & Comparisons**: Uses 4-week on 4-week comparisons for all metrics, including advanced metrics like Frequency, Audience Penetration, and Avg Dwell Time.
     *   **Special Flags**: Displays LAN, Expansion, and Maximize Delivery badges.
     *   **Data Sync**: Weekly sync for most campaigns; daily for campaigns with LAN/Expansion. Manual refresh available. Seniority data is synced daily alongside audit for scoring.
